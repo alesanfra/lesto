@@ -1,0 +1,2 @@
+`#[store(..)]` declares nothing: give it `read = ".."`, `write = ".."`, or both
+--> db_store_empty_option.rs:6

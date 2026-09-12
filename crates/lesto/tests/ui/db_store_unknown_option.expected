@@ -1,0 +1,3 @@
+# The option name is ours; how rustc frames the attribute around it is not.
+unknown `#[store(..)]` option: expected `read` or `write`, each a permission string
+--> db_store_unknown_option.rs:6

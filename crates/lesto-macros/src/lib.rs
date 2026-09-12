@@ -749,7 +749,17 @@ pub fn views(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// #[derive(lesto::db::Store)]
 /// pub struct NoteStore<M, P>(lesto::db::Store<M, P, Sqlite>);
 /// ```
-#[proc_macro_derive(Store)]
+///
+/// With `#[store(read = "..", write = "..")]` the permission pair is declared once on the type
+/// and `read` / `write` / `read_with` / `write_with` are generated without a requirement
+/// argument, so a method cannot name the wrong permission:
+///
+/// ```ignore
+/// #[derive(lesto::db::Store)]
+/// #[store(read = "notes:read", write = "notes:write")]
+/// pub struct NoteStore<M, P>(lesto::db::Store<M, P, Sqlite>);
+/// ```
+#[proc_macro_derive(Store, attributes(store))]
 pub fn derive_store(item: TokenStream) -> TokenStream {
     let input = match syn::parse::<syn::DeriveInput>(item) {
         Ok(i) => i,
@@ -758,6 +768,79 @@ pub fn derive_store(item: TokenStream) -> TokenStream {
     expand_store(input)
         .unwrap_or_else(|e| e.to_compile_error())
         .into()
+}
+
+/// The permission pair declared by `#[store(read = "..", write = "..")]`.
+#[derive(Default)]
+struct StorePermissions {
+    read: Option<syn::LitStr>,
+    write: Option<syn::LitStr>,
+}
+
+impl StorePermissions {
+    fn parse(attrs: &[syn::Attribute]) -> syn::Result<Self> {
+        let mut found = Self::default();
+        for attr in attrs.iter().filter(|a| a.path().is_ident("store")) {
+            attr.parse_nested_meta(|meta| {
+                let slot = if meta.path.is_ident("read") {
+                    &mut found.read
+                } else if meta.path.is_ident("write") {
+                    &mut found.write
+                } else {
+                    return Err(meta.error(
+                        "unknown `#[store(..)]` option: expected `read` or `write`, each a permission string",
+                    ));
+                };
+                if slot.is_some() {
+                    return Err(meta.error("this permission is already declared"));
+                }
+                *slot = Some(meta.value()?.parse::<syn::LitStr>()?);
+                Ok(())
+            })?;
+        }
+        if let Some(attr) = attrs.iter().find(|a| a.path().is_ident("store"))
+            && found.read.is_none()
+            && found.write.is_none()
+        {
+            return Err(syn::Error::new_spanned(
+                attr,
+                "`#[store(..)]` declares nothing: give it `read = \"..\"`, `write = \"..\"`, or both",
+            ));
+        }
+        Ok(found)
+    }
+
+    fn declared(&self) -> bool {
+        self.read.is_some() || self.write.is_some()
+    }
+}
+
+/// The `M`, `P` and `DB` of the inner `Store<M, P, DB>`, as written.
+fn store_arguments(inner: &Type) -> syn::Result<(Type, Type, Type)> {
+    const SHAPE: &str = "`#[store(..)]` needs the inner type spelled as `lesto::db::Store<M, P, Db>` so the mode, the principal and the database can be named in the generated methods";
+    let Type::Path(path) = inner else {
+        return Err(syn::Error::new_spanned(inner, SHAPE));
+    };
+    let segment = path
+        .path
+        .segments
+        .last()
+        .ok_or_else(|| syn::Error::new_spanned(inner, SHAPE))?;
+    let syn::PathArguments::AngleBracketed(args) = &segment.arguments else {
+        return Err(syn::Error::new_spanned(inner, SHAPE));
+    };
+    let types: Vec<Type> = args
+        .args
+        .iter()
+        .filter_map(|a| match a {
+            syn::GenericArgument::Type(t) => Some(t.clone()),
+            _ => None,
+        })
+        .collect();
+    match <[Type; 3]>::try_from(types) {
+        Ok([mode, principal, db]) => Ok((mode, principal, db)),
+        Err(_) => Err(syn::Error::new_spanned(inner, SHAPE)),
+    }
 }
 
 fn expand_store(input: syn::DeriveInput) -> syn::Result<TokenStream2> {
@@ -780,7 +863,112 @@ fn expand_store(input: syn::DeriveInput) -> syn::Result<TokenStream2> {
         .insert(0, syn::parse_quote!(__S: Send + Sync));
     let (extract_impl_generics, _, _) = extract_generics.split_for_impl();
 
+    let permissions = StorePermissions::parse(&input.attrs)?;
+    let guarded = if permissions.declared() {
+        let (mode, principal, db) = store_arguments(&inner)?;
+        let connection = quote! {
+            <#db as ::lesto::db::sqlx::Database>::Connection
+        };
+        let read = permissions.read.map(|permission| {
+            let doc = format!(
+                "Run `f` in a read-only transaction, requiring `{}`.",
+                permission.value()
+            );
+            let doc_with = format!(
+                "[`read`](Self::read) at `isolation`, requiring `{}`.",
+                permission.value()
+            );
+            quote! {
+                impl #impl_generics #name #ty_generics
+                where
+                    #mode: ::lesto::db::Mode,
+                    #principal: ::lesto::db::Authenticated,
+                    #db: ::lesto::db::Dialect,
+                    #predicates
+                {
+                    #[doc = #doc]
+                    pub async fn read<__T, __E, __F>(
+                        &self,
+                        f: __F,
+                    ) -> ::core::result::Result<__T, ::lesto::db::Error>
+                    where
+                        __E: ::core::convert::Into<::lesto::db::Error>,
+                        __F: for<'__c> ::core::ops::AsyncFnOnce(&'__c mut #connection)
+                            -> ::core::result::Result<__T, __E>,
+                    {
+                        self.0.read(#permission, f).await
+                    }
+
+                    #[doc = #doc_with]
+                    pub async fn read_with<__T, __E, __F>(
+                        &self,
+                        isolation: ::lesto::db::Isolation,
+                        f: __F,
+                    ) -> ::core::result::Result<__T, ::lesto::db::Error>
+                    where
+                        __E: ::core::convert::Into<::lesto::db::Error>,
+                        __F: for<'__c> ::core::ops::AsyncFn(&'__c mut #connection)
+                            -> ::core::result::Result<__T, __E>,
+                    {
+                        self.0.read_with(#permission, isolation, f).await
+                    }
+                }
+            }
+        });
+        let write = permissions.write.map(|permission| {
+            let doc = format!(
+                "Run `f` in a read-write transaction, requiring `{}`.",
+                permission.value()
+            );
+            let doc_with = format!(
+                "[`write`](Self::write) at `isolation`, requiring `{}`.",
+                permission.value()
+            );
+            quote! {
+                impl #impl_generics #name #ty_generics
+                where
+                    #mode: ::lesto::db::Writable,
+                    #principal: ::lesto::db::Authenticated,
+                    #db: ::lesto::db::Dialect,
+                    #predicates
+                {
+                    #[doc = #doc]
+                    pub async fn write<__T, __E, __F>(
+                        &self,
+                        f: __F,
+                    ) -> ::core::result::Result<__T, ::lesto::db::Error>
+                    where
+                        __E: ::core::convert::Into<::lesto::db::Error>,
+                        __F: for<'__c> ::core::ops::AsyncFnOnce(&'__c mut #connection)
+                            -> ::core::result::Result<__T, __E>,
+                    {
+                        self.0.write(#permission, f).await
+                    }
+
+                    #[doc = #doc_with]
+                    pub async fn write_with<__T, __E, __F>(
+                        &self,
+                        isolation: ::lesto::db::Isolation,
+                        f: __F,
+                    ) -> ::core::result::Result<__T, ::lesto::db::Error>
+                    where
+                        __E: ::core::convert::Into<::lesto::db::Error>,
+                        __F: for<'__c> ::core::ops::AsyncFn(&'__c mut #connection)
+                            -> ::core::result::Result<__T, __E>,
+                    {
+                        self.0.write_with(#permission, isolation, f).await
+                    }
+                }
+            }
+        });
+        quote! { #read #write }
+    } else {
+        TokenStream2::new()
+    };
+
     Ok(quote! {
+        #guarded
+
         impl #extract_impl_generics ::lesto::__private::FromRequestParts<__S> for #name #ty_generics
         where
             #inner: ::lesto::__private::FromRequestParts<__S>,

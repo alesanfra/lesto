@@ -212,6 +212,34 @@ A permission string on a `Public` store does not compile: `Public` can never hol
 The error message says to pass `Anyone` or to declare an authenticated principal in the handler.
 For your own combinators (any of, all of), implement `Requirement<P>`.
 
+### Declaring the permission pair once
+
+Passing the permission at every call site means every call site can pass the wrong one. Declare
+the pair on the store instead:
+
+```rust
+#[derive(lesto::db::Store)]
+#[store(read = "notes:read", write = "notes:write")]
+struct NoteStore<M, P>(Store<M, P, Sqlite>);
+```
+
+`read`, `read_with`, `write` and `write_with` are then generated **without the requirement
+argument** — the permission comes from the type, and a method cannot name the wrong one because
+there is nowhere to name it:
+
+```rust
+impl<M: Writable> NoteStore<M, User> {
+    async fn create(&self, body: NoteCreate) -> Result<Note, Error> {
+        self.write(async |conn| { /* ... */ }).await   // "notes:write", always
+    }
+}
+```
+
+Declare only `read` for a store that has no writes, only `write` for one whose reads are public.
+Whatever you leave undeclared keeps the explicit two-argument form, so a store can mix the two.
+The generated methods need an authenticated principal, since a permission does: on a `Public`
+store use `Anyone` and the explicit form.
+
 ### Why two impl blocks
 
 The first block is generic over the principal, so `list` and `get` are available on both
@@ -568,6 +596,8 @@ let pool = SqlitePoolOptions::new().max_connections(1).connect("sqlite::memory:"
   `read_with` / `write_with`; the resulting conflict is a 409 with `Retry-After`.
 - One store method per use case, and the check that decides a write lives inside that write's
   closure — never in a separate `read`, which would run on the replica.
+- `#[store(read = "..", write = "..")]` declares the permission pair on the type; the generated
+  `read`/`write` then take no requirement argument.
 - `read_with`/`write_with` retry a conflict `Db::with_conflict_retries` times before the 409,
   which is why their closure is an `AsyncFn`.
 

@@ -50,6 +50,7 @@ crates/lesto/             library
                           (db_*.rs for lesto::db), checked by tests/ui.rs
 crates/lesto-macros/      proc macros: #[lesto::get] and friends (RouteInfo marker type +
                           per-argument checks), #[lesto::views], #[derive(Store)] with the
+                          optional #[store(read = .., write = ..)] permission pair with the
                           optional #[store(read = .., write = ..)] permission pair
 crates/lesto-cli/         the `lesto` binary: dev (watch + rebuild + restart, socket kept open),
                           run, new/openapi (reserved, exit 2)
@@ -242,6 +243,15 @@ Recorded here because they are not derivable from the code. Do not undo them cas
   retried closure runs more than once: that is what `AsyncFn` announces, and why the docs say to
   keep outside-visible effects out of it. A test that synchronises attempts with a barrier must
   disable retrying or arrange for only the first attempt to wait, or it deadlocks.
+- **The permission pair can live on the store type** (`#[store(read = .., write = ..)]`), which
+  generates `read`/`write`/`read_with`/`write_with` with no requirement argument — a method then
+  cannot name the wrong permission, without adding a domain type parameter to `Store` (which
+  would break every `#[derive(Store)]` newtype). The derive reads `M`, `P` and `DB` out of the
+  inner `Store<M, P, DB>` path so the generated signatures can name the connection type; that is
+  why the inner type has to be spelled with all three arguments. Whatever is left undeclared
+  keeps the explicit two-argument form, so one store can mix them. A read-only store declares no
+  `write`: `Store::write` stays reachable through the `Deref`, a deliberate bypass rather than an
+  accident, since it needs both `ReadWrite` and an explicit requirement.
 - **No `Store::atomic`.** It would be `write_with` with another name: one transaction around
   several statements is what a closure already is. What was actually missing is the way to share
   a *query* between methods, which is the `Connection<DB>` alias plus the convention of writing

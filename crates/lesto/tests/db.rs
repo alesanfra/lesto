@@ -578,3 +578,87 @@ async fn a_serializable_write_opens_begin_immediate_on_sqlite() {
     }
 }
 
+// ---- declared permissions -------------------------------------------------------------------
+
+/// The permission pair on the type instead of at every call site: `read`/`write` then take no
+/// requirement, so a method cannot name the wrong permission — there is no argument to name it
+/// in.
+#[derive(lesto::db::Store)]
+#[store(read = "notes:read", write = "notes:write")]
+struct GuardedStore<M, P>(Store<M, P, Sqlite>);
+
+impl<M: Mode> GuardedStore<M, User> {
+    async fn count(&self) -> Result<i64, Error> {
+        self.read(async |conn| {
+            sqlx::query_scalar::<_, i64>("SELECT count(*) FROM notes")
+                .fetch_one(conn)
+                .await
+        })
+        .await
+    }
+}
+
+impl<M: Writable> GuardedStore<M, User> {
+    async fn add(&self, text: &str) -> Result<(), Error> {
+        self.write_with(Isolation::Serializable, async |conn| {
+            sqlx::query("INSERT INTO notes (author, text) VALUES ('guarded', ?)")
+                .bind(text)
+                .execute(conn)
+                .await
+                .map(|_| ())
+        })
+        .await
+    }
+}
+
+fn guarded<M: Mode>(db: Db<Sqlite>, permissions: &[&str]) -> GuardedStore<M, User> {
+    GuardedStore(Store::new(
+        db,
+        User {
+            name: "alice".into(),
+            permissions: permissions.iter().map(|p| (*p).to_string()).collect(),
+        },
+    ))
+}
+
+#[tokio::test]
+async fn declared_permissions_are_checked_without_a_requirement_argument() {
+    let db = Db::new(pool(&["seeded"]).await);
+
+    // The declared read permission is required, and the caller has it.
+    assert_eq!(
+        guarded::<ReadOnly>(db.clone(), &["notes:read"])
+            .count()
+            .await
+            .unwrap(),
+        1
+    );
+
+    // Holding the write permission does not grant the read one: the pair is two permissions.
+    let error = guarded::<ReadOnly>(db.clone(), &["notes:write"])
+        .count()
+        .await
+        .unwrap_err();
+    assert_eq!(error.status(), StatusCode::FORBIDDEN);
+    assert!(error.to_string().contains("notes:read"), "{error}");
+
+    // The write side, through the generated `write_with`.
+    let error = guarded::<ReadWrite>(db.clone(), &["notes:read"])
+        .add("nope")
+        .await
+        .unwrap_err();
+    assert_eq!(error.status(), StatusCode::FORBIDDEN);
+    assert!(error.to_string().contains("notes:write"), "{error}");
+
+    guarded::<ReadWrite>(db.clone(), &["notes:write"])
+        .add("written")
+        .await
+        .unwrap();
+    assert_eq!(
+        guarded::<ReadOnly>(db, &["notes:read"])
+            .count()
+            .await
+            .unwrap(),
+        2
+    );
+}

@@ -25,7 +25,8 @@ A Rust web micro-framework with **FastAPI**'s ergonomics, built on [axum](https:
   trip as the `BEGIN`, so a policy can read it and the query needs no `WHERE` of its own.
   `read_with` / `write_with` take an `Isolation` (`Snapshot`, `Serializable`) for the methods
   whose check has to hold until commit, and retry a conflict before answering 409 with
-  `Retry-After` instead of 500.
+  `Retry-After` instead of 500. `#[store(read = "..", write = "..")]` declares the permission
+  pair on the type, so the generated `read`/`write` have no requirement argument to get wrong.
 - **AWS Lambda** with the `lambda` feature: `lesto::lambda::serve(app)` runs the
   Lambda runtime inside Lambda (API Gateway REST and HTTP APIs, Function URLs, ALB) and a plain
   server anywhere else; REST stages are stripped, docs pages work behind them, and
