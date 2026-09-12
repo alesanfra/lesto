@@ -1,0 +1,22 @@
+[book]
+title = "lesto"
+description = "A Rust web framework with FastAPI's ergonomics: garde validation, OpenAPI from types."
+authors = ["lesto contributors"]
+language = "en"
+src = "tutorial"
+
+[build]
+build-dir = "book"
+
+[output.html]
+default-theme = "light"
+preferred-dark-theme = "navy"
+git-repository-url = "https://github.com/OWNER/lesto"
+edit-url-template = "https://github.com/OWNER/lesto/edit/main/docs/tutorial/{path}"
+no-section-label = true
+
+[output.html.playground]
+runnable = false
+
+[output.html.search]
+limit-results = 20

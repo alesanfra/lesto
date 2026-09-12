@@ -1,0 +1,47 @@
+//! Graceful shutdown: in-flight requests finish, then `serve` returns.
+
+use std::time::Duration;
+
+use lesto::prelude::*;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+#[lesto::get("/slow")]
+async fn slow() -> &'static str {
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    "done"
+}
+
+#[tokio::test]
+async fn in_flight_requests_finish_before_serve_returns() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+    let app = App::<()>::new().routes(routes![slow]);
+    let server = tokio::spawn(app.serve_until(listener, async {
+        rx.await.ok();
+    }));
+
+    let mut client = tokio::net::TcpStream::connect(addr).await.unwrap();
+    client
+        .write_all(b"GET /slow HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
+        .await
+        .unwrap();
+    // The request is being handled: ask the server to stop now.
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    tx.send(()).unwrap();
+
+    let mut response = String::new();
+    client.read_to_string(&mut response).await.unwrap();
+    assert!(response.starts_with("HTTP/1.1 200"), "{response}");
+    assert!(response.ends_with("done"), "{response}");
+
+    let result = tokio::time::timeout(Duration::from_secs(5), server)
+        .await
+        .expect("serve returns once the in-flight request is done")
+        .unwrap();
+    assert!(result.is_ok());
+    assert!(
+        tokio::net::TcpStream::connect(addr).await.is_err(),
+        "the listener is closed after shutdown"
+    );
+}

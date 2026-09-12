@@ -1,0 +1,2 @@
+error[E0573]: expected type, found function `health`
+--> missing_route_attribute.rs:9

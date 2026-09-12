@@ -1,0 +1,5 @@
+error[E0277]: `lesto::db::Public` cannot hold permissions
+--> db_permission_on_public.rs:10
+not an authenticated principal
+a permission string such as `"notes:write"` needs an authenticated principal: `Public` never has permissions, so pass `Anyone`, or declare the handler argument as `YourStore<_, User>` where `User: lesto::db::Authenticated`
+if `lesto::db::Public` is your own user type, implement `lesto::db::Authenticated` for it (credential + authenticate + has_permission)

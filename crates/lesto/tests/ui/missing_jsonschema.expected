@@ -1,0 +1,5 @@
+# schemars owns the wording of the trait bound; lesto owns the chain that explains why it is needed.
+error[E0277]: the trait bound `Output: JsonSchema` is not satisfied
+--> missing_jsonschema.rs:10
+required for `lesto::Json<Output>` to implement `OperationOutput`
+required by a bound in `lesto::__private::check_documented_output`

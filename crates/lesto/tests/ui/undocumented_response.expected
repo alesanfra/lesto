@@ -1,0 +1,5 @@
+error[E0277]: lesto cannot document `Csv` as a handler response
+--> undocumented_response.rs:14
+`Csv` does not implement `lesto::OperationOutput`
+return `lesto::Json<T>` with `T: serde::Serialize + schemars::JsonSchema`, or `String`, `&'static str`, `()`, `Html<T>`, or `Result<T, lesto::HttpError>` of those
+for a custom response type, add `impl lesto::OperationOutput for Csv {}` (an empty impl documents nothing)

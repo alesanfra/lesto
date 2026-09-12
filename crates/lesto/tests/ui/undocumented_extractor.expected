@@ -1,0 +1,5 @@
+error[E0277]: lesto cannot document `RequestId` as a handler argument
+--> undocumented_extractor.rs:16
+`RequestId` does not implement `lesto::OperationInput`
+request data goes through `lesto::Json<T>`, `lesto::Query<T>` or `lesto::Path<T>`, with `T: serde::Deserialize + schemars::JsonSchema` (+ `garde::Validate` for Json/Query)
+for a custom extractor, add `impl lesto::OperationInput for RequestId {}` (an empty impl documents nothing) or delegate to the extractor it wraps, e.g. `Bearer::<BearerAuth>::describe(builder)`

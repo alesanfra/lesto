@@ -1,0 +1,20 @@
+[package]
+name = "notes"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "A complete CRUD API on SQLite with the `db` feature: stores, principals, permissions, views"
+
+[dependencies]
+lesto = { path = "../../crates/lesto", features = ["sqlite"] }
+sqlx = { workspace = true, features = ["sqlite", "derive"] }
+serde.workspace = true
+garde.workspace = true
+schemars.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+tower.workspace = true
+http-body-util.workspace = true

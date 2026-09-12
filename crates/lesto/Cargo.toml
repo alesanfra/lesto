@@ -1,0 +1,64 @@
+[package]
+name = "lesto"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+readme = "../../README.md"
+keywords.workspace = true
+categories.workspace = true
+description = "FastAPI-like web framework on top of axum: garde validation, OpenAPI from types, optional sqlx stores and AWS Lambda"
+
+[dependencies]
+lesto-macros.workspace = true
+axum.workspace = true
+garde.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_html_form.workspace = true
+serde_path_to_error.workspace = true
+mime.workspace = true
+form_urlencoded.workspace = true
+base64.workspace = true
+tokio.workspace = true
+http.workspace = true
+indexmap.workspace = true
+tower-layer = "0.3"
+tower-service = "0.3"
+anyhow = { workspace = true, optional = true }
+tracing.workspace = true
+# feature `db`
+sqlx = { workspace = true, optional = true }
+# feature `lambda`
+lambda_http = { version = "1.3", default-features = false, features = ["apigw_rest", "apigw_http", "alb"], optional = true }
+tower = { workspace = true, optional = true }
+http-body-util = { workspace = true, optional = true }
+
+[features]
+default = []
+# `From<anyhow::Error> for HttpError` (and `lesto::db::Error`): a 500 with the detail hidden
+# and the cause logged.
+anyhow = ["dep:anyhow"]
+# `lesto::db`: sqlx stores with principals and permissions. Pick the database too.
+db = ["dep:sqlx"]
+postgres = ["db", "sqlx/postgres"]
+mysql = ["db", "sqlx/mysql"]
+sqlite = ["db", "sqlx/sqlite"]
+# `lesto::lambda`: run the app on AWS Lambda behind API Gateway, a Function URL or an ALB.
+lambda = ["dep:lambda_http", "dep:tower", "dep:http-body-util"]
+
+[package.metadata.docs.rs]
+all-features = true
+
+[dev-dependencies]
+# Tests exercise every feature.
+lesto = { path = ".", features = ["anyhow", "sqlite", "lambda"] }
+sqlx = { workspace = true, features = ["sqlite", "derive"] }
+anyhow.workspace = true
+tower.workspace = true
+http-body-util.workspace = true
+
+[target.'cfg(unix)'.dev-dependencies]
+libc = "0.2"

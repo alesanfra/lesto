@@ -1,0 +1,9 @@
+# Points at the offending argument, not only at the routes![] call.
+error[E0277]: `lesto::Json<Input>` cannot be a handler argument in this position (state type `_`)
+--> body_not_last.rs:16
+not a `FromRequestParts<_>` extractor
+extractors that consume the request body (`Json<T>`, `String`, `Bytes`, `Request`) must be the LAST argument of the handler
+if `lesto::Json<Input>` is a custom extractor, implement `axum::extract::FromRequestParts<S>` for it (see the tutorial, chapter 8)
+the state type `_` is the `S` of the `App<S>` this `routes![]` set is added to
+required by a bound in `create::__lesto_check`
+--> body_not_last.rs:11

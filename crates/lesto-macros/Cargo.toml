@@ -1,0 +1,19 @@
+[package]
+name = "lesto-macros"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+readme = "../../README.md"
+keywords.workspace = true
+categories.workspace = true
+description = "Attribute and derive macros for lesto: #[lesto::get], #[lesto::views], #[derive(Store)]"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn.workspace = true
+quote.workspace = true
+proc-macro2.workspace = true

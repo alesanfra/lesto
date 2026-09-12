@@ -1,0 +1,252 @@
+//! Compile-fail tests pinning the diagnostics an agent (or a human) sees for the most common
+//! mistakes (`db_*.rs` need the `sqlite` feature, on in tests through the dev-dependency).
+//!
+//! Each `tests/ui/<case>.rs` must fail to compile, and the diagnostics rustc emits for it must
+//! contain every fragment listed in `tests/ui/<case>.expected`: one fragment per line, `#`
+//! comments and blank lines ignored, matched as a substring after collapsing whitespace, with
+//! the case directory stripped from paths so a span reads `<case>.rs:16`.
+//!
+//! Only the text lesto owns is pinned: the `#[diagnostic::on_unimplemented]` messages, the
+//! `compile_error!`s of the macros, and the span they point at. Everything rustc writes around
+//! them (which impls it suggests, how it words "required by a bound", how it underlines a
+//! `where` clause) changes between compiler releases and is deliberately not asserted -- an
+//! exact-output snapshot made the suite fail on every rustc upgrade without a lesto change.
+//!
+//! The cases are built as the binaries of a generated package under `target/ui`, whose
+//! dependency requirements are read back from `[workspace.dependencies]`.
+
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::{env, fs};
+
+#[test]
+fn ui() {
+    let crate_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let workspace = crate_dir
+        .ancestors()
+        .nth(2)
+        .expect("workspace root above crates/lesto");
+    let case_dir = crate_dir.join("tests/ui");
+    let cases = cases(&case_dir);
+    assert!(!cases.is_empty(), "no cases in {}", case_dir.display());
+
+    let scratch = target_dir().join("ui");
+    fs::create_dir_all(&scratch).expect("create the scratch package");
+    write_if_changed(
+        &scratch.join("Cargo.toml"),
+        &manifest(workspace, crate_dir, &case_dir, &cases),
+    );
+
+    let diagnostics = build(&scratch);
+    let mut failures = Vec::new();
+    let prefix = format!("{}/", case_dir.display());
+
+    for case in &cases {
+        let Some(diagnostic) = diagnostics.get(case) else {
+            failures.push(format!("{case}.rs compiled with no diagnostic at all"));
+            continue;
+        };
+        if !diagnostic.errored {
+            failures.push(format!("{case}.rs compiled: it must fail to compile"));
+            continue;
+        }
+        let rendered = collapse(&diagnostic.rendered.replace(&prefix, ""));
+        let expected = case_dir.join(format!("{case}.expected"));
+        let source =
+            fs::read_to_string(&expected).unwrap_or_else(|e| panic!("{}: {e}", expected.display()));
+        let mut missing = Vec::new();
+        for fragment in fragments(&source) {
+            if !rendered.contains(&collapse(fragment)) {
+                missing.push(fragment);
+            }
+        }
+        if !missing.is_empty() {
+            let missing = missing
+                .iter()
+                .map(|fragment| format!("    {fragment}\n"))
+                .collect::<String>();
+            failures.push(format!(
+                "{case}.rs is missing from its diagnostics:\n{missing}\nwhat rustc emitted:\n\n{}",
+                diagnostic.rendered
+            ));
+        }
+    }
+
+    assert!(
+        failures.is_empty(),
+        "{} of {} ui cases failed:\n\n{}",
+        failures.len(),
+        cases.len(),
+        failures.join("\n\n")
+    );
+}
+
+/// The case names (file stems of `tests/ui/*.rs`), sorted.
+fn cases(case_dir: &Path) -> Vec<String> {
+    let mut cases: Vec<String> = fs::read_dir(case_dir)
+        .unwrap_or_else(|e| panic!("{}: {e}", case_dir.display()))
+        .map(|entry| entry.expect("read the case directory").path())
+        .filter(|path| path.extension().is_some_and(|ext| ext == "rs"))
+        .map(|path| {
+            path.file_stem()
+                .expect("a file name")
+                .to_str()
+                .expect("a UTF-8 file name")
+                .to_owned()
+        })
+        .collect();
+    cases.sort();
+    cases
+}
+
+/// `target/`, where the generated package and its own build directory live.
+fn target_dir() -> PathBuf {
+    if let Some(dir) = env::var_os("CARGO_TARGET_DIR") {
+        return PathBuf::from(dir);
+    }
+    // .../target/debug/deps/ui-<hash>
+    env::current_exe()
+        .expect("the test executable path")
+        .ancestors()
+        .nth(3)
+        .expect("the target directory above deps/")
+        .to_path_buf()
+}
+
+/// A package with one binary per case, depending on lesto (all the features the cases need) and
+/// on the crates the generated code names at the crate root, at the workspace's requirements.
+fn manifest(workspace: &Path, crate_dir: &Path, case_dir: &Path, cases: &[String]) -> String {
+    let root = fs::read_to_string(workspace.join("Cargo.toml")).expect("the workspace manifest");
+    let mut manifest = format!(
+        "# Generated by crates/lesto/tests/ui.rs. Edit that, not this.\n\
+         [workspace]\n\n\
+         [package]\n\
+         name = \"lesto-ui\"\n\
+         version = \"0.0.0\"\n\
+         edition = \"{edition}\"\n\
+         publish = false\n\n\
+         [dependencies]\n\
+         lesto = {{ path = \"{lesto}\", features = [\"anyhow\", \"sqlite\", \"lambda\"] }}\n\
+         garde = {{ version = \"{garde}\", features = [\"derive\"] }}\n\
+         schemars = {{ version = \"{schemars}\", features = [\"derive\"] }}\n\
+         serde = {{ version = \"{serde}\", features = [\"derive\"] }}\n\
+         sqlx = {{ version = \"{sqlx}\", default-features = false, \
+         features = [\"runtime-tokio\", \"sqlite\", \"derive\"] }}\n",
+        edition = requirement(&root, "edition"),
+        lesto = crate_dir.display(),
+        garde = requirement(&root, "garde"),
+        schemars = requirement(&root, "schemars"),
+        serde = requirement(&root, "serde"),
+        sqlx = requirement(&root, "sqlx"),
+    );
+    for case in cases {
+        manifest.push_str(&format!(
+            "\n[[bin]]\nname = \"{case}\"\npath = \"{}\"\n",
+            case_dir.join(format!("{case}.rs")).display()
+        ));
+    }
+    manifest
+}
+
+/// The version requirement of `name` in the workspace manifest, from either `name = "1.2"` or
+/// `name = { version = "1.2", .. }`.
+fn requirement(root: &str, name: &str) -> String {
+    let prefix = format!("{name} = ");
+    let line = root
+        .lines()
+        .find(|line| line.starts_with(&prefix))
+        .unwrap_or_else(|| panic!("`{name}` is not declared in the workspace manifest"));
+    let value = &line[prefix.len()..];
+    let start = match value.find("version = \"") {
+        Some(at) => at + "version = \"".len(),
+        None => {
+            assert!(
+                value.starts_with('"'),
+                "`{name}` has no version requirement"
+            );
+            1
+        }
+    };
+    let end = value[start..]
+        .find('"')
+        .expect("a closing quote on the version requirement")
+        + start;
+    value[start..end].to_owned()
+}
+
+/// Write only on a change, so cargo does not re-resolve the generated package every run.
+fn write_if_changed(path: &Path, contents: &str) {
+    if fs::read_to_string(path).is_ok_and(|current| current == contents) {
+        return;
+    }
+    fs::write(path, contents).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+}
+
+/// What rustc said about one case.
+#[derive(Default)]
+struct Diagnostic {
+    rendered: String,
+    errored: bool,
+}
+
+/// Build every case at once and collect the diagnostics per binary. `--keep-going` so that one
+/// broken case does not hide the others.
+fn build(scratch: &Path) -> BTreeMap<String, Diagnostic> {
+    let cargo = env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+    let output = Command::new(cargo)
+        .arg("build")
+        .arg("--message-format=json")
+        .arg("--keep-going")
+        .arg("--manifest-path")
+        .arg(scratch.join("Cargo.toml"))
+        .arg("--target-dir")
+        .arg(scratch.join("target"))
+        .env("CARGO_TERM_COLOR", "never")
+        .output()
+        .expect("run cargo on the generated package");
+
+    let stdout = String::from_utf8(output.stdout).expect("cargo writes UTF-8 json");
+    let mut diagnostics: BTreeMap<String, Diagnostic> = BTreeMap::new();
+    let mut finished = false;
+    for line in stdout.lines() {
+        let Ok(message) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        match message["reason"].as_str() {
+            Some("compiler-message") => {
+                let (Some(target), Some(rendered)) = (
+                    message["target"]["name"].as_str(),
+                    message["message"]["rendered"].as_str(),
+                ) else {
+                    continue;
+                };
+                let diagnostic = diagnostics.entry(target.to_owned()).or_default();
+                diagnostic.rendered.push_str(rendered);
+                diagnostic.errored |= message["message"]["level"].as_str() == Some("error");
+            }
+            Some("build-finished") => finished = true,
+            _ => {}
+        }
+    }
+    assert!(
+        finished,
+        "cargo did not get as far as building the cases:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    diagnostics
+}
+
+/// The fragments a case must show: every line that is neither blank nor a `#` comment.
+fn fragments(expected: &str) -> impl Iterator<Item = &str> {
+    expected
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+}
+
+/// Collapse every run of whitespace into one space, so that line breaks, indentation and the
+/// gutter rustc draws around a span do not matter.
+fn collapse(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}

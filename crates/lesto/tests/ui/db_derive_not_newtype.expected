@@ -1,0 +1,2 @@
+error: #[derive(Store)] expects a tuple struct with exactly one field holding the inner store, e.g. `struct NoteStore<M, P>(lesto::db::Store<M, P, Sqlite>);`
+--> db_derive_not_newtype.rs:6

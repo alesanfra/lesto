@@ -1,0 +1,17 @@
+[package]
+name = "lambda"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "lesto on AWS Lambda: the same binary serves locally under `lesto dev` and in Lambda"
+
+[dependencies]
+lesto = { path = "../../crates/lesto", features = ["lambda"] }
+serde.workspace = true
+garde.workspace = true
+schemars.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

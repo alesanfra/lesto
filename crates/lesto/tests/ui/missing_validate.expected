@@ -1,0 +1,6 @@
+error[E0277]: `lesto::Json<Input>` is not an extractor (state type `_`)
+--> missing_validate.rs:15
+does not implement `FromRequest<_>` or `FromRequestParts<_>`
+request data goes through `lesto::Json<T>`, `lesto::Query<T>` or `lesto::Path<T>`; `T` needs `#[derive(Deserialize, JsonSchema)]`, plus `#[derive(Validate)]` for `Json`/`Query`
+required by a bound in `create::__lesto_check`
+--> missing_validate.rs:10

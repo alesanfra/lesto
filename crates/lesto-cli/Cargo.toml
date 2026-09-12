@@ -1,0 +1,24 @@
+[package]
+name = "lesto-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+readme = "../../README.md"
+keywords.workspace = true
+categories.workspace = true
+description = "`lesto dev`: run a lesto application, rebuild and restart it on change, keep the port open meanwhile"
+
+[[bin]]
+name = "lesto"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+notify = "8"
+serde.workspace = true
+serde_json.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

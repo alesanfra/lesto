@@ -1,0 +1,4 @@
+error[E0277]: this store is read-only: `lesto::db::ReadOnly` does not allow `write`
+--> db_write_on_read_only.rs:10
+`write` needs a `ReadWrite` store
+declare the handler argument as `YourStore<ReadWrite, _>`, or bound the impl block with `M: lesto::db::Writable` so the method is only available on read-write stores

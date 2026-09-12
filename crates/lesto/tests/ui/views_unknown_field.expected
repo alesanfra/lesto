@@ -1,0 +1,2 @@
+error: `Note` has no field `body`; available fields: id, author, text
+--> views_unknown_field.rs:2
