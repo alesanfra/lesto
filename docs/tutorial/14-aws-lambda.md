@@ -110,5 +110,4 @@ option belongs to the router you pass, so both settings can share a test file.
   infrastructure tool.
 - Test the Lambda path in-process with `lesto::lambda::test::invoke` and event fixtures.
 
-Appendices: [From FastAPI to lesto](A-from-fastapi-to-lesto.md), [Common problems](B-common-problems.md),
-[Why axum and not actix-web](C-why-axum.md).
+Next: [Observability: tracing and OpenTelemetry](15-observability.md).

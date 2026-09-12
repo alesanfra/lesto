@@ -1,0 +1,16 @@
+[package]
+name = "openobserve"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Chapter 15: an API whose spans go to a local OpenObserve, configured by environment variables only"
+
+[dependencies]
+lesto = { path = "../../crates/lesto", features = ["otel", "sqlite"] }
+sqlx = { workspace = true, features = ["sqlite", "derive"] }
+serde.workspace = true
+garde.workspace = true
+schemars.workspace = true
+tokio.workspace = true
+tracing.workspace = true

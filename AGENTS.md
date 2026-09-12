@@ -26,6 +26,10 @@ crates/lesto/             library
   src/error.rs            HttpError, ValidationError, Problem (RFC 9457), ErrorFormat
   src/openapi.rs          hand-written OpenAPI 3.1 model (serde)
   src/docs.rs             Scalar / Swagger UI HTML (relative openapi.json link)
+  src/trace.rs            request span (HTTP semconv), Trace config, feature `otel`: propagation
+  src/otel.rs             feature `otel`: Config from the OTEL_* variables, init/init_named,
+                          Telemetry guard (tracer + logger providers), auto_init called by
+                          App::serve_until, the tracing→OTLP logs bridge and its feedback filter
   src/lib.rs              re-exports, prelude, routes! macro, __private compile-time checks
   src/db/                 feature `db` (+ postgres/mysql/sqlite): sqlx stores
     mod.rs                re-exports, prelude
@@ -36,6 +40,7 @@ crates/lesto/             library
     dialect.rs            BEGIN / BEGIN_READ_ONLY per database, begin_statement (isolation + SET LOCAL)
     handle.rs             Db<DB>: primary pool + optional read replica, conflict retry budget
     error.rs              lesto::db::Error → 403/404/409/500 problems, ResultExt::internal
+    trace.rs              the transaction's client span (database semconv)
   src/lambda.rs           feature `lambda`: AWS Lambda adapter over lambda_http: serve (Lambda or
                           local), Options (keep_stage, a per-router request mapper), test::invoke
   tests/integration.rs    end-to-end tests via tower::ServiceExt::oneshot
@@ -43,6 +48,7 @@ crates/lesto/             library
   tests/db_postgres.rs    RLS end to end; skipped unless LESTO_TEST_POSTGRES_URL is set. Also the
                           compiled home of the chapter 13 row level security snippets, which
                           examples/02-notes cannot host (it is SQLite)
+  tests/trace.rs          the span fields, through a hand-rolled capturing tracing::Subscriber
   tests/lambda.rs         API Gateway v1/v2, Function URL and ALB event fixtures
   tests/listener.rs       LISTEN_FDS socket inheritance
   tests/shutdown.rs       graceful shutdown (serve_until) finishes in-flight requests
@@ -61,6 +67,9 @@ examples/01-hello/        package `hello`: one route, the smallest app
 examples/02-notes/        package `notes`: full CRUD on SQLite with lesto::db, split into
                           lib.rs / state.rs / auth.rs / notes/{model,store,handlers}.rs, tests/api.rs
 examples/03-lambda/       package `lambda`: chapter 14 (lesto::lambda), in-memory notes, event-fixture test
+examples/04-openobserve/  package `openobserve`: chapter 15 end to end — compose.yaml with a local
+                          OpenObserve, an unauthenticated SQLite API, verify.sh (requests + a
+                          trace and a log search against the collector). Not run in CI: Docker
 examples/99-tutorial/     package `tutorial`: every tutorial snippet, compiled and tested (keep in sync)
 docs/tutorial/            the tutorial, mdBook (docs/book.toml, docs/build.sh → docs/book, gitignored)
 ```
@@ -74,10 +83,12 @@ cargo fmt --all
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features   # intra-doc links must resolve
 cargo deny check                              # licenses and advisories (deny.toml)
 cargo check -p lesto --no-default-features --features db   # each feature alone must compile too
+cargo check -p lesto --no-default-features --features otel
 cargo test -p lesto --test ui                 # after changing a diagnostic message, update tests/ui/*.expected
 sh docs/build.sh                              # needs `cargo install mdbook`
 LESTO_PORT=8765 cargo run -p notes            # port 8000 may be taken on dev machines
 docker run --rm -e POSTGRES_PASSWORD=lesto -p 5432:5432 postgres:18   # for tests/db_postgres.rs
+(cd examples/04-openobserve && docker compose up -d && sh verify.sh)  # OTLP traces + logs end to end
 LESTO_TEST_POSTGRES_URL=postgres://postgres:lesto@127.0.0.1:5432/postgres cargo test -p lesto --test db_postgres
 cargo run -p lesto-cli -- dev -p notes --port 8765      # lesto dev from this checkout
 ```
@@ -160,6 +171,49 @@ Recorded here because they are not derivable from the code. Do not undo them cas
   (`subsecond`, `hot-lib-reloader`) was rejected: invasive and incompatible with generics and
   macros. `[profile.dev.package."*"] opt-level = 3` makes the first build slower and rebuilds of
   workspace crates unaffected.
+- **Logs go out with the traces.** `opentelemetry-appender-tracing` turns every `tracing` event
+  into an OTLP log record with the `trace_id`/`span_id` of the span it happened in, which is what
+  makes a backend line up the logs of a request with its trace; the console layer keeps printing
+  them. The bridge layer carries a `Targets` filter turning `opentelemetry*`, `reqwest`, `hyper`,
+  `h2` and `tower` off (`no_feedback`): those crates report through `tracing`, so without it an
+  export failure is logged, exported, and fails again. Signals are switched off one at a time
+  with the spec's own `OTEL_TRACES_EXPORTER=none` / `OTEL_LOGS_EXPORTER=none`.
+- **Telemetry is configured by the environment, not by an API.** `App::serve_until` calls
+  `otel::auto_init` (feature `otel`): with `OTEL_EXPORTER_OTLP_ENDPOINT` set and no subscriber
+  installed (`tracing::dispatcher::has_been_set`), lesto installs console + OTLP (traces and
+  logs) and flushes on
+  shutdown, so `main` stays `app.serve().await`. Two refusals keep it honest: no export without
+  an endpoint (the SDK default of `localhost:4318` would spam errors in every test run), and
+  nothing at all once the application has its own subscriber — that is the escape hatch for
+  gRPC, samplers or a logs pipeline. Only lesto's own knobs are parsed (`Config::read`, taking a
+  getter so tests never write to the environment); the endpoint, headers and timeout are read by
+  the exporter itself.
+- **OTLP over HTTP/protobuf with the *blocking* reqwest client.** The batch processor runs on a
+  thread of its own with no tokio reactor, so an async client panics there with "there is no
+  reactor running" — the blocking client is what that processor is built for. No TLS feature is
+  enabled (`https` endpoints need your own exporter): `opentelemetry-http`'s rustls features do
+  not resolve against reqwest 0.12, and pulling a TLS stack into every `otel` build to reach a
+  collector that is usually a sidecar is the wrong trade. gRPC is not wired for the same reason
+  (tonic, prost-grpc); `OTEL_EXPORTER_OTLP_PROTOCOL=grpc` is reported as ignored, not silently.
+- **Spans are `tracing`, not OpenTelemetry.** The request span and the store span carry the
+  semantic-convention field names plus the `otel.name` / `otel.kind` / `otel.status_code` fields
+  `tracing-opentelemetry` reads, so the spans themselves cost no dependency and work with any
+  subscriber; the `otel` feature adds the export and the *incoming* context (`traceparent` →
+  parent span), neither of which can be done without the OpenTelemetry crates. The span name lives in
+  `otel.name` because `tracing` metadata is static and the name is `{method} {http.route}`.
+  lesto installs no propagator: the API's default is a no-op and W3C, B3 and the rest live in
+  different crates, so choosing one for the user would be wrong. `Trace` has no level knob —
+  a `tracing` level must be a constant, and filtering is the subscriber's job.
+- **The trace middleware is outermost but inside routing.** `Router::layer` runs after axum
+  matched the request, which is what makes `MatchedPath` (`http.route`) available; putting it
+  last in `into_router` still wraps the panic catcher and the problem rewriting, so the span
+  sees the status the client sees. `url.query` and the `X-Forwarded-*` headers are opt-in:
+  the first is application data, the second is client-controlled unless a proxy rewrites it.
+- **Store spans cover the transaction, not the statements.** One `CLIENT` span from `BEGIN` to
+  commit/rollback, named after the statement the dialect opens with (`db.operation.name`), with
+  no `db.query.text`: lesto's own statement carries the principal's identity through
+  `SET LOCAL`, and the queries belong to the closure. A failed requirement gets no span, because
+  a 403 never reaches the database. Per-statement spans are sqlx's business.
 - **`lesto::lambda` wraps `lambda_http`, it does not reimplement it.** The official runtime already
   turns API Gateway v1/v2, Function URL and ALB events into `http::Request`s and accepts any
   tower service, so the crate adds only what lesto users need: the Lambda-or-local switch on

@@ -23,6 +23,7 @@ use crate::error::{ErrorFormat, HttpError, PROBLEM_JSON, Problem, problem_to_fas
 use crate::openapi::{self, Components, OpenApi, SecurityRequirement, SecurityScheme, Tag};
 use crate::operation::{OperationHandler, OperationInput, OperationOutput};
 use crate::route::{PendingOperation, RouteMeta, RouteSet};
+use crate::trace::Trace;
 
 /// The application: routes plus their OpenAPI description.
 ///
@@ -39,6 +40,7 @@ pub struct App<S = ()> {
     docs_url: Option<String>,
     swagger_url: Option<String>,
     docs_assets: DocsAssets,
+    trace: Trace,
     /// A fallback was installed through [`App::fallback`]: keep it instead of the problem 404.
     custom_fallback: bool,
 }
@@ -85,6 +87,7 @@ where
             docs_url: Some("/docs".to_string()),
             swagger_url: Some("/swagger".to_string()),
             docs_assets: DocsAssets::default(),
+            trace: Trace::default(),
             custom_fallback: false,
         }
     }
@@ -187,6 +190,15 @@ where
     /// is used as given, with no integrity attributes.
     pub fn swagger_ui_base_url(mut self, url: impl Into<String>) -> Self {
         self.docs_assets.swagger_ui_base = Some(url.into());
+        self
+    }
+
+    /// What the per-request span records, or [`Trace::off()`] for no span at all.
+    ///
+    /// Every request runs inside a `tracing` span whose fields are the OpenTelemetry semantic
+    /// conventions for HTTP servers; see [`crate::trace`].
+    pub fn trace(mut self, trace: Trace) -> Self {
+        self.trace = trace;
         self
     }
 
@@ -296,6 +308,7 @@ where
             docs_url: self.docs_url,
             swagger_url: self.swagger_url,
             docs_assets: self.docs_assets,
+            trace: self.trace,
             custom_fallback: self.custom_fallback,
         }
     }
@@ -405,11 +418,25 @@ where
             HttpError::new(StatusCode::METHOD_NOT_ALLOWED, "Method Not Allowed")
         });
 
+        router =
+            router.layer(CatchPanicLayer).layer(middleware::from_fn(
+                move |req: Request, next: Next| async move {
+                    finish_problem(req, next, error_format).await
+                },
+            ));
+
+        // Outermost, so the span covers the fallbacks, the panic catcher and the rewriting of
+        // the problem body — everything the client waits for. It still runs *inside* routing,
+        // which is what makes `MatchedPath` (and so `http.route`) available.
+        let trace = self.trace;
+        if trace.enabled {
+            router = router.layer(middleware::from_fn(
+                move |req: Request, next: Next| async move {
+                    crate::trace::trace_request(req, next, trace).await
+                },
+            ));
+        }
         router
-            .layer(CatchPanicLayer)
-            .layer(middleware::from_fn(move |req: Request, next: Next| async move {
-                finish_problem(req, next, error_format).await
-            }))
     }
 }
 
@@ -421,6 +448,11 @@ impl App<()> {
     /// Shutdown is graceful: the listener closes at once, requests already in flight run to
     /// completion, then the future resolves. Pair it with your platform's termination grace
     /// period (Kubernetes gives 30 s by default).
+    ///
+    /// With the `otel` feature, this is also where telemetry is set up: if
+    /// `OTEL_EXPORTER_OTLP_ENDPOINT` is set and no `tracing` subscriber has been installed,
+    /// spans go to the console and to the collector, and are flushed before this returns. See
+    /// [`crate::otel`].
     pub async fn serve(self) -> std::io::Result<()> {
         let addr = bind_address()?;
         self.serve_at(addr).await
@@ -447,6 +479,11 @@ impl App<()> {
         listener: tokio::net::TcpListener,
         shutdown: impl Future<Output = ()> + Send + 'static,
     ) -> std::io::Result<()> {
+        // Held until the server is done, so the last spans are flushed after the in-flight
+        // requests finish. Does nothing unless the `otel` feature is on, the environment names
+        // a collector, and the application installed no subscriber of its own.
+        #[cfg(feature = "otel")]
+        let _telemetry = crate::otel::auto_init(&self.spec.info.title);
         axum::serve(listener, self.into_router())
             .with_graceful_shutdown(shutdown)
             .await

@@ -18,6 +18,7 @@
 - [Testing](12-testing.md)
 - [Databases: stores and principals](13-databases.md)
 - [Deploying to AWS Lambda](14-aws-lambda.md)
+- [Observability: tracing and OpenTelemetry](15-observability.md)
 
 # Appendices
 

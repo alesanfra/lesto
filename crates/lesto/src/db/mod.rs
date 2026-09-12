@@ -49,6 +49,7 @@ pub mod principal;
 pub mod requirement;
 pub mod settings;
 pub mod store;
+pub mod trace;
 
 pub use dialect::Dialect;
 pub use error::{Error, ResultExt};

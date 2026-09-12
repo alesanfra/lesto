@@ -34,6 +34,13 @@ sqlx = { workspace = true, optional = true }
 # feature `db`: the value type of a transaction setting. Not a feature of its own — an RLS
 # identity is made of UUIDs in practice, and `default-features = false` brings nothing with it.
 uuid = { workspace = true, optional = true }
+# feature `otel`
+opentelemetry = { workspace = true, optional = true }
+opentelemetry_sdk = { workspace = true, optional = true }
+opentelemetry-otlp = { workspace = true, optional = true }
+opentelemetry-appender-tracing = { workspace = true, optional = true }
+tracing-opentelemetry = { workspace = true, optional = true }
+tracing-subscriber = { workspace = true, optional = true }
 # feature `lambda`
 lambda_http = { version = "1.3", default-features = false, features = ["apigw_rest", "apigw_http", "alb"], optional = true }
 tower = { workspace = true, optional = true }
@@ -51,13 +58,24 @@ mysql = ["db", "sqlx/mysql"]
 sqlite = ["db", "sqlx/sqlite"]
 # `lesto::lambda`: run the app on AWS Lambda behind API Gateway, a Function URL or an ALB.
 lambda = ["dep:lambda_http", "dep:tower", "dep:http-body-util"]
+# `lesto::otel`: OTLP export of spans *and* log events, configured by the standard `OTEL_*`
+# variables (`App::serve` sets it up by itself), plus trace context propagation so an incoming
+# `traceparent` continues here. The spans themselves need no feature.
+otel = [
+    "dep:opentelemetry",
+    "dep:opentelemetry_sdk",
+    "dep:opentelemetry-otlp",
+    "dep:opentelemetry-appender-tracing",
+    "dep:tracing-opentelemetry",
+    "dep:tracing-subscriber",
+]
 
 [package.metadata.docs.rs]
 all-features = true
 
 [dev-dependencies]
 # Tests exercise every feature.
-lesto = { path = ".", features = ["anyhow", "sqlite", "postgres", "lambda"] }
+lesto = { path = ".", features = ["anyhow", "sqlite", "postgres", "lambda", "otel"] }
 # `postgres` and `uuid` for `tests/db_postgres.rs`, which binds a `Uuid`; lesto itself never
 # binds one, so the `db` feature does not ask sqlx for it.
 sqlx = { workspace = true, features = ["sqlite", "postgres", "uuid", "derive"] }

@@ -7,6 +7,7 @@ members = [
     "examples/01-hello",
     "examples/02-notes",
     "examples/03-lambda",
+    "examples/04-openobserve",
     "examples/99-tutorial",
 ]
 
@@ -40,6 +41,16 @@ quote = "1"
 proc-macro2 = "1"
 sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio"] }
 tracing = "0.1"
+# feature `otel` of `lesto`: the API crate, the SDK, OTLP exporters over HTTP/protobuf (no TLS
+# stack, no gRPC), the bridges that turn a `tracing` span into an OpenTelemetry span and a
+# `tracing` event into an OpenTelemetry log record, and the subscriber `lesto::otel::init`
+# installs.
+opentelemetry = { version = "0.32", default-features = false, features = ["trace", "logs"] }
+opentelemetry_sdk = { version = "0.32", default-features = false, features = ["trace", "logs"] }
+opentelemetry-otlp = { version = "0.32", default-features = false, features = ["trace", "logs", "http-proto", "reqwest-blocking-client"] }
+opentelemetry-appender-tracing = { version = "0.32", default-features = false }
+tracing-opentelemetry = { version = "0.33", default-features = false }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 anyhow = "1"
 uuid = { version = "1", default-features = false }
 

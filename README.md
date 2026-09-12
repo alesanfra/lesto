@@ -31,6 +31,15 @@ A Rust web micro-framework with **FastAPI**'s ergonomics, built on [axum](https:
   Lambda runtime inside Lambda (API Gateway REST and HTTP APIs, Function URLs, ALB) and a plain
   server anywhere else; REST stages are stripped, docs pages work behind them, and
   `lesto::lambda::test::invoke` replays event fixtures in tests.
+- **Observability by default**: every request runs in a `tracing` span named `{method} {http.route}`
+  whose fields are the [OpenTelemetry semantic conventions](https://opentelemetry.io/docs/specs/semconv/http/http-spans/)
+  for HTTP servers, and every store transaction in a client span with the database conventions.
+  With the `otel` feature, setup is environment only — `OTEL_EXPORTER_OTLP_ENDPOINT` and friends:
+  `App::serve` installs the console subscriber and the OTLP export of **traces and logs** (every
+  `tracing` event becomes a log record carrying its `trace_id`), flushes on shutdown, and
+  continues a trace started upstream (`traceparent`). It stands aside if you install your own
+  subscriber. `App::trace(Trace::new()...)` opts `url.query` in, trusts forwarding headers, or
+  turns the span off.
 - **Production defaults**: `App::serve` shuts down gracefully on `SIGTERM`/`Ctrl-C`, credentials
   are redacted from `Debug` output, internal errors never leak their cause to the client.
 - axum stays underneath: `State`, `Extension`, tower layers and `into_router()` work as always.
@@ -40,8 +49,9 @@ crates/lesto-cli` from a checkout until it is published), then `lesto dev` in yo
 builds, runs, and rebuilds + restarts on every save, keeping the port open while the code compiles
 (like `fastapi dev`). `lesto run` does it once; `lesto new` and `lesto openapi` are reserved.
 
-**New here?** Start with the [tutorial](docs/tutorial/README.md): fourteen short chapters, from
-"Hello" to security, testing, databases and AWS Lambda, with full code and `curl` commands for every step.
+**New here?** Start with the [tutorial](docs/tutorial/README.md): fifteen short chapters, from
+"Hello" to security, testing, databases, AWS Lambda and OpenTelemetry, with full code and `curl`
+commands for every step.
 The crates are not on crates.io yet: depend on them by `path` as the tutorial shows.
 
 ## Example
@@ -209,11 +219,14 @@ with a `WWW-Authenticate` header. See the tutorial's [Security](docs/tutorial/09
 - `crates/lesto/` — the library: `App`, extractors, errors, OpenAPI model, `OperationInput`/`OperationOutput` traits;
   `lesto::db` (feature `db`): `Store<M, P, DB>`, `Authenticated`, `Public`, `TransactionSettings`,
   `Isolation`, `lesto::db::Error`;
-  `lesto::lambda` (feature `lambda`): `serve`, `Options`, `test::invoke`.
+  `lesto::lambda` (feature `lambda`): `serve`, `Options`, `test::invoke`;
+  `lesto::trace`: the request span and `Trace`; `lesto::otel` (feature `otel`): OTLP export of
+  traces and logs plus trace context propagation, configured by the `OTEL_*` variables.
 - `crates/lesto-macros/` — `#[lesto::get(...)]` attributes and friends, `#[lesto::views]`, `#[derive(Store)]`.
 - `crates/lesto-cli/` — the `lesto` command: `dev` (watch, rebuild, restart with the socket kept open), `run`.
 - `examples/01-hello/` — the smallest app. `examples/02-notes/` — full CRUD on SQLite with `lesto::db`,
   split into modules. `examples/03-lambda/` — the same kind of API on AWS Lambda.
+  `examples/04-openobserve/` — traces and logs in a local OpenObserve, `docker compose` included.
   `examples/99-tutorial/` — every tutorial snippet, compiled and tested.
 - `docs/tutorial/` — the tutorial; `docs/build.sh` builds it as an mdBook site.
 
@@ -230,7 +243,7 @@ cargo deny check                                     # licenses, advisories (car
 cargo run -p lesto-cli -- dev -p notes --port 8765   # the CLI from this checkout
 ```
 
-Features of `lesto`: `db` + `postgres`/`mysql`/`sqlite`, `lambda`, `anyhow`. Tests always run with all of them.
+Features of `lesto`: `db` + `postgres`/`mysql`/`sqlite`, `lambda`, `otel`, `anyhow`. Tests always run with all of them.
 
 CI runs fmt, clippy, tests on stable and 1.85, rustdoc with warnings denied, and `cargo deny`.
 

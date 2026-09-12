@@ -432,8 +432,17 @@ pub fn build_app(state: AppState) -> App<()> {
         .with_state(state)
 }
 
+// ---- Chapter 15 ----------------------------------------------------------------------------
+
+/// The request span, configured: the query string is recorded and the proxy is trusted.
+pub fn traced_app(state: AppState) -> App<()> {
+    build_app(state).trace(Trace::new().query(true).forwarded(true))
+}
+
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
+    // No telemetry code: with the `otel` feature, `serve` reads the `OTEL_*` variables and
+    // exports the spans itself (chapter 15).
     build_app(AppState::default()).serve().await
 }
 
@@ -463,6 +472,16 @@ mod tests {
             .header(header::CONTENT_TYPE, "application/json")
             .body(Body::from(body.to_string()))
             .unwrap()
+    }
+
+    /// Chapter 15: the configured span does not change what the application answers.
+    #[tokio::test]
+    async fn a_traced_app_still_serves() {
+        let app = traced_app(AppState::for_tests());
+        let req = Request::get("/").body(Body::empty()).unwrap();
+        let (status, body) = call(app, req).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body, "Hello, lesto!");
     }
 
     #[tokio::test]

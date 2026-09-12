@@ -59,8 +59,11 @@ pub mod extract;
 pub mod lambda;
 pub mod openapi;
 pub mod operation;
+#[cfg(feature = "otel")]
+pub mod otel;
 pub mod route;
 pub mod security;
+pub mod trace;
 
 pub use app::{App, bind_address, listener, shutdown_signal};
 pub use docs::DocsAssets;
@@ -76,6 +79,7 @@ pub use route::{
 pub use security::{
     ApiKey, ApiKeyScheme, AuthScheme, Basic, BasicAuth, Bearer, BearerAuth, Security,
 };
+pub use trace::Trace;
 
 // The attribute macros share names with the `RouteMeta` constructors above. Both are useful:
 // `#[lesto::get("/x")]` in attribute position and `lesto::get("/x")` in expression position.
@@ -96,7 +100,7 @@ pub mod prelude {
     pub use crate::openapi::{ApiKeyIn, OAuthFlows, SecurityScheme};
     pub use crate::security::{ApiKey, ApiKeyScheme, AuthScheme, Basic, Bearer, Security};
     pub use crate::{
-        App, ErrorFormat, Extension, HttpError, Json, Path, Query, State, StatusCode, routes,
+        App, ErrorFormat, Extension, HttpError, Json, Path, Query, State, StatusCode, Trace, routes,
     };
     pub use garde::Validate;
     pub use schemars::JsonSchema;

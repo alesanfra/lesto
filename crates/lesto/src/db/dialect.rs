@@ -13,6 +13,10 @@ use crate::db::settings::TransactionSettings;
     note = "enable the matching feature of `lesto`: `postgres`, `mysql` or `sqlite`"
 )]
 pub trait Dialect: sqlx::Database + sealed::Sealed {
+    /// `db.system.name` of the OpenTelemetry semantic conventions, recorded on every store
+    /// span (see [`crate::db::trace`]).
+    const SYSTEM: &'static str;
+
     /// Statement that opens a read-only transaction, passed to `Pool::begin_with`.
     const BEGIN_READ_ONLY: &'static str;
 
@@ -102,6 +106,7 @@ mod sealed {
 impl sealed::Sealed for sqlx::Postgres {}
 #[cfg(feature = "postgres")]
 impl Dialect for sqlx::Postgres {
+    const SYSTEM: &'static str = "postgresql";
     const BEGIN_READ_ONLY: &'static str = "BEGIN READ ONLY";
     const BEGIN: &'static str = "BEGIN";
 
@@ -160,6 +165,7 @@ impl Dialect for sqlx::Postgres {
 impl sealed::Sealed for sqlx::MySql {}
 #[cfg(feature = "mysql")]
 impl Dialect for sqlx::MySql {
+    const SYSTEM: &'static str = "mysql";
     const BEGIN_READ_ONLY: &'static str = "START TRANSACTION READ ONLY";
     const BEGIN: &'static str = "START TRANSACTION";
 
@@ -196,6 +202,7 @@ impl Dialect for sqlx::MySql {
 impl sealed::Sealed for sqlx::Sqlite {}
 #[cfg(feature = "sqlite")]
 impl Dialect for sqlx::Sqlite {
+    const SYSTEM: &'static str = "sqlite";
     const BEGIN_READ_ONLY: &'static str = "BEGIN DEFERRED";
     const BEGIN: &'static str = "BEGIN";
 
