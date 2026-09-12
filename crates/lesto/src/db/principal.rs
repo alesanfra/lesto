@@ -7,6 +7,7 @@ use std::future::Future;
 
 use crate::axum::extract::FromRequestParts;
 use crate::axum::response::{IntoResponse, Response};
+use crate::db::settings::TransactionSettings;
 use crate::http::request::Parts;
 use crate::{HttpError, OperationBuilder, OperationInput};
 
@@ -46,6 +47,23 @@ pub trait Authenticated: Sized + Send + Sync + 'static {
 
     /// Does this identity hold `permission` (e.g. `"notes:write"`)?
     fn has_permission(&self, permission: &str) -> bool;
+
+    /// Settings published to the database at the start of every transaction this principal
+    /// opens, so a row level security policy can read who is asking. None by default.
+    ///
+    /// ```ignore
+    /// fn transaction_settings(&self) -> TransactionSettings {
+    ///     TransactionSettings::empty()
+    ///         .set("app.user_id", self.id)
+    ///         .set("app.is_staff", self.is_staff)
+    /// }
+    /// ```
+    ///
+    /// Postgres only: see the [`settings`](crate::db::settings) module for what it renders to,
+    /// why the value types are a closed set, and how to read the values back.
+    fn transaction_settings(&self) -> TransactionSettings {
+        TransactionSettings::empty()
+    }
 }
 
 /// The anonymous principal: always extracted, never holds permissions.
@@ -61,6 +79,13 @@ pub struct Public;
 pub trait PrincipalDocs: Sized + Send + Sync + 'static {
     /// Add the security requirement and error responses this principal implies.
     fn describe(builder: &mut OperationBuilder<'_>);
+
+    /// Forwards [`Authenticated::transaction_settings`] ([`Public`] publishes none).
+    ///
+    /// The `S`-free half of a principal is where `Store::read` / `Store::write` can reach it:
+    /// they have no state parameter. Implement the method on [`Authenticated`], not here —
+    /// this trait is blanket-implemented.
+    fn transaction_settings(&self) -> TransactionSettings;
 }
 
 /// A principal that can be extracted with state `S`. Implemented for [`Public`] (any state)
@@ -81,6 +106,10 @@ impl<P: Authenticated> PrincipalDocs for P {
         P::Credential::describe(builder);
         builder.error_response(403, "Forbidden");
     }
+
+    fn transaction_settings(&self) -> TransactionSettings {
+        Authenticated::transaction_settings(self)
+    }
 }
 
 impl<P: Authenticated> Principal<P::State> for P {
@@ -96,6 +125,10 @@ impl<P: Authenticated> Principal<P::State> for P {
 
 impl PrincipalDocs for Public {
     fn describe(_builder: &mut OperationBuilder<'_>) {}
+
+    fn transaction_settings(&self) -> TransactionSettings {
+        TransactionSettings::empty()
+    }
 }
 
 impl<S: Send + Sync> Principal<S> for Public {

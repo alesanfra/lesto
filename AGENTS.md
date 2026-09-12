@@ -33,20 +33,24 @@ crates/lesto/             library
     principal.rs          Authenticated (user-implemented), Public, Principal<S>, PrincipalDocs
     requirement.rs        Requirement<P>: Anyone, &'static str permission
     mode.rs               ReadOnly / ReadWrite, sealed Mode / Writable
-    dialect.rs            BEGIN_READ_ONLY per database
-    handle.rs             Db<DB>: primary pool + optional read replica
+    dialect.rs            BEGIN / BEGIN_READ_ONLY per database, begin_statement (isolation + SET LOCAL)
+    handle.rs             Db<DB>: primary pool + optional read replica, conflict retry budget
     error.rs              lesto::db::Error → 403/404/409/500 problems, ResultExt::internal
   src/lambda.rs           feature `lambda`: AWS Lambda adapter over lambda_http: serve (Lambda or
                           local), Options (keep_stage, a per-router request mapper), test::invoke
   tests/integration.rs    end-to-end tests via tower::ServiceExt::oneshot
   tests/db.rs             SQLite in-memory end-to-end for lesto::db
+  tests/db_postgres.rs    RLS end to end; skipped unless LESTO_TEST_POSTGRES_URL is set. Also the
+                          compiled home of the chapter 13 row level security snippets, which
+                          examples/02-notes cannot host (it is SQLite)
   tests/lambda.rs         API Gateway v1/v2, Function URL and ALB event fixtures
   tests/listener.rs       LISTEN_FDS socket inheritance
   tests/shutdown.rs       graceful shutdown (serve_until) finishes in-flight requests
   tests/ui/*.rs           compile-fail cases; *.expected lists the diagnostic fragments lesto owns
                           (db_*.rs for lesto::db), checked by tests/ui.rs
 crates/lesto-macros/      proc macros: #[lesto::get] and friends (RouteInfo marker type +
-                          per-argument checks), #[lesto::views], #[derive(Store)]
+                          per-argument checks), #[lesto::views], #[derive(Store)] with the
+                          optional #[store(read = .., write = ..)] permission pair
 crates/lesto-cli/         the `lesto` binary: dev (watch + rebuild + restart, socket kept open),
                           run, new/openapi (reserved, exit 2)
   src/cargo.rs            cargo metadata; cargo build --message-format=json → executable path
@@ -72,6 +76,8 @@ cargo check -p lesto --no-default-features --features db   # each feature alone 
 cargo test -p lesto --test ui                 # after changing a diagnostic message, update tests/ui/*.expected
 sh docs/build.sh                              # needs `cargo install mdbook`
 LESTO_PORT=8765 cargo run -p notes            # port 8000 may be taken on dev machines
+docker run --rm -e POSTGRES_PASSWORD=lesto -p 5432:5432 postgres:18   # for tests/db_postgres.rs
+LESTO_TEST_POSTGRES_URL=postgres://postgres:lesto@127.0.0.1:5432/postgres cargo test -p lesto --test db_postgres
 cargo run -p lesto-cli -- dev -p notes --port 8765      # lesto dev from this checkout
 ```
 
@@ -200,11 +206,47 @@ Recorded here because they are not derivable from the code. Do not undo them cas
   parameter: no downstream crate can implement it for `Public`. `PrincipalDocs` is the `S`-free
   half so that `Store<M, P, DB>: OperationInput` (which has no `S`) can be written.
   `&'static str: Requirement<P>` only for `P: Authenticated` makes a permission on a `Public`
-  store a compile error. `Store::read`/`write` take `for<'c> AsyncFnOnce(&'c mut DB::Connection)`;
-  the future is `Send` through auto-trait leakage, no boxing. Inside a closure the error type is
+  store a compile error. `Store::read`/`write` take `for<'c> AsyncFnOnce(&'c mut DB::Connection)`
+  (`read_with`/`write_with` an `AsyncFn`, see below); the future is `Send` through auto-trait
+  leakage, no boxing. Inside a closure the error type is
   generic, so use `Error::not_found(..)` etc. rather than `.into()`. SQLite has no read-only
   transactions: `BEGIN DEFERRED`. In SQLite tests use `max_connections(1)`: every
   `sqlite::memory:` connection is a separate database.
+- **`lesto::db` transaction settings are values, not SQL.** `SET LOCAL` accepts no bind
+  parameters on any database, so a setting's value is interpolated; `Literal` is therefore a
+  closed set (`bool`, integer, `Uuid`) whose text forms cannot contain a quote, with no text
+  variant and no way to add one downstream, and names are checked `&'static str`. lesto builds
+  the whole statement, so `BEGIN` is always first (sqlx then fails the call if the connection
+  did not stay in a transaction) — the caller never formats SQL. The type is named
+  `TransactionSettings`, not `SessionVars`: in Postgres "session" is the opposite scope of what
+  `SET LOCAL` does, and a name suggesting session scope invites setting them per connection.
+  They are read off the principal once, when the store is built, so `read`/`write` need no
+  `P: PrincipalDocs` bound that every user's store `impl` block would have to repeat.
+- **`Isolation` is a value, not a type parameter**, because it changes what the database does,
+  not which methods compile (unlike `Mode`). It sits on `read_with`/`write_with` rather than as
+  a fourth argument to `read`/`write`, so the common case pays nothing. Named `Isolation` even
+  though SQLite has no isolation levels: SQLite only ever provides serializable, so the request
+  is meaningful there and only the rendering differs (`BEGIN IMMEDIATE` takes the write lock up
+  front instead of meeting `SQLITE_BUSY` halfway through a check-then-act). MySQL overrides
+  `begin_statement` because `START TRANSACTION` takes no isolation clause: it has to precede the
+  statement, the opposite order from Postgres.
+- **A lost race is a 409, not a 500.** `40001`, `40P01` and SQLite's `SQLITE_BUSY` family answer
+  409 with `Retry-After: 0`, because the request is safe to resend. Lock *timeouts*
+  (`ER_LOCK_WAIT_TIMEOUT`, `55P03`) stay 500s on purpose: a retry does not fix one, and hiding
+  them would hide a transaction somebody is holding too long.
+- **Only `read_with`/`write_with` retry, and only they take an `AsyncFn`.** `read`/`write` keep
+  `AsyncFnOnce` and duplicate the few lines rather than delegating, so the common case is not
+  made to satisfy a bound it has no use for — at the database's own isolation there is no
+  conflict to retry. The budget lives on `Db` (`with_conflict_retries`, default 2) because it is
+  policy, not a per-call decision, and a fourth argument on every store method would be. A
+  retried closure runs more than once: that is what `AsyncFn` announces, and why the docs say to
+  keep outside-visible effects out of it. A test that synchronises attempts with a barrier must
+  disable retrying or arrange for only the first attempt to wait, or it deadlocks.
+- **No `Store::atomic`.** It would be `write_with` with another name: one transaction around
+  several statements is what a closure already is. What was actually missing is the way to share
+  a *query* between methods, which is the `Connection<DB>` alias plus the convention of writing
+  `..._in(conn, ..)` helpers. Two public store methods sharing one transaction stays impossible
+  on purpose — that is the boundary the design is built on.
 - **`lesto::lambda`**: `Options::keep_stage` selects whether the request mapper strips
   `/{stage}` (read from the event's `RequestContext`, v1 and v2; `$default` has no prefix).
   `lambda_http` still *adds* the stage when the event path lacks it, so the mapper always sees

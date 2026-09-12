@@ -6,6 +6,7 @@ use lesto::axum::body::Body;
 use lesto::axum::extract::FromRef;
 use lesto::db::Dialect;
 use lesto::db::prelude::*;
+use lesto::db::uuid::Uuid;
 use lesto::http::{Request, StatusCode, header};
 use lesto::prelude::*;
 use serde_json::{Value, json};
@@ -472,3 +473,108 @@ fn error_status_mapping() {
     assert!(matches!(e, Error::Internal(_)));
     assert_eq!(<Sqlite as Dialect>::BEGIN_READ_ONLY, "BEGIN DEFERRED");
 }
+
+// ---- transaction settings -------------------------------------------------------------------
+
+/// A principal that publishes its identity to every transaction it opens. SQLite has no
+/// transaction-local settings, so it is here to prove that lesto says so instead of running the
+/// queries with the identity silently missing. The Postgres end of this lives in
+/// `tests/db_postgres.rs`.
+#[derive(Debug)]
+struct Tenant {
+    id: Uuid,
+}
+
+impl Authenticated for Tenant {
+    type State = AppState;
+    type Credential = Bearer;
+
+    async fn authenticate(_token: Bearer, _state: &AppState) -> Result<Self, HttpError> {
+        Ok(Tenant { id: Uuid::nil() })
+    }
+
+    fn has_permission(&self, _permission: &str) -> bool {
+        true
+    }
+
+    fn transaction_settings(&self) -> TransactionSettings {
+        TransactionSettings::empty()
+            .set("app.user_id", self.id)
+            .set("app.is_staff", false)
+    }
+}
+
+#[tokio::test]
+async fn a_principal_without_settings_opens_the_plain_transaction() {
+    let store = NoteStore(Store::<ReadOnly, _, _>::new(
+        Db::new(pool(&["a"]).await),
+        Public,
+    ));
+    assert!(store.settings().is_empty());
+    assert_eq!(store.list().await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn settings_on_a_database_that_has_none_fail_the_request() {
+    let store = NoteStore(Store::<ReadOnly, _, _>::new(
+        Db::new(pool(&["a"]).await),
+        Tenant { id: Uuid::nil() },
+    ));
+    assert_eq!(store.settings().len(), 2);
+
+    let error = store.list().await.unwrap_err();
+    assert_eq!(error.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    // The cause names the database and what to do; the response body never carries it.
+    assert!(
+        error
+            .to_string()
+            .contains("has no transaction-local settings"),
+        "{error}"
+    );
+}
+
+// ---- isolation ------------------------------------------------------------------------------
+
+#[tokio::test]
+async fn a_serializable_write_opens_begin_immediate_on_sqlite() {
+    let store = NoteStore(Store::<ReadWrite, _, _>::new(
+        Db::new(pool(&[]).await),
+        User {
+            name: "alice".into(),
+            permissions: vec![],
+        },
+    ));
+
+    // SQLite has no isolation levels; `Serializable` takes the write lock up front instead, so
+    // what this proves is that `BEGIN IMMEDIATE` is what SQLite gets and that it accepts it.
+    let count = store
+        .write_with(Anyone, Isolation::Serializable, async |conn| {
+            sqlx::query("INSERT INTO notes (author, text) VALUES ('alice', 'serialized')")
+                .execute(&mut *conn)
+                .await?;
+            sqlx::query_scalar::<_, i64>("SELECT count(*) FROM notes")
+                .fetch_one(conn)
+                .await
+        })
+        .await
+        .unwrap();
+    assert_eq!(count, 1);
+
+    // And a read at every isolation still works.
+    for isolation in [
+        Isolation::Default,
+        Isolation::Snapshot,
+        Isolation::Serializable,
+    ] {
+        let rows = store
+            .read_with(Anyone, isolation, async |conn| {
+                sqlx::query_scalar::<_, i64>("SELECT count(*) FROM notes")
+                    .fetch_one(conn)
+                    .await
+            })
+            .await
+            .unwrap();
+        assert_eq!(rows, 1, "{isolation:?}");
+    }
+}
+

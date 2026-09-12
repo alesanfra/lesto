@@ -1,20 +1,24 @@
 //! `Store<M, P, DB>`: a principal, a database handle, and `read`/`write` that run a closure
 //! inside a transaction after checking a requirement.
 
+use std::borrow::Cow;
+use std::future::Future;
 use std::marker::PhantomData;
 
 use crate::axum::extract::{FromRef, FromRequestParts};
 use crate::axum::response::Response;
 use crate::http::request::Parts;
 use crate::{OperationBuilder, OperationInput};
-use sqlx::{Database, Transaction};
+use sqlx::{AssertSqlSafe, Database, Transaction};
 
 use crate::db::dialect::Dialect;
 use crate::db::error::Error;
 use crate::db::handle::Db;
+use crate::db::isolation::Isolation;
 use crate::db::mode::{Mode, Writable};
 use crate::db::principal::{Principal, PrincipalDocs};
 use crate::db::requirement::Requirement;
+use crate::db::settings::TransactionSettings;
 
 /// The inner type of every store. Wrap it in a newtype and `#[derive(Store)]`:
 ///
@@ -33,15 +37,24 @@ use crate::db::requirement::Requirement;
 pub struct Store<M, P, DB: Database> {
     db: Db<DB>,
     principal: P,
+    /// Read off the principal once, when the store is built, rather than per method: they
+    /// cannot change while the store lives, and this is what keeps `read` and `write` free of
+    /// a `P: PrincipalDocs` bound that every user's store `impl` block would have to repeat.
+    settings: TransactionSettings,
     _mode: PhantomData<fn() -> M>,
 }
 
 impl<M: Mode, P, DB: Dialect> Store<M, P, DB> {
     /// Build a store by hand (tests, background jobs). Handlers get theirs by extraction.
-    pub fn new(db: Db<DB>, principal: P) -> Self {
+    pub fn new(db: Db<DB>, principal: P) -> Self
+    where
+        P: PrincipalDocs,
+    {
+        let settings = principal.transaction_settings();
         Self {
             db,
             principal,
+            settings,
             _mode: PhantomData,
         }
     }
@@ -62,6 +75,10 @@ impl<M: Mode, P, DB: Dialect> Store<M, P, DB> {
 
     /// Check `requirement`, open a **read-only** transaction (on the replica when configured),
     /// run `f`, commit. Any error rolls back.
+    ///
+    /// The principal's [`transaction_settings`](PrincipalDocs::transaction_settings) are
+    /// published in the same round trip as the `BEGIN`. For a stable snapshot across several
+    /// queries, use [`read_with`](Self::read_with).
     pub async fn read<T, E, R, F>(&self, requirement: R, f: F) -> Result<T, Error>
     where
         R: Requirement<P>,
@@ -69,12 +86,53 @@ impl<M: Mode, P, DB: Dialect> Store<M, P, DB> {
         F: for<'c> AsyncFnOnce(&'c mut DB::Connection) -> Result<T, E>,
     {
         requirement.check(&self.principal)?;
-        let tx = self.db.reads().begin_with(DB::BEGIN_READ_ONLY).await?;
+        // Not `read_with(.., Isolation::Default, ..)`: that one may run `f` twice and so takes
+        // an `AsyncFn`, which is a bound the common case should not have to satisfy. At the
+        // database's own isolation there is no conflict to retry anyway.
+        let tx = self
+            .db
+            .reads()
+            .begin_with(AssertSqlSafe(self.begin(true, Isolation::Default)?))
+            .await?;
         run(tx, f).await
+    }
+
+    /// [`read`](Self::read), asking the database for `isolation`.
+    ///
+    /// On a transient conflict the closure is re-run, up to
+    /// [`Db::with_conflict_retries`] times; if the last attempt still conflicts the answer is
+    /// **409** with `Retry-After: 0` — the request is safe to send again.
+    ///
+    /// `f` is an `AsyncFn`, not an `AsyncFnOnce`, precisely because it may run more than once:
+    /// keep it free of effects the outside world can see (no email, no queue publish), or the
+    /// retry sends them twice.
+    pub async fn read_with<T, E, R, F>(
+        &self,
+        requirement: R,
+        isolation: Isolation,
+        f: F,
+    ) -> Result<T, Error>
+    where
+        R: Requirement<P>,
+        E: Into<Error>,
+        F: for<'c> AsyncFn(&'c mut DB::Connection) -> Result<T, E>,
+    {
+        requirement.check(&self.principal)?;
+        let statement = self.begin(true, isolation)?;
+        self.attempt(&f, || {
+            self.db.reads().begin_with(AssertSqlSafe(statement.clone()))
+        })
+        .await
     }
 
     /// Check `requirement`, open a read-write transaction on the primary, run `f`, commit.
     /// Any error rolls back. Only available when `M: Writable` (`ReadWrite`).
+    ///
+    /// The principal's [`transaction_settings`](PrincipalDocs::transaction_settings) are
+    /// published in the same round trip as the `BEGIN`. When a check inside `f` decides whether
+    /// to write, that check does **not** hold to commit at this isolation — use
+    /// [`write_with`](Self::write_with) with [`Isolation::Serializable`], or a unique
+    /// constraint.
     pub async fn write<T, E, R, F>(&self, requirement: R, f: F) -> Result<T, Error>
     where
         M: Writable,
@@ -83,8 +141,89 @@ impl<M: Mode, P, DB: Dialect> Store<M, P, DB> {
         F: for<'c> AsyncFnOnce(&'c mut DB::Connection) -> Result<T, E>,
     {
         requirement.check(&self.principal)?;
-        let tx = self.db.primary().begin().await?;
+        // `AsyncFnOnce`, and no retry: see `read`.
+        let tx = self
+            .db
+            .primary()
+            .begin_with(AssertSqlSafe(self.begin(false, Isolation::Default)?))
+            .await?;
         run(tx, f).await
+    }
+
+    /// [`write`](Self::write), asking the database for `isolation`.
+    ///
+    /// [`Isolation::Serializable`] is what a check-then-act needs: a row read to decide still
+    /// holds when the transaction commits. On a conflict the closure is re-run, up to
+    /// [`Db::with_conflict_retries`] times, and a conflict that survives the last attempt
+    /// answers **409** with `Retry-After: 0`, not 500.
+    ///
+    /// `f` is an `AsyncFn`, not an `AsyncFnOnce`, precisely because it may run more than once:
+    /// keep it free of effects the outside world can see, or the retry repeats them.
+    pub async fn write_with<T, E, R, F>(
+        &self,
+        requirement: R,
+        isolation: Isolation,
+        f: F,
+    ) -> Result<T, Error>
+    where
+        M: Writable,
+        R: Requirement<P>,
+        E: Into<Error>,
+        F: for<'c> AsyncFn(&'c mut DB::Connection) -> Result<T, E>,
+    {
+        requirement.check(&self.principal)?;
+        let statement = self.begin(false, isolation)?;
+        self.attempt(&f, || {
+            self.db
+                .primary()
+                .begin_with(AssertSqlSafe(statement.clone()))
+        })
+        .await
+    }
+
+    /// Run `f` in a transaction from `open`, retrying a transient conflict.
+    ///
+    /// The requirement is checked by the caller, once: a permission cannot change between
+    /// attempts, and re-checking it would only make the 403 arrive later.
+    async fn attempt<T, E, F, O, Fut>(&self, f: &F, open: O) -> Result<T, Error>
+    where
+        E: Into<Error>,
+        F: for<'c> AsyncFn(&'c mut DB::Connection) -> Result<T, E>,
+        O: Fn() -> Fut,
+        Fut: Future<Output = Result<Transaction<'static, DB>, sqlx::Error>>,
+    {
+        let mut attempts_left = self.db.conflict_retries();
+        loop {
+            let error = match run(open().await?, f).await {
+                Ok(value) => return Ok(value),
+                Err(e) => e,
+            };
+            if attempts_left == 0 || !error.is_transient_conflict() {
+                return Err(error);
+            }
+            attempts_left -= 1;
+            tracing::debug!(
+                attempts_left,
+                error = &error as &dyn std::error::Error,
+                "transaction conflicted, retrying"
+            );
+        }
+    }
+
+    /// The settings this store publishes to every transaction it opens.
+    pub fn settings(&self) -> &TransactionSettings {
+        &self.settings
+    }
+
+    /// The `BEGIN`, plus this store's transaction settings, as one statement.
+    ///
+    /// `AssertSqlSafe` is the audit sqlx asks for, and this is where it is owed: the statement
+    /// is built by [`Dialect::begin_statement`] from a checked `&'static str` name and a
+    /// [`Literal`](crate::db::settings::Literal) whose text form cannot contain a quote, never
+    /// from request data. `SET LOCAL` accepts no bind parameters, so there is no alternative to
+    /// interpolation — only the choice of what may be interpolated.
+    fn begin(&self, read_only: bool, isolation: Isolation) -> Result<Cow<'static, str>, Error> {
+        DB::begin_statement(read_only, isolation, &self.settings)
     }
 }
 
@@ -117,6 +256,7 @@ impl<M: Mode, P: std::fmt::Debug, DB: Database> std::fmt::Debug for Store<M, P, 
         f.debug_struct("Store")
             .field("mode", &std::any::type_name::<M>())
             .field("principal", &self.principal)
+            .field("settings", &self.settings)
             .field("db", &self.db)
             .finish()
     }

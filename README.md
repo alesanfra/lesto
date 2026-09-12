@@ -20,7 +20,12 @@ A Rust web micro-framework with **FastAPI**'s ergonomics, built on [axum](https:
   `NoteStore<ReadWrite, User>` is a store that opens one transaction per method, derives the
   principal from the token through a single `Authenticated` impl, and checks string permissions
   (`"notes:write"`) before each query. Read-only stores, `Public` principals and permission checks
-  are enforced by the compiler where possible.
+  are enforced by the compiler where possible. For Postgres row level security, a principal's
+  `transaction_settings` publish its identity (`SET LOCAL app.user_id = ...`) in the same round
+  trip as the `BEGIN`, so a policy can read it and the query needs no `WHERE` of its own.
+  `read_with` / `write_with` take an `Isolation` (`Snapshot`, `Serializable`) for the methods
+  whose check has to hold until commit, and retry a conflict before answering 409 with
+  `Retry-After` instead of 500.
 - **AWS Lambda** with the `lambda` feature: `lesto::lambda::serve(app)` runs the
   Lambda runtime inside Lambda (API Gateway REST and HTTP APIs, Function URLs, ALB) and a plain
   server anywhere else; REST stages are stripped, docs pages work behind them, and
@@ -201,7 +206,8 @@ with a `WWW-Authenticate` header. See the tutorial's [Security](docs/tutorial/09
 ## Layout
 
 - `crates/lesto/` — the library: `App`, extractors, errors, OpenAPI model, `OperationInput`/`OperationOutput` traits;
-  `lesto::db` (feature `db`): `Store<M, P, DB>`, `Authenticated`, `Public`, `lesto::db::Error`;
+  `lesto::db` (feature `db`): `Store<M, P, DB>`, `Authenticated`, `Public`, `TransactionSettings`,
+  `Isolation`, `lesto::db::Error`;
   `lesto::lambda` (feature `lambda`): `serve`, `Options`, `test::invoke`.
 - `crates/lesto-macros/` — `#[lesto::get(...)]` attributes and friends, `#[lesto::views]`, `#[derive(Store)]`.
 - `crates/lesto-cli/` — the `lesto` command: `dev` (watch, rebuild, restart with the socket kept open), `run`.

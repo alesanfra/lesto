@@ -41,6 +41,7 @@ proc-macro2 = "1"
 sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio"] }
 tracing = "0.1"
 anyhow = "1"
+uuid = { version = "1", default-features = false }
 
 # Intra-workspace dependency: `version` is required to publish, `path` to build from a checkout.
 lesto-macros = { path = "crates/lesto-macros", version = "0.1.0" }

@@ -3,7 +3,7 @@
 use std::fmt;
 
 use crate::axum::response::{IntoResponse, Response};
-use crate::http::StatusCode;
+use crate::http::{StatusCode, header};
 use crate::{HttpError, OperationBuilder, OperationOutput};
 use sqlx::error::ErrorKind;
 
@@ -56,11 +56,28 @@ impl Error {
         Error::Http(HttpError::conflict(detail))
     }
 
+    /// Did the transaction simply lose a race — a serialization failure, a deadlock, or
+    /// SQLite's `SQLITE_BUSY`?
+    ///
+    /// `true` means re-running the same closure is a sensible thing to do, and is what
+    /// [`Store::read_with`](crate::db::Store::read_with) and
+    /// [`write_with`](crate::db::Store::write_with) check before retrying. Lock *timeouts* are
+    /// deliberately not in this set: a retry does not fix one.
+    pub fn is_transient_conflict(&self) -> bool {
+        match self {
+            Error::Sqlx(sqlx::Error::Database(db)) => is_transient_conflict(&**db),
+            _ => false,
+        }
+    }
+
     /// The HTTP status this error answers with.
     pub fn status(&self) -> StatusCode {
         match self {
             Error::Forbidden { .. } => StatusCode::FORBIDDEN,
             Error::Sqlx(sqlx::Error::RowNotFound) => StatusCode::NOT_FOUND,
+            Error::Sqlx(sqlx::Error::Database(db)) if is_transient_conflict(&**db) => {
+                StatusCode::CONFLICT
+            }
             Error::Sqlx(sqlx::Error::Database(db)) => match db.kind() {
                 ErrorKind::UniqueViolation | ErrorKind::ForeignKeyViolation => StatusCode::CONFLICT,
                 _ => StatusCode::INTERNAL_SERVER_ERROR,
@@ -78,6 +95,18 @@ impl Error {
                     .with_extension("required_permission", permission)
             }
             Error::Sqlx(sqlx::Error::RowNotFound) => HttpError::not_found("Not found"),
+            Error::Sqlx(sqlx::Error::Database(db)) if is_transient_conflict(&*db) => {
+                // Not logged as an error: under `Isolation::Serializable` this is the database
+                // doing its job, and the answer tells the client what to do about it.
+                tracing::debug!(
+                    code = db.code().as_deref(),
+                    "transaction conflicted; answering 409"
+                );
+                HttpError::conflict("Conflicting concurrent change, retry the request")
+                    // Delta-seconds 0: the conflict is instantaneous, so retrying at once is
+                    // the right thing — there is nothing to wait for.
+                    .with_header(header::RETRY_AFTER, "0")
+            }
             Error::Sqlx(sqlx::Error::Database(db)) => match db.kind() {
                 ErrorKind::UniqueViolation => HttpError::conflict("Already exists"),
                 ErrorKind::ForeignKeyViolation => {
@@ -89,6 +118,32 @@ impl Error {
             Error::Internal(e) => internal(&*e),
             Error::Http(e) => e,
         }
+    }
+}
+
+/// A conflict the client can simply retry: the transaction lost a race, and nothing about the
+/// request itself was wrong.
+///
+/// Covered: `40001` serialization failure (Postgres, and where MySQL maps `ER_LOCK_DEADLOCK`),
+/// `40P01` deadlock detected (Postgres), and SQLite's `SQLITE_BUSY` family.
+///
+/// **Not** covered: lock wait timeouts (MySQL `ER_LOCK_WAIT_TIMEOUT`, Postgres `55P03`). Those
+/// mean somebody held a lock too long, which a retry does not fix and which should be looked
+/// at, so they stay 500s.
+fn is_transient_conflict(db: &dyn sqlx::error::DatabaseError) -> bool {
+    let Some(code) = db.code() else {
+        return false;
+    };
+    match code.as_ref() {
+        "40001" | "40P01" => true,
+        // SQLite reports the *extended* result code as a number: the low byte is the primary
+        // code and `SQLITE_BUSY` is 5, so 5, 261 (`_RECOVERY`), 517 (`_SNAPSHOT`) and 773
+        // (`_TIMEOUT`) all qualify, as would a future one. Bounded below 10000 because a
+        // Postgres or MySQL SQLSTATE is five characters and an all-digit one could otherwise
+        // land on the same remainder by accident; every SQLite code is far smaller.
+        other => other
+            .parse::<i32>()
+            .is_ok_and(|code| code < 10_000 && code % 256 == 5),
     }
 }
 
