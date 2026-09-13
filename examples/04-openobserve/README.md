@@ -62,11 +62,12 @@ Open <http://localhost:5080>, log in with the credentials above, and go to **Tra
 
 ```
 GET /notes                    http.route=/notes, http.response.status_code=200
-└── BEGIN DEFERRED            db.system.name=sqlite, db.operation.name=BEGIN DEFERRED
+└── NoteStore::list           db.system.name=sqlite
 ```
 
-`GET /boom` has `error.type=500` on the request span, and `GET /broken` has the SQLite error code
-on the store span.
+The child span is named after the store method that opened the transaction. `GET /boom` has
+`error.type=500` on the request span, and `GET /broken` has the SQLite error code (`1`) on its
+store span, named `openobserve::broken` because the closure lives in the handler itself.
 
 **Logs** are in the `default` stream under **Logs**, one record per `tracing` event, each with the
 `trace_id` and `span_id` of the request it happened in:

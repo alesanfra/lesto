@@ -25,14 +25,12 @@ impl FromRef<AppState> for Db<Sqlite> {
 
 // ---- the store --------------------------------------------------------------------------------
 
-#[derive(Serialize, JsonSchema, sqlx::FromRow)]
+#[lesto::views(Create(text))]
+#[derive(Serialize, Deserialize, JsonSchema, sqlx::FromRow, Validate)]
 struct Note {
+    #[garde(skip)]
     id: i64,
-    text: String,
-}
 
-#[derive(Deserialize, JsonSchema, Validate)]
-struct NoteCreate {
     #[garde(length(min = 1, max = 280))]
     text: String,
 }

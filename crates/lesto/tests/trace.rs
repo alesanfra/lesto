@@ -425,10 +425,15 @@ async fn a_read_is_a_client_span_under_the_request_span() {
     let (_, span) = capture.only("db.client.operation");
     span.assert_field("otel.kind", "client");
     span.assert_field("db.system.name", "sqlite");
-    // SQLite has no read-only transaction, so a read opens a deferred one.
-    span.assert_field("otel.name", "BEGIN DEFERRED");
-    span.assert_field("db.operation.name", "BEGIN DEFERRED");
+    // The store method that opened the transaction, not the statement it opened it with.
+    span.assert_field("otel.name", "Notes::count");
     assert_eq!(span.field("error.type"), None);
+    assert_eq!(
+        span.fields.len(),
+        3,
+        "a successful transaction records three fields, no more: {:?}",
+        span.fields
+    );
     assert_eq!(
         span.parent,
         Some(request_id),
@@ -437,7 +442,7 @@ async fn a_read_is_a_client_span_under_the_request_span() {
 }
 
 #[tokio::test]
-async fn a_write_names_the_statement_it_opens() {
+async fn a_write_is_named_after_its_method_too() {
     let router = notes_app().await;
     let (capture, _guard) = Capture::install();
     let request = Request::builder()
@@ -448,8 +453,7 @@ async fn a_write_names_the_statement_it_opens() {
     assert_eq!(call(router, request).await, StatusCode::CREATED);
 
     let (_, span) = capture.only("db.client.operation");
-    span.assert_field("otel.name", "BEGIN");
-    span.assert_field("db.operation.name", "BEGIN");
+    span.assert_field("otel.name", "Notes::add");
 }
 
 #[tokio::test]
@@ -462,6 +466,7 @@ async fn a_failed_transaction_records_the_database_code() {
     );
 
     let (_, span) = capture.only("db.client.operation");
+    span.assert_field("otel.name", "Notes::broken");
     span.assert_field("otel.status_code", "ERROR");
     // SQLite reports `SQLITE_ERROR` (1) for a query that does not compile.
     span.assert_field("error.type", "1");

@@ -209,11 +209,20 @@ Recorded here because they are not derivable from the code. Do not undo them cas
   last in `into_router` still wraps the panic catcher and the problem rewriting, so the span
   sees the status the client sees. `url.query` and the `X-Forwarded-*` headers are opt-in:
   the first is application data, the second is client-controlled unless a proxy rewrites it.
-- **Store spans cover the transaction, not the statements.** One `CLIENT` span from `BEGIN` to
-  commit/rollback, named after the statement the dialect opens with (`db.operation.name`), with
-  no `db.query.text`: lesto's own statement carries the principal's identity through
-  `SET LOCAL`, and the queries belong to the closure. A failed requirement gets no span, because
-  a 403 never reaches the database. Per-statement spans are sqlx's business.
+- **Store spans cover the transaction, not the statements, and are named after the store
+  method.** One `CLIENT` span from `BEGIN` to commit/rollback, named `NoteStore::list` — read
+  from `std::any::type_name` of the closure, which the compiler spells with the path of the
+  function it was written in (`db::trace::operation_of`, falling back to `read`/`write`).
+  `BEGIN DEFERRED` as a name told nobody what ran. Three fields on success (`otel.name`,
+  `otel.kind`, `db.system.name`): no `db.operation.name`, which the conventions require only
+  when readily available and lesto does not see the statements, and no `db.query.text`, since
+  lesto's own statement carries the principal's identity through `SET LOCAL` and the queries
+  belong to the closure (`RUST_LOG=sqlx::query=debug` gives those, inside the span). A failed
+  requirement gets no span, because a 403 never reaches the database.
+- **The OpenTelemetry layer is configured to say less**: `with_location(false)`,
+  `with_threads(false)`, `with_tracked_inactivity(false)`. Source file, line, module, thread id,
+  thread name and busy/idle timings are seven attributes per span repeating what the span name
+  already says, on every span of every request.
 - **`lesto::lambda` wraps `lambda_http`, it does not reimplement it.** The official runtime already
   turns API Gateway v1/v2, Function URL and ALB events into `http::Request`s and accepts any
   tower service, so the crate adds only what lesto users need: the Lambda-or-local switch on

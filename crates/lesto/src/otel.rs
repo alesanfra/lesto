@@ -219,7 +219,14 @@ fn install(config: Config) -> Telemetry {
             .with(tracing_subscriber::EnvFilter::new(config.filter.clone()))
             .with(tracing_subscriber::fmt::layer())
             .with(traces.as_ref().map(|provider| {
-                tracing_opentelemetry::layer().with_tracer(provider.tracer("lesto"))
+                tracing_opentelemetry::layer()
+                    .with_tracer(provider.tracer("lesto"))
+                    // Off: the source file, line and module of every span, the thread that
+                    // polled it, and its busy/idle timings. Seven attributes per span that say
+                    // nothing the span name does not, on every span of every request.
+                    .with_location(false)
+                    .with_threads(false)
+                    .with_tracked_inactivity(false)
             }))
             .with(logs.as_ref().map(|provider| {
                 OpenTelemetryTracingBridge::new(provider).with_filter(no_feedback())

@@ -129,13 +129,21 @@ the transaction, as a child of the request span:
 
 ```
 GET /notes
-└── BEGIN DEFERRED
+└── NoteStore::list
       otel.kind            "client"
       db.system.name       "sqlite"
-      db.operation.name    "BEGIN DEFERRED"    the statement the transaction opens with
       error.type           on failure: "23505", "1", "Forbidden", ...
-      db.response.status_code  the database's own code
+      db.response.status_code  the database's own code, on failure
 ```
+
+The span is named after the **store method that opened the transaction**, which is what a trace
+view has to show — `BEGIN` is a statement, not an operation. lesto reads the name from the type
+of the closure you passed, which the compiler spells with the path of the function it was
+written in; a closure built elsewhere and handed in falls back to `read` or `write`.
+
+Three fields on success, and no more: a span with twenty attributes is a span nobody reads.
+There is no `db.operation.name` (the conventions ask for it only when it is readily available,
+and lesto does not see your statements) and no `db.query.text`.
 
 The span starts at the `BEGIN` and ends at the commit or the rollback, so its duration is the
 time the request really spent holding a transaction — including the retries `read_with` and
@@ -143,9 +151,9 @@ time the request really spent holding a transaction — including the retries `r
 
 A requirement that fails has no span at all: a `403` never reaches the database.
 
-lesto records no `db.query.text`. The statement it builds carries the principal's
-`transaction_settings` (an identity), and the queries themselves live in your closure, which
-lesto never sees. Per-statement spans are sqlx's business.
+The statement lesto builds carries the principal's `transaction_settings`, which is identity
+data, so it is never recorded. The queries are yours: `RUST_LOG=sqlx::query=debug` puts each one,
+with its timing, inside the span of the method that ran it.
 
 ## Configuring what is recorded
 

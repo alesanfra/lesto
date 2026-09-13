@@ -90,14 +90,17 @@ impl<M: Mode, P, DB: Dialect> Store<M, P, DB> {
         // Not `read_with(.., Isolation::Default, ..)`: that one may run `f` twice and so takes
         // an `AsyncFn`, which is a bound the common case should not have to satisfy. At the
         // database's own isolation there is no conflict to retry anyway.
-        trace::traced(trace::transaction_span::<DB>(true), async move {
-            let tx = self
-                .db
-                .reads()
-                .begin_with(AssertSqlSafe(self.begin(true, Isolation::Default)?))
-                .await?;
-            run(tx, f).await
-        })
+        trace::traced(
+            trace::transaction_span::<DB>(&trace::operation_of::<F>("read")),
+            async move {
+                let tx = self
+                    .db
+                    .reads()
+                    .begin_with(AssertSqlSafe(self.begin(true, Isolation::Default)?))
+                    .await?;
+                run(tx, f).await
+            },
+        )
         .await
     }
 
@@ -124,7 +127,7 @@ impl<M: Mode, P, DB: Dialect> Store<M, P, DB> {
         requirement.check(&self.principal)?;
         let statement = self.begin(true, isolation)?;
         trace::traced(
-            trace::transaction_span::<DB>(true),
+            trace::transaction_span::<DB>(&trace::operation_of::<F>("read")),
             self.attempt(&f, || {
                 self.db.reads().begin_with(AssertSqlSafe(statement.clone()))
             }),
@@ -149,14 +152,17 @@ impl<M: Mode, P, DB: Dialect> Store<M, P, DB> {
     {
         requirement.check(&self.principal)?;
         // `AsyncFnOnce`, and no retry: see `read`.
-        trace::traced(trace::transaction_span::<DB>(false), async move {
-            let tx = self
-                .db
-                .primary()
-                .begin_with(AssertSqlSafe(self.begin(false, Isolation::Default)?))
-                .await?;
-            run(tx, f).await
-        })
+        trace::traced(
+            trace::transaction_span::<DB>(&trace::operation_of::<F>("write")),
+            async move {
+                let tx = self
+                    .db
+                    .primary()
+                    .begin_with(AssertSqlSafe(self.begin(false, Isolation::Default)?))
+                    .await?;
+                run(tx, f).await
+            },
+        )
         .await
     }
 
@@ -184,7 +190,7 @@ impl<M: Mode, P, DB: Dialect> Store<M, P, DB> {
         requirement.check(&self.principal)?;
         let statement = self.begin(false, isolation)?;
         trace::traced(
-            trace::transaction_span::<DB>(false),
+            trace::transaction_span::<DB>(&trace::operation_of::<F>("write")),
             self.attempt(&f, || {
                 self.db
                     .primary()
