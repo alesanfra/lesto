@@ -28,7 +28,7 @@ Replace `src/main.rs`:
 use lesto::prelude::*;
 
 /// Greets the world.
-#[lesto::get("/")]
+#[lesto::get("/hello")]
 async fn root() -> &'static str {
     "Hello, lesto!"
 }
@@ -58,7 +58,7 @@ the reload.
 In another terminal:
 
 ```sh
-curl http://127.0.0.1:8000/
+curl http://127.0.0.1:8000/hello
 ```
 
 ```
@@ -72,7 +72,7 @@ Line by line:
 - `use lesto::prelude::*` imports everything a route file normally needs: `App`, `routes!`, the
   extractors (`Json`, `Query`, `Path`, `State`), `HttpError` and the serde, garde and schemars
   derives.
-- `#[lesto::get("/")]` declares a `GET /` route. There are also `post`, `put`, `patch`,
+- `#[lesto::get("/hello")]` declares a `GET /hello` route. There are also `post`, `put`, `patch`,
   `delete`, `head`, `options`.
 - `/// Greets the world.` is not just a comment: it becomes the operation's *summary* in the
   documentation. A following paragraph, separated by a blank line, becomes the *description*
@@ -90,8 +90,8 @@ Line by line:
 ## Automatic documentation
 
 Open <http://127.0.0.1:8000/docs>: that is the **Scalar** API reference, generated from the code
-you just wrote. You will see `GET /` with the summary "Greets the world." and a `200` response of
-type `text/plain`.
+you just wrote. You will see `GET /hello` with the summary "Greets the world." and a `200` 
+response of type `text/plain`.
 
 Open <http://127.0.0.1:8000/swagger>: the same documentation with the classic **Swagger UI**.
 
@@ -105,10 +105,10 @@ when two modules have a `list` function; `operation_id = "..."` in the attribute
   "openapi": "3.1.0",
   "info": { "title": "Hello API", "version": "0.1.0" },
   "paths": {
-    "/": {
+    "/hello": {
       "get": {
         "summary": "Greets the world.",
-        "operationId": "root__get",
+        "operationId": "hello_hello_get",
         "responses": {
           "200": {
             "description": "OK",
