@@ -1,0 +1,33 @@
+# Two backends to send this example's telemetry to. Start the one you want:
+#
+#   docker compose up -d jaeger        # traces only, nothing to log into
+#   docker compose up -d openobserve   # traces and logs, http://localhost:5080
+#
+# Both can run at the same time (their ports do not overlap); the application talks to whichever
+# one `OTEL_EXPORTER_OTLP_ENDPOINT` points at. See README.md.
+services:
+  # Traces only. No account, no credentials: open the UI and look.
+  jaeger:
+    image: jaegertracing/jaeger:latest
+    container_name: lesto-jaeger
+    ports:
+      - "127.0.0.1:16686:16686" # UI
+      - "127.0.0.1:4318:4318" # OTLP over HTTP, which is what lesto exports
+
+  # Traces and logs, in one binary with a UI and a search API.
+  #
+  # The credentials are a demo pair on a port bound to localhost — do not reuse them anywhere.
+  openobserve:
+    image: public.ecr.aws/zinclabs/openobserve:latest
+    container_name: lesto-openobserve
+    ports:
+      - "127.0.0.1:5080:5080" # UI and OTLP ingestion on the same port
+    environment:
+      ZO_ROOT_USER_EMAIL: root@example.com
+      ZO_ROOT_USER_PASSWORD: Complexpass#123
+      ZO_DATA_DIR: /data
+    volumes:
+      - openobserve-data:/data
+
+volumes:
+  openobserve-data:

@@ -1,40 +1,61 @@
-# 04 — traces and logs in OpenObserve
+# 04 — OpenTelemetry: traces and logs
 
 An unauthenticated API with no telemetry code at all: `lesto` is built with the `otel` feature,
 the environment says where the collector is, and `App::serve` sets everything up — console logs,
-OTLP export of **traces and logs**, a flush on shutdown.
+OTLP export, a flush on shutdown. `main` only builds the app and calls `serve()`.
 
-[OpenObserve](https://openobserve.ai/) is a single binary that ingests OTLP traces and logs and
-shows them; it runs here in Docker, on `localhost` only.
+`compose.yaml` has two backends to send it to. Pick one:
 
-## 1. Start OpenObserve
+| | [Jaeger](https://www.jaegertracing.io/) | [OpenObserve](https://openobserve.ai/) |
+|---|---|---|
+| signals | traces | traces **and** logs |
+| setup | none: open the UI | log in, demo credentials |
+| OTLP endpoint | `http://localhost:4318` | `http://localhost:5080/api/default` |
+| authentication | none | `Authorization: Basic …` |
+| UI | <http://localhost:16686> | <http://localhost:5080> |
+
+Both can run at the same time; their ports do not overlap.
+
+## Option A — Jaeger (traces, zero configuration)
 
 ```sh
-cd examples/04-openobserve
-docker compose up -d           # UI and OTLP ingestion on http://localhost:5080
+cd examples/04-opentelemetry
+docker compose up -d jaeger
+
+export OTEL_SERVICE_NAME=lesto-demo
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
+export OTEL_LOGS_EXPORTER=none          # Jaeger ingests traces only
+export LESTO_PORT=8000
+
+cargo run -p opentelemetry-example
 ```
 
-The demo credentials are in `compose.yaml`: `root@example.com` / `Complexpass#123`.
+`OTEL_LOGS_EXPORTER=none` matters: Jaeger answers `404` on `/v1/logs`, so without it every batch
+of log records fails. Traces are at <http://localhost:16686>, service `lesto-demo`.
 
-## 2. Run the API
+## Option B — OpenObserve (traces and logs)
 
 ```sh
+cd examples/04-opentelemetry
+docker compose up -d openobserve
+
 export OTEL_SERVICE_NAME=lesto-demo
 export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:5080/api/default
 export OTEL_EXPORTER_OTLP_HEADERS="Authorization=Basic cm9vdEBleGFtcGxlLmNvbTpDb21wbGV4cGFzcyMxMjM="
 export LESTO_PORT=8000
 
-cargo run -p openobserve
+cargo run -p opentelemetry-example
 ```
 
-The `Authorization` value is `base64("root@example.com:Complexpass#123")`; with other
-credentials, rebuild it with `printf 'email:password' | base64`. OpenObserve ingests OTLP over
-HTTP at `<endpoint>/v1/traces` and `<endpoint>/v1/logs`, which the exporters append on their
-own, and `default` in the endpoint is the organization.
+The `Authorization` value is `base64("root@example.com:Complexpass#123")`, the credentials in
+`compose.yaml`; with others, rebuild it with `printf 'email:password' | base64`. `default` in the
+endpoint is the organization, and the exporters append `/v1/traces` and `/v1/logs` themselves.
+The UI is at <http://localhost:5080>, same credentials.
 
-That is the whole configuration. `main` only builds the app and calls `serve()`.
+`./verify.sh` checks this option from the command line: it sends a few requests and asks
+OpenObserve for the spans and the log records it received.
 
-## 3. Make some telemetry
+## Make some telemetry
 
 ```sh
 curl localhost:8000/hello
@@ -55,10 +76,9 @@ curl localhost:8000/notes \
 The request span becomes a child of that trace instead of starting a new one — that is what the
 `otel` feature adds on top of the spans themselves.
 
-## 4. Look at them
+## What you should see
 
-Open <http://localhost:5080>, log in with the credentials above, and go to **Traces**, stream
-`default`. A `GET /notes` trace has two spans:
+A `GET /notes` trace has two spans:
 
 ```
 GET /notes                    http.route=/notes, http.response.status_code=200
@@ -67,20 +87,18 @@ GET /notes                    http.route=/notes, http.response.status_code=200
 
 The child span is named after the store method that opened the transaction. `GET /boom` has
 `error.type=500` on the request span, and `GET /broken` has the SQLite error code (`1`) on its
-store span, named `openobserve::broken` because the closure lives in the handler itself.
+store span, named `opentelemetry_example::broken` because that closure lives in the handler
+itself.
 
-**Logs** are in the `default` stream under **Logs**, one record per `tracing` event, each with the
-`trace_id` and `span_id` of the request it happened in:
+With OpenObserve, **logs** are in the `default` stream under **Logs**, one record per `tracing`
+event, each carrying the `trace_id` and `span_id` of the request it happened in:
 
-| body | severity | trace_id |
+| body | severity | trace |
 |---|---|---|
 | `creating a note` | INFO | the `POST /notes` trace |
 | `store method failed` | ERROR | the `GET /broken` trace, with `exception_message` |
 
-`./verify.sh` does the same check from the command line: it sends a few requests and asks
-OpenObserve for the spans and the log records it received.
-
-## 5. Stop
+## Stop
 
 ```sh
 docker compose down -v
@@ -93,7 +111,8 @@ docker compose down -v
 - `OTEL_SDK_DISABLED=true` keeps the console and turns both exports off; `OTEL_TRACES_EXPORTER=none`
   and `OTEL_LOGS_EXPORTER=none` turn off one signal each.
 - `RUST_LOG` filters the console and the exported logs (`RUST_LOG=warn,lesto=info`); spans are
-  emitted at `INFO`.
+  emitted at `INFO`. `RUST_LOG=sqlx::query=debug` adds each SQL statement, with its timing,
+  inside the span of the store method that ran it.
 - The export is OTLP over HTTP/protobuf. For gRPC, or for a subscriber of your own, build the
   pipeline by hand — lesto stands aside as soon as a subscriber is installed (tutorial,
   chapter 15).

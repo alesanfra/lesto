@@ -67,9 +67,10 @@ examples/01-hello/        package `hello`: one route, the smallest app
 examples/02-notes/        package `notes`: full CRUD on SQLite with lesto::db, split into
                           lib.rs / state.rs / auth.rs / notes/{model,store,handlers}.rs, tests/api.rs
 examples/03-lambda/       package `lambda`: chapter 14 (lesto::lambda), in-memory notes, event-fixture test
-examples/04-openobserve/  package `openobserve`: chapter 15 end to end — compose.yaml with a local
-                          OpenObserve, an unauthenticated SQLite API, verify.sh (requests + a
-                          trace and a log search against the collector). Not run in CI: Docker
+examples/04-opentelemetry/ package `opentelemetry-example` (not `opentelemetry`: that is the API
+                          crate): chapter 15 end to end — compose.yaml with Jaeger (traces) and
+                          OpenObserve (traces + logs), an unauthenticated SQLite API, verify.sh
+                          (requests + a trace and a log search). Not run in CI: needs Docker
 examples/99-tutorial/     package `tutorial`: every tutorial snippet, compiled and tested (keep in sync)
 docs/tutorial/            the tutorial, mdBook (docs/book.toml, docs/build.sh → docs/book, gitignored)
 ```
@@ -88,7 +89,8 @@ cargo test -p lesto --test ui                 # after changing a diagnostic mess
 sh docs/build.sh                              # needs `cargo install mdbook`
 LESTO_PORT=8765 cargo run -p notes            # port 8000 may be taken on dev machines
 docker run --rm -e POSTGRES_PASSWORD=lesto -p 5432:5432 postgres:18   # for tests/db_postgres.rs
-(cd examples/04-openobserve && docker compose up -d && sh verify.sh)  # OTLP traces + logs end to end
+(cd examples/04-opentelemetry && docker compose up -d openobserve && sh verify.sh)  # OTLP end to end
+(cd examples/04-opentelemetry && docker compose up -d jaeger)        # traces only, OTEL_LOGS_EXPORTER=none
 LESTO_TEST_POSTGRES_URL=postgres://postgres:lesto@127.0.0.1:5432/postgres cargo test -p lesto --test db_postgres
 cargo run -p lesto-cli -- dev -p notes --port 8765      # lesto dev from this checkout
 ```

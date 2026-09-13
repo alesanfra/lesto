@@ -226,7 +226,7 @@ with a `WWW-Authenticate` header. See the tutorial's [Security](docs/tutorial/09
 - `crates/lesto-cli/` — the `lesto` command: `dev` (watch, rebuild, restart with the socket kept open), `run`.
 - `examples/01-hello/` — the smallest app. `examples/02-notes/` — full CRUD on SQLite with `lesto::db`,
   split into modules. `examples/03-lambda/` — the same kind of API on AWS Lambda.
-  `examples/04-openobserve/` — traces and logs in a local OpenObserve, `docker compose` included.
+  `examples/04-opentelemetry/` — traces and logs in a local Jaeger or OpenObserve, `docker compose` included.
   `examples/99-tutorial/` — every tutorial snippet, compiled and tested.
 - `docs/tutorial/` — the tutorial; `docs/build.sh` builds it as an mdBook site.
 

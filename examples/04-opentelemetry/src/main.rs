@@ -1,4 +1,4 @@
-//! A small, unauthenticated API whose traces end up in a local OpenObserve.
+//! A small, unauthenticated API whose traces and logs end up in a local Jaeger or OpenObserve.
 //!
 //! The interesting part is what is *not* here: no telemetry code. `lesto` is built with the
 //! `otel` feature, the environment says where the collector is, and `App::serve` does the rest
@@ -107,8 +107,8 @@ async fn broken(store: NoteStore<ReadOnly, Public>) -> Result<Json<i64>, Error> 
 
 fn build_app() -> App<AppState> {
     App::new()
-        .title("OpenObserve demo")
-        .description("Traces go to OpenObserve through the `OTEL_*` variables alone.")
+        .title("OpenTelemetry demo")
+        .description("Traces and logs leave through the `OTEL_*` variables alone.")
         .tag("notes", "Anonymous notes")
         .routes(routes![hello, list_notes, create_note, boom, broken])
 }

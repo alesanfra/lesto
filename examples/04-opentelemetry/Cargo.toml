@@ -1,10 +1,10 @@
 [package]
-name = "openobserve"
+name = "opentelemetry-example"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish = false
-description = "Chapter 15: an API whose spans go to a local OpenObserve, configured by environment variables only"
+description = "Chapter 15: an API whose traces and logs go to a local OpenObserve or Jaeger, configured by environment variables only"
 
 [dependencies]
 lesto = { path = "../../crates/lesto", features = ["otel", "sqlite"] }

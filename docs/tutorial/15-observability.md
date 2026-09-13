@@ -7,9 +7,9 @@ and every store transaction (chapter 13) inside a client span with the
 Nothing to add to a handler. With the `otel` feature, nothing to add to `main` either: the
 `OTEL_*` environment variables decide where the spans — and the log events — go.
 
-The runnable version of this chapter is `examples/04-openobserve`: an API plus a local
-[OpenObserve](https://openobserve.ai/) in Docker, where you can watch the traces and the logs
-arrive.
+The runnable version of this chapter is `examples/04-opentelemetry`: an API plus, in Docker,
+either [Jaeger](https://www.jaegertracing.io/) (traces, no configuration at all) or
+[OpenObserve](https://openobserve.ai/) (traces **and** logs), where you can watch them arrive.
 
 ## Sending traces and logs, in two lines of configuration
 
@@ -27,8 +27,15 @@ async fn main() -> std::io::Result<()> {
 
 ```sh
 export OTEL_SERVICE_NAME=notes
-export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318   # an OTLP collector, or Jaeger
 cargo run
+```
+
+A backend that takes traces but not logs (Jaeger answers `404` on `/v1/logs`) needs one more
+line, or every batch of log records fails:
+
+```sh
+export OTEL_LOGS_EXPORTER=none
 ```
 
 `App::serve` sees the endpoint, installs a subscriber that prints to the console **and** exports
@@ -213,7 +220,7 @@ or send to the OpenTelemetry Lambda layer, which does that for you.
 - An incoming `traceparent` continues the trace here.
 - `App::trace(Trace::new()...)` opts `url.query` in, trusts forwarding headers, or turns the
   span off.
-- `examples/04-openobserve` runs the whole thing against a local OpenObserve.
+- `examples/04-opentelemetry` runs the whole thing against a local Jaeger or OpenObserve.
 
 Appendices: [From FastAPI to lesto](A-from-fastapi-to-lesto.md), [Common problems](B-common-problems.md),
 [Why axum and not actix-web](C-why-axum.md).

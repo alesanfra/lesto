@@ -1,8 +1,9 @@
 #!/bin/sh
-# End-to-end check: send a few requests to the example and ask OpenObserve for the spans and
-# the log records it received.
+# End-to-end check of the OpenObserve option: send a few requests to the example and ask
+# OpenObserve for the spans and the log records it received.
 #
-#   docker compose up -d && cargo run -p openobserve   # in another terminal, see README.md
+#   docker compose up -d openobserve
+#   cargo run -p opentelemetry-example        # in another terminal, see README.md
 #   ./verify.sh
 set -eu
 
