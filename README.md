@@ -271,3 +271,11 @@ permissions as OpenAPI scopes, `--watch`/`--ignore` for `lesto dev`, exporting t
 
 Not planned: typed header/cookie parameters beyond API keys, forms and multipart, websockets,
 an ORM, hot patching without a restart.
+
+## License
+
+Licensed under the [Apache License, Version 2.0](LICENSE).
+
+Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in
+lesto by you, as defined in the Apache-2.0 license, shall be licensed as above, without any
+additional terms or conditions.
