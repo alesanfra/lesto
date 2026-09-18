@@ -563,10 +563,10 @@ fn inherited_listener() -> std::io::Result<Option<tokio::net::TcpListener>> {
     if fds == 0 {
         return Ok(None);
     }
-    if let Ok(pid) = std::env::var("LISTEN_PID") {
-        if pid.trim() != std::process::id().to_string() {
-            return Ok(None);
-        }
+    if let Ok(pid) = std::env::var("LISTEN_PID")
+        && pid.trim() != std::process::id().to_string()
+    {
+        return Ok(None);
     }
     if TAKEN.swap(true, Ordering::SeqCst) {
         return Ok(None);

@@ -153,16 +153,16 @@ impl Telemetry {
     }
 
     fn stop(&mut self) {
-        if let Some(provider) = self.traces.take() {
-            if let Err(error) = provider.shutdown() {
-                tracing::warn!(%error, "the span exporter did not shut down cleanly");
-            }
+        if let Some(provider) = self.traces.take()
+            && let Err(error) = provider.shutdown()
+        {
+            tracing::warn!(%error, "the span exporter did not shut down cleanly");
         }
-        if let Some(provider) = self.logs.take() {
-            if let Err(error) = provider.shutdown() {
-                // Printed, not logged: the log pipeline is the thing shutting down.
-                eprintln!("lesto: the log exporter did not shut down cleanly: {error}");
-            }
+        if let Some(provider) = self.logs.take()
+            && let Err(error) = provider.shutdown()
+        {
+            // Printed, not logged: the log pipeline is the thing shutting down.
+            eprintln!("lesto: the log exporter did not shut down cleanly: {error}");
         }
     }
 }

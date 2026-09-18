@@ -199,19 +199,18 @@ fn doc_parts(func: &ItemFn) -> (Option<String>, Option<String>) {
         if !attr.path().is_ident("doc") {
             continue;
         }
-        if let Meta::NameValue(nv) = &attr.meta {
-            if let Expr::Lit(ExprLit {
+        if let Meta::NameValue(nv) = &attr.meta
+            && let Expr::Lit(ExprLit {
                 lit: Lit::Str(s), ..
             }) = &nv.value
-            {
-                for line in s.value().split('\n') {
-                    lines.push(
-                        line.strip_prefix(' ')
-                            .unwrap_or(line)
-                            .trim_end()
-                            .to_string(),
-                    );
-                }
+        {
+            for line in s.value().split('\n') {
+                lines.push(
+                    line.strip_prefix(' ')
+                        .unwrap_or(line)
+                        .trim_end()
+                        .to_string(),
+                );
             }
         }
     }
@@ -580,20 +579,20 @@ fn optional_field_attrs(attrs: &[syn::Attribute]) -> Vec<syn::Attribute> {
     let mut out = Vec::new();
     let mut has_serde_default = false;
     for attr in view_field_attrs(attrs) {
-        if attr.path().is_ident("garde") {
-            if let Meta::List(list) = &attr.meta {
-                let is_skip = matches!(
-                    attr.parse_args::<Meta>(),
-                    Ok(Meta::Path(p)) if p.is_ident("skip")
-                );
-                if is_skip {
-                    out.push(attr.clone());
-                } else {
-                    let tokens = &list.tokens;
-                    out.push(syn::parse_quote! { #[garde(inner(#tokens))] });
-                }
-                continue;
+        if attr.path().is_ident("garde")
+            && let Meta::List(list) = &attr.meta
+        {
+            let is_skip = matches!(
+                attr.parse_args::<Meta>(),
+                Ok(Meta::Path(p)) if p.is_ident("skip")
+            );
+            if is_skip {
+                out.push(attr.clone());
+            } else {
+                let tokens = &list.tokens;
+                out.push(syn::parse_quote! { #[garde(inner(#tokens))] });
             }
+            continue;
         }
         if attr.path().is_ident("serde") && serde_has_default(&attr) {
             has_serde_default = true;

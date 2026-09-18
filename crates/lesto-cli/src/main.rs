@@ -169,13 +169,11 @@ fn dev(args: RunArgs) -> std::io::Result<ExitCode> {
                     return Err(std::io::Error::other("file watcher stopped"));
                 }
                 Err(RecvTimeoutError::Timeout) => {
-                    if let Some(c) = child.as_mut() {
-                        if let Some(status) = c.try_wait()? {
-                            eprintln!(
-                                "lesto: application exited ({status}), waiting for changes..."
-                            );
-                            child = None;
-                        }
+                    if let Some(c) = child.as_mut()
+                        && let Some(status) = c.try_wait()?
+                    {
+                        eprintln!("lesto: application exited ({status}), waiting for changes...");
+                        child = None;
                     }
                 }
             }
