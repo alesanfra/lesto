@@ -1,0 +1,19 @@
+[package]
+name = "routers"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Two APIs in one service, FastAPI-router style: /api/app/v1 and /api/analytics/v1"
+
+[dependencies]
+lesto = { path = "../../crates/lesto" }
+serde.workspace = true
+garde.workspace = true
+schemars.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+tower.workspace = true
+http-body-util.workspace = true

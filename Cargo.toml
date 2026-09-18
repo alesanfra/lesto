@@ -8,6 +8,7 @@ members = [
     "examples/02-notes",
     "examples/03-lambda",
     "examples/04-opentelemetry",
+    "examples/05-routers",
     "examples/99-tutorial",
 ]
 

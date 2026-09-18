@@ -30,7 +30,7 @@ Prerequisites: stable Rust (`rustup`), `curl` and a browser.
 Every snippet in this tutorial is compiled and tested in `examples/99-tutorial` (`cargo test -p tutorial`),
 so the documentation cannot drift from the API. The other examples grow with the chapters:
 `examples/01-hello` (chapter 1), `examples/02-notes` (a complete CRUD API, chapter 13),
-`examples/03-lambda` (chapter 14).
+`examples/03-lambda` (chapter 14), `examples/05-routers` (chapter 10).
 
 To read this tutorial as a website (sidebar, search, dark theme):
 `cargo install mdbook && mdbook serve docs --open`.

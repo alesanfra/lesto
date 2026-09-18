@@ -3,6 +3,11 @@
 A single `main.rs` is fine for a tutorial; a real API is split into modules. Here is a layout that
 works well.
 
+The runnable version of this chapter is `examples/05-routers`: a shop serving two APIs from one
+process, `/api/app/v1` (products and orders) and `/api/analytics/v1` (sales figures), each a
+module with its own `router()`, sharing one state and one OpenAPI document
+(`LESTO_PORT=8765 cargo run -p routers`, then open `/docs`).
+
 ```
 src/
 ├── main.rs          # builds the App, mounts the modules, starts

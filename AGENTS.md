@@ -71,6 +71,8 @@ examples/04-opentelemetry/ package `opentelemetry-example` (not `opentelemetry`:
                           crate): chapter 15 end to end — compose.yaml with Jaeger (traces) and
                           OpenObserve (traces + logs), an unauthenticated SQLite API, verify.sh
                           (requests + a trace and a log search). Not run in CI: needs Docker
+examples/05-routers/      package `routers`: chapter 10 as a running app, two APIs (`/api/app/v1`,
+                          `/api/analytics/v1`) as FastAPI-style routers mounted with `nest`, tests/api.rs
 examples/99-tutorial/     package `tutorial`: every tutorial snippet, compiled and tested (keep in sync)
 docs/tutorial/            the tutorial, mdBook (docs/book.toml, docs/build.sh → docs/book, gitignored)
 ```

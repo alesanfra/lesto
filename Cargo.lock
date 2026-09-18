@@ -1822,6 +1822,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "routers"
+version = "0.1.0"
+dependencies = [
+ "garde",
+ "http-body-util",
+ "lesto",
+ "schemars",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tower",
+]
+
+[[package]]
 name = "rustversion"
 version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
