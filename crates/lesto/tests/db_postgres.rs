@@ -388,7 +388,8 @@ async fn a_conflict_is_retried_until_it_succeeds() {
     let (_url, pool) = setup_or_skip!("lesto_rls_retry");
     let barrier = std::sync::Arc::new(tokio::sync::Barrier::new(2));
     // Every entry into a closure, retries included. Two conflicting transactions plus one
-    // retry is three.
+    // retry is three, at least: when the winner has not committed yet by the time the retry
+    // reads, the two conflict again and one more retry follows (seen on CI runners).
     let attempts = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
 
     let contend = |pool: Pool<Postgres>,
@@ -424,10 +425,10 @@ async fn a_conflict_is_retried_until_it_succeeds() {
     );
     assert!(first.is_ok(), "{first:?}");
     assert!(second.is_ok(), "{second:?}");
-    assert_eq!(
-        attempts.load(std::sync::atomic::Ordering::SeqCst),
-        3,
-        "two first attempts plus one retry"
+    let attempts = attempts.load(std::sync::atomic::Ordering::SeqCst);
+    assert!(
+        attempts >= 3,
+        "two first attempts plus at least one retry, got {attempts}"
     );
 
     // Both rows landed: the retry committed, it did not silently swallow the write.
