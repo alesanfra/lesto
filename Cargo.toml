@@ -51,3 +51,12 @@ lesto-macros = { path = "crates/lesto-macros", version = "0.1.0" }
 # Dependencies are compiled once, optimized; `lesto dev` rebuilds only touch workspace crates.
 [profile.dev.package."*"]
 opt-level = 3
+
+# CI builds everything once and runs it once: optimizing dependencies (above, for `lesto dev`)
+# and emitting debug info only cost build minutes there. `cargo test --profile ci`.
+[profile.ci]
+inherits = "dev"
+debug = false
+
+[profile.ci.package."*"]
+opt-level = 0

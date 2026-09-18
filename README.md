@@ -246,10 +246,10 @@ cargo run -p lesto-cli -- dev -p notes --port 8765   # the CLI from this checkou
 
 Features of `lesto`: `db` + `postgres`/`mysql`/`sqlite`, `lambda`, `otel`, `anyhow`. Tests always run with all of them.
 
-CI (`.github/workflows/ci.yml`) runs fmt, clippy with warnings denied, tests on Linux and macOS
-(stable) and on the MSRV (1.94), the PostgreSQL row level security tests against a `postgres:18`
-service, each feature of `lesto` alone (`cargo hack`), rustdoc with warnings denied, the mdBook
-build, and `cargo deny`.
+CI (`.github/workflows/ci.yml`) runs fmt, clippy and rustdoc with warnings denied, each feature of
+`lesto` alone (`cargo hack`), the mdBook build and `cargo deny`; the tests on stable, including the
+PostgreSQL row level security tests against a `postgres:18` service; and `cargo check` on the MSRV
+(1.94).
 
 ## Roadmap
 
