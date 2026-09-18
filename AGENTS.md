@@ -98,8 +98,10 @@ cargo run -p lesto-cli -- dev -p notes --port 8765      # lesto dev from this ch
 ```
 
 Test, clippy, fmt, rustdoc and (if docs changed) the mdBook build must pass before a change is
-done; `.github/workflows/ci.yml` runs the same on every push (tests on stable and on the MSRV,
-1.85). Do not claim success without running them. Gate commits on the test result, never on "it
+done; `.github/workflows/ci.yml` runs the same on every push and pull request (tests on Linux and
+macOS stable and on the MSRV, 1.94, which `sqlx` 0.9 dictates; `cargo hack --each-feature` for the
+features alone; `db_postgres` against a service container). When raising `rust-version`, change
+the MSRV entry of the test matrix too. Do not claim success without running them. Gate commits on the test result, never on "it
 should pass". Run `git grep -i presto` before committing: the old name must not come back.
 
 ## Conventions

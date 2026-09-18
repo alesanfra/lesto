@@ -235,7 +235,7 @@ Design decisions, internals and the roadmap are in [AGENTS.md](AGENTS.md).
 
 ## Development
 
-Rust 1.85 or newer (edition 2024).
+Rust 1.94 or newer (edition 2024; `sqlx` 0.9 sets the floor).
 
 ```sh
 cargo test --workspace
@@ -246,7 +246,10 @@ cargo run -p lesto-cli -- dev -p notes --port 8765   # the CLI from this checkou
 
 Features of `lesto`: `db` + `postgres`/`mysql`/`sqlite`, `lambda`, `otel`, `anyhow`. Tests always run with all of them.
 
-CI runs fmt, clippy, tests on stable and 1.85, rustdoc with warnings denied, and `cargo deny`.
+CI (`.github/workflows/ci.yml`) runs fmt, clippy with warnings denied, tests on Linux and macOS
+(stable) and on the MSRV (1.94), the PostgreSQL row level security tests against a `postgres:18`
+service, each feature of `lesto` alone (`cargo hack`), rustdoc with warnings denied, the mdBook
+build, and `cargo deny`.
 
 ## Roadmap
 
