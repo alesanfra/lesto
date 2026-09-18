@@ -1,16 +1,6 @@
 [workspace]
 resolver = "2"
-members = [
-    "crates/lesto",
-    "crates/lesto-macros",
-    "crates/lesto-cli",
-    "examples/01-hello",
-    "examples/02-notes",
-    "examples/03-lambda",
-    "examples/04-opentelemetry",
-    "examples/05-routers",
-    "examples/99-tutorial",
-]
+members = ["crates/*", "examples/*"]
 
 [workspace.package]
 version = "0.1.0"
