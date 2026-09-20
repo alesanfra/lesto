@@ -26,6 +26,9 @@ crates/lesto/             library
   src/error.rs            HttpError, ValidationError, Problem (RFC 9457), ErrorFormat
   src/openapi.rs          hand-written OpenAPI 3.1 model (serde)
   src/docs.rs             Scalar / Swagger UI HTML (relative openapi.json link)
+  src/layers.rs           the tower layers into_router installs, public: ProblemLayer (renders
+                          RFC 9457 through a task-local request context), CatchPanicLayer,
+                          RequestSpanLayer. Hand-written services, pin-projected futures
   src/trace.rs            request span (HTTP semconv), Trace config, feature `otel`: propagation
   src/otel.rs             feature `otel`: Config from the OTEL_* variables, init/init_named,
                           Telemetry guard (tracer + logger providers), auto_init called by
@@ -44,6 +47,7 @@ crates/lesto/             library
   src/lambda.rs           feature `lambda`: AWS Lambda adapter over lambda_http: serve (Lambda or
                           local), Options (keep_stage, a per-router request mapper), test::invoke
   tests/integration.rs    end-to-end tests via tower::ServiceExt::oneshot
+  benches/overhead.rs     per-request overhead against plain axum (harness = false, no dev-dep)
   tests/db.rs             SQLite in-memory end-to-end for lesto::db
   tests/db_postgres.rs    RLS end to end; skipped unless LESTO_TEST_POSTGRES_URL is set. Also the
                           compiled home of the chapter 13 row level security snippets, which
@@ -89,6 +93,8 @@ cargo check -p lesto --no-default-features --features db   # each feature alone 
 cargo check -p lesto --no-default-features --features otel
 cargo test -p lesto --test ui                 # after changing a diagnostic message, update tests/ui/*.expected
 sh docs/build.sh                              # needs `cargo install mdbook`
+cargo bench -p lesto                          # overhead vs axum; LESTO_BENCH_ITERS/_ROUNDS shrink it
+sh scripts/bench-http.sh                      # throughput over a socket (needs `oha`)
 LESTO_PORT=8765 cargo run -p notes            # port 8000 may be taken on dev machines
 docker run --rm -e POSTGRES_PASSWORD=lesto -p 5432:5432 postgres:18   # for tests/db_postgres.rs
 (cd examples/04-opentelemetry && docker compose up -d openobserve && sh verify.sh)  # OTLP end to end
@@ -193,7 +199,10 @@ Recorded here because they are not derivable from the code. Do not undo them cas
   nothing at all once the application has its own subscriber — that is the escape hatch for
   gRPC, samplers or a logs pipeline. Only lesto's own knobs are parsed (`Config::read`, taking a
   getter so tests never write to the environment); the endpoint, headers and timeout are read by
-  the exporter itself.
+  the exporter itself. Reading the incoming `traceparent` is gated on an `AtomicBool` that
+  `install` sets next to the propagator (`otel::enable_propagation` for an application with its
+  own subscriber): the API's default propagator is a no-op, and asking it per request buys a
+  lookup and a header walk for an answer that cannot change.
 - **OTLP over HTTP/protobuf with the *blocking* reqwest client.** The batch processor runs on a
   thread of its own with no tokio reactor, so an async client panics there with "there is no
   reactor running" — the blocking client is what that processor is built for. No TLS feature is
@@ -210,9 +219,9 @@ Recorded here because they are not derivable from the code. Do not undo them cas
   lesto installs no propagator: the API's default is a no-op and W3C, B3 and the rest live in
   different crates, so choosing one for the user would be wrong. `Trace` has no level knob —
   a `tracing` level must be a constant, and filtering is the subscriber's job.
-- **The trace middleware is outermost but inside routing.** `Router::layer` runs after axum
-  matched the request, which is what makes `MatchedPath` (`http.route`) available; putting it
-  last in `into_router` still wraps the panic catcher and the problem rewriting, so the span
+- **The trace layer is outermost but inside routing.** `Router::layer` runs after axum
+  matched the request, which is what makes `MatchedPath` (`http.route`) available; being the
+  outermost of the stack it still wraps the panic catcher and the problem rendering, so the span
   sees the status the client sees. `url.query` and the `X-Forwarded-*` headers are opt-in:
   the first is application data, the second is client-controlled unless a proxy rewrites it.
 - **Store spans cover the transaction, not the statements, and are named after the store
@@ -246,16 +255,29 @@ Recorded here because they are not derivable from the code. Do not undo them cas
   a `State<T>` argument or `state = T` the checks run immediately, on the argument's span. A
   missing attribute yields `expected type, found function`.
 - A nested `/` route is documented at the prefix itself (that is where axum serves it).
-- `HttpError::into_response` emits problem+json without `instance`; the middleware installed by
-  `into_router` adds it and, with `ErrorFormat::FastApi`, rewrites the body. `into_router` also
-  installs a `404` fallback (unless `App::fallback` was called), a `405`
-  `method_not_allowed_fallback`, and `CatchPanicLayer` (inside the `instance` middleware, so the
-  `500` gets its `instance` too). The panic catcher is hand-rolled (`catch_unwind` around
-  `poll`) to avoid a `tower-http` dependency.
+- **Problems are rendered once.** `ProblemLayer` publishes the request URI and the
+  `ErrorFormat` in a `tokio::task_local!` (`error::RENDER`); `Problem::into_response` reads it,
+  fills `instance`, serializes in that format and marks the response with the `ProblemRendered`
+  extension. A `problem+json` response *without* that marker — built by hand, or built where
+  the task-local is not visible, as in a spawned task — still takes the layer's slow path
+  (buffer, parse, rewrite), which is also what keeps `instance` working there.
+- `into_router` installs a `404` fallback (unless `App::fallback` was called), a `405`
+  `method_not_allowed_fallback`, and then **one** `Router::layer` call with
+  `tower_layer::Stack`: `RequestSpanLayer` outside `ProblemLayer` outside `CatchPanicLayer`.
+  One call, because axum re-boxes every route and its future on each `.layer(..)`; that is also
+  why `Trace::off()` no longer removes the span layer, it only takes a branch inside it.
+- The panic catcher stays hand-rolled (`catch_unwind` around `call` and around `poll`) because
+  `tower_http::catch_panic` returns `Response<UnsyncBoxBody<..>>`: it would re-box every
+  response body, and axum would wrap it in `Body` again — an allocation per request to save a
+  hundred lines.
 - `App::serve` → `serve_at` → `serve_on` → `serve_until(listener, shutdown)`;
   `shutdown_signal()` is `SIGTERM` or `Ctrl-C`. Graceful shutdown is `axum::serve(..)
   .with_graceful_shutdown`, nothing more.
-- `status = N` wraps the handler (`WithStatus`) and rewrites a `200` into `N` at runtime.
+- `status = N` wraps the handler (`WithStatus`) and rewrites a `200` into `N` at runtime, in a
+  pin-projected future around the handler's own — no boxing.
+- The docs routes (`/openapi.json`, `/docs`, `/swagger`) are built once into `Bytes` and carry
+  an `ETag` hashed once, so a response is a reference-count increment and a conditional request
+  is a `304`.
 - `App::serve()` binds `lesto::bind_address()`: `LESTO_HOST`/`LESTO_PORT`, `PORT` as fallback,
   default `127.0.0.1:8000`; `serve_at(addr)` is explicit. `lesto dev` sets `LESTO_HOST`,
   `LESTO_PORT` and `PORT` in the child.
@@ -292,6 +314,10 @@ Recorded here because they are not derivable from the code. Do not undo them cas
   `SET LOCAL` does, and a name suggesting session scope invites setting them per connection.
   They are read off the principal once, when the store is built, so `read`/`write` need no
   `P: PrincipalDocs` bound that every user's store `impl` block would have to repeat.
+- **The principal is authenticated once per request.** `Store::from_request_parts` caches it in
+  the request extensions as an `Arc<P>`, so a handler with two stores verifies one token;
+  `into_principal` therefore hands out the `Arc`. `Arc` rather than a `Clone` bound on
+  `Authenticated`, which every user's principal would have to carry. Failures are not cached.
 - **`Isolation` is a value, not a type parameter**, because it changes what the database does,
   not which methods compile (unlike `Mode`). It sits on `read_with`/`write_with` rather than as
   a fourth argument to `read`/`write`, so the common case pays nothing. Named `Isolation` even

@@ -91,6 +91,32 @@ panic catcher (`500`) and the error middleware, then gives you back an ordinary 
 you can pass it to `axum::serve`, merge it with other routers, or serve it over TLS with
 `axum-server`.
 
+### Keeping lesto's behavior on a plain router
+
+The three layers `into_router` installs are public, so a router that is not built by lesto at
+all can have them:
+
+```rust
+use lesto::layers::{CatchPanicLayer, ProblemLayer, RequestSpanLayer};
+
+let router = lesto::axum::Router::new()
+    .route("/legacy", lesto::axum::routing::get(legacy_handler))
+    .layer(CatchPanicLayer)
+    .layer(ProblemLayer::new())
+    .layer(RequestSpanLayer::new());
+```
+
+- `ProblemLayer` gives every RFC 9457 response its `instance` (the request path) and writes it
+  in the format you chose — `ProblemLayer::format(ErrorFormat::FastApi)` for FastAPI's shape.
+- `CatchPanicLayer` turns a panic into a `500` problem.
+- `RequestSpanLayer` opens the request span of chapter 15. `RequestSpanLayer::with(Trace::off())`
+  is the same layer with the span switched off.
+
+The order above is the one lesto uses: the last layer added is the outermost, so the span sees
+the status the client sees, and the panic `500` still gets its `instance`. Inside `into_router`
+the three are stacked and added in a single `.layer(...)` call, because each call makes axum
+re-box every route.
+
 ## Shutdown and panics
 
 `App::serve` (and `serve_at`, `serve_on`) already stops gracefully on `SIGTERM` or `Ctrl-C`:
@@ -137,5 +163,6 @@ For an axum or third-party extractor lesto does not know, implement `OperationIn
 - Graceful shutdown and panic-to-500 are built in; `serve_until` for a custom shutdown trigger.
 - `middleware::from_fn` for ad hoc middleware; they can return `HttpError`.
 - `map_router` and `into_router` for everything that is pure axum.
+- `lesto::layers` if you leave lesto but want the problems, the panic catcher or the span.
 
 Next: [Testing](12-testing.md).

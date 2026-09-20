@@ -221,7 +221,9 @@ with a `WWW-Authenticate` header. See the tutorial's [Security](docs/tutorial/09
   `Isolation`, `lesto::db::Error`;
   `lesto::lambda` (feature `lambda`): `serve`, `Options`, `test::invoke`;
   `lesto::trace`: the request span and `Trace`; `lesto::otel` (feature `otel`): OTLP export of
-  traces and logs plus trace context propagation, configured by the `OTEL_*` variables.
+  traces and logs plus trace context propagation, configured by the `OTEL_*` variables;
+  `lesto::layers`: the tower layers `into_router` installs (`ProblemLayer`, `CatchPanicLayer`,
+  `RequestSpanLayer`), usable on a plain `axum::Router`.
 - `crates/lesto-macros/` — `#[lesto::get(...)]` attributes and friends, `#[lesto::views]`, `#[derive(Store)]`.
 - `crates/lesto-cli/` — the `lesto` command: `dev` (watch, rebuild, restart with the socket kept open), `run`.
 - `examples/01-hello/` — the smallest app. `examples/02-notes/` — full CRUD on SQLite with `lesto::db`,
@@ -233,6 +235,28 @@ with a `WWW-Authenticate` header. See the tutorial's [Security](docs/tutorial/09
 
 Design decisions, internals and the roadmap are in [AGENTS.md](AGENTS.md).
 
+## Performance
+
+What lesto costs over the `axum::Router` it builds on, per request, measured through
+`tower::Service` calls with no networking (`crates/lesto/benches/overhead.rs`, `cargo bench -p
+lesto`; an Apple laptop, best of five rounds of 200,000 requests):
+
+| Request | axum 0.8 | lesto |
+|---|---:|---:|
+| `GET /hello` | 616 ns | 911 ns |
+| `POST /items`, JSON body validated, `status = 201` | 1,187 ns | 1,498 ns |
+| `GET /missing` → `404` problem+json | 388 ns | 1,260 ns |
+| `GET` a handler returning `HttpError::not_found` | 805 ns | 1,215 ns |
+
+The difference is what lesto adds: the request span, the panic catcher, and an RFC 9457 body
+where axum answers with none. A `422` costs more again (about 3.0 µs) because it also runs
+garde and reports every failed check with its location — plain axum does not validate at all,
+so there is nothing to compare it with.
+
+`Trace::off()` takes the span off and saves about 30 ns; it is a branch, not a layer, so it is
+rarely worth it. `scripts/bench-http.sh` runs the same application behind `oha` over a real
+socket, where the numbers above are lost in the noise of the network.
+
 ## Development
 
 Rust 1.94 or newer (edition 2024; `sqlx` 0.9 sets the floor).
@@ -240,6 +264,7 @@ Rust 1.94 or newer (edition 2024; `sqlx` 0.9 sets the floor).
 ```sh
 cargo test --workspace
 cargo clippy --workspace --all-targets
+cargo bench -p lesto                                 # per-request overhead against plain axum
 cargo deny check                                     # licenses, advisories (cargo install cargo-deny)
 cargo run -p lesto-cli -- dev -p notes --port 8765   # the CLI from this checkout
 ```

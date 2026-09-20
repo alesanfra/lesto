@@ -384,6 +384,17 @@ async fn legacy_handler() -> &'static str {
     "legacy"
 }
 
+/// Chapter 11: lesto's own layers on a router lesto did not build.
+pub fn legacy_router() -> lesto::axum::Router {
+    use lesto::layers::{CatchPanicLayer, ProblemLayer, RequestSpanLayer};
+
+    lesto::axum::Router::new()
+        .route("/legacy", lesto::axum::routing::get(legacy_handler))
+        .layer(CatchPanicLayer)
+        .layer(ProblemLayer::new())
+        .layer(RequestSpanLayer::new())
+}
+
 // ---- Chapter 10: composition -----------------------------------------------------------------
 
 pub fn build_app(state: AppState) -> App<()> {
