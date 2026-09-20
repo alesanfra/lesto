@@ -191,7 +191,10 @@ App::new()
 - `forwarded(true)` trusts `X-Forwarded-For`, `X-Forwarded-Proto` and `X-Forwarded-Host` for
   `client.address`, `url.scheme` and `server.address`. Turn it on when a proxy you control
   rewrites those headers — anybody can send them.
-- `Trace::off()` removes the span entirely.
+- `Trace::off()` records no span at all. It is a switch on *what is recorded*, not a faster
+  path: the layer is installed either way and the branch costs about 13 ns. Reach for it when
+  the span itself is unwanted — a test with a noisy subscriber, an application whose subscriber
+  is built elsewhere, a service that wants the logs but not one `SERVER` span per request.
 
 `client.address` without a proxy comes from the peer address, which axum only knows when the app
 is served with `into_make_service_with_connect_info`; `App::serve` does not, so behind a proxy

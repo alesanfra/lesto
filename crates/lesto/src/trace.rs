@@ -21,6 +21,10 @@
 //! let quiet = App::<()>::new().trace(Trace::off());
 //! ```
 //!
+//! [`Trace::off`] says *record nothing*, which is not the same as filtering the span out in the
+//! subscriber: it works where the subscriber is not yours to configure. It is not an
+//! optimization — a span nobody listens to already costs a branch.
+//!
 //! With the `otel` feature the parent of the span is taken from the incoming request through
 //! the global OpenTelemetry propagator, so a trace started upstream continues here. See
 //! [`propagation`].

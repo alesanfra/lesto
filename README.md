@@ -247,8 +247,9 @@ where axum answers with none. A `422` costs more again (about 3.0 µs) because i
 garde and reports every failed check with its location — plain axum does not validate at all,
 so there is nothing to compare it with.
 
-`Trace::off()` takes the span off and saves about 30 ns; it is a branch, not a layer, so it is
-rarely worth it. `scripts/bench-http.sh` runs the same application behind `oha` over a real
+`Trace::off()` is not on that list on purpose: it saves about 13 ns, because it is a branch
+inside a layer that is installed anyway. Use it when you do not want a request span, not when
+you want speed. `scripts/bench-http.sh` runs the same application behind `oha` over a real
 socket, where the numbers above are lost in the noise of the network.
 
 ## Development

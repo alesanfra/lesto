@@ -183,6 +183,9 @@ where
     ///
     /// Every request runs inside a `tracing` span whose fields are the OpenTelemetry semantic
     /// conventions for HTTP servers; see [`crate::trace`].
+    ///
+    /// [`Trace::off()`] is about what is recorded, not about speed: the layer is installed
+    /// either way, and with no interested subscriber the span already costs a branch.
     pub fn trace(mut self, trace: Trace) -> Self {
         self.trace = trace;
         self
