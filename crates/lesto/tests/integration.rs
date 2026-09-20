@@ -1334,3 +1334,36 @@ async fn the_problem_layer_works_on_a_plain_axum_router() {
     let problem: Value = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(problem["instance"], "/gone", "the layer alone is enough");
 }
+
+#[tokio::test]
+async fn the_documentation_routes_answer_304_to_a_matching_etag() {
+    for (url, content_type) in [
+        ("/openapi.json", "application/json"),
+        ("/docs", "text/html; charset=utf-8"),
+        ("/swagger", "text/html; charset=utf-8"),
+    ] {
+        let response = app().into_router().oneshot(get(url)).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()[header::CONTENT_TYPE], content_type);
+        let etag = response.headers()[header::ETAG].clone();
+
+        let conditional = Request::builder()
+            .uri(url)
+            .header(header::IF_NONE_MATCH, &etag)
+            .body(Body::empty())
+            .unwrap();
+        let response = app().into_router().oneshot(conditional).await.unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_MODIFIED, "{url}");
+        assert_eq!(response.headers()[header::ETAG], etag);
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        assert!(bytes.is_empty(), "a 304 carries no body");
+
+        let stale = Request::builder()
+            .uri(url)
+            .header(header::IF_NONE_MATCH, "\"0000000000000000\"")
+            .body(Body::empty())
+            .unwrap();
+        let response = app().into_router().oneshot(stale).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK, "{url}");
+    }
+}

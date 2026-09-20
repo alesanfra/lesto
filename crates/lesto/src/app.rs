@@ -1,12 +1,12 @@
 //! `App`: an `axum::Router` that also accumulates an OpenAPI document.
 
 use std::convert::Infallible;
-use std::sync::Arc;
 
+use axum::body::Bytes;
 use axum::extract::Request;
-use axum::response::{Html, IntoResponse};
+use axum::response::IntoResponse;
 use axum::routing::{Router, get};
-use http::{StatusCode, header};
+use http::{HeaderMap, HeaderValue, StatusCode, header};
 use schemars::SchemaGenerator;
 use schemars::generate::SchemaSettings;
 use schemars::transform::ReplaceBoolSchemas;
@@ -360,48 +360,24 @@ where
         let mut router = self.router;
 
         if let (Some(openapi_url), Some(spec)) = (self.openapi_url.clone(), spec) {
-            let json =
-                Arc::new(serde_json::to_string(&spec).expect("OpenAPI document is serializable"));
+            let json = serde_json::to_string(&spec).expect("OpenAPI document is serializable");
             let title = spec.info.title.clone();
-            router = router.route(
-                &openapi_url,
-                get(move || {
-                    let json = json.clone();
-                    async move {
-                        (
-                            [(header::CONTENT_TYPE, "application/json")],
-                            json.as_str().to_owned(),
-                        )
-                    }
-                }),
-            );
+            router = router.route(&openapi_url, served_once(json, "application/json"));
             if let Some(docs_url) = &self.docs_url {
-                let html = Arc::new(docs::scalar_html(
+                let html = docs::scalar_html(
                     &docs::relative_url(docs_url, &openapi_url),
                     &title,
                     &self.docs_assets,
-                ));
-                router = router.route(
-                    docs_url,
-                    get(move || {
-                        let html = html.clone();
-                        async move { Html(html.as_str().to_owned()) }
-                    }),
                 );
+                router = router.route(docs_url, served_once(html, HTML));
             }
             if let Some(swagger_url) = &self.swagger_url {
-                let html = Arc::new(docs::swagger_ui_html(
+                let html = docs::swagger_ui_html(
                     &docs::relative_url(swagger_url, &openapi_url),
                     &title,
                     &self.docs_assets,
-                ));
-                router = router.route(
-                    swagger_url,
-                    get(move || {
-                        let html = html.clone();
-                        async move { Html(html.as_str().to_owned()) }
-                    }),
                 );
+                router = router.route(swagger_url, served_once(html, HTML));
             }
         }
 
@@ -570,6 +546,47 @@ fn inherited_listener() -> std::io::Result<Option<tokio::net::TcpListener>> {
 #[cfg(not(unix))]
 fn inherited_listener() -> std::io::Result<Option<tokio::net::TcpListener>> {
     Ok(None)
+}
+
+/// `text/html`, as the documentation pages are served.
+const HTML: &str = "text/html; charset=utf-8";
+
+/// A route that answers the same bytes to every request: the OpenAPI document and the two
+/// documentation pages.
+///
+/// The body is built once and every response is a reference-count increment on it, never a
+/// copy. It carries an `ETag` (a hash of those bytes, computed once too), so a browser that
+/// comes back with `If-None-Match` gets a `304` and no body at all.
+fn served_once<S>(body: String, content_type: &'static str) -> axum::routing::MethodRouter<S>
+where
+    S: Clone + Send + Sync + 'static,
+{
+    use std::hash::{Hash, Hasher};
+
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    body.hash(&mut hasher);
+    let etag = HeaderValue::from_str(&format!("\"{:016x}\"", hasher.finish()))
+        .expect("a hexadecimal ETag is a valid header value");
+    let content_type = HeaderValue::from_static(content_type);
+    let body = Bytes::from(body);
+
+    get(move |headers: HeaderMap| {
+        let (body, etag, content_type) = (body.clone(), etag.clone(), content_type.clone());
+        async move {
+            if headers
+                .get_all(header::IF_NONE_MATCH)
+                .iter()
+                .any(|candidate| candidate == etag)
+            {
+                return (StatusCode::NOT_MODIFIED, [(header::ETAG, etag)]).into_response();
+            }
+            (
+                [(header::CONTENT_TYPE, content_type), (header::ETAG, etag)],
+                body,
+            )
+                .into_response()
+        }
+    })
 }
 
 impl<S> From<App<S>> for Router<S>
