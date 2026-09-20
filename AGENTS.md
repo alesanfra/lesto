@@ -23,7 +23,7 @@ crates/lesto/             library
   src/operation.rs        OperationInput / OperationOutput / OperationHandler, OperationBuilder
   src/extract.rs          Json, Query, Path (validating extractors)
   src/security.rs         Bearer, Basic, ApiKey<S>, Security<S>, AuthScheme, ApiKeyScheme
-  src/error.rs            HttpError, ValidationError, Problem (RFC 9457), ErrorFormat
+  src/error.rs            HttpError, ValidationError, Problem (RFC 9457), the render context
   src/openapi.rs          hand-written OpenAPI 3.1 model (serde)
   src/docs.rs             Scalar / Swagger UI HTML (relative openapi.json link)
   src/layers.rs           the tower layers into_router installs, public: ProblemLayer (renders
@@ -150,9 +150,12 @@ Recorded here because they are not derivable from the code. Do not undo them cas
 - **axum, not actix-web.** Extractor traits, tower middleware ecosystem, `Handler<T, S>`
   exposing the argument tuple (which is what lets lesto document handlers with no annotations).
   Details in the tutorial, appendix C.
-- **RFC 9457 by default, FastAPI's shape as an option.** A standard media type beats an ad hoc
-  `{"detail": ...}`; FastAPI's format is kept as `ErrorFormat::FastApi` for clients that expect
-  it, implemented as a response-rewriting middleware so handlers never know about it.
+- **RFC 9457, and only that.** A standard media type beats an ad hoc `{"detail": ...}`.
+  FastAPI's shape was offered as `ErrorFormat::FastApi` until 2026-09-20 and was removed: two
+  wire formats meant two OpenAPI shapes for every error response, a format argument threaded
+  through `App`, `RouteSet`, `OperationBuilder` and the problem layer, and a second body to
+  keep in step with the first. A client that needs another shape rewrites the body in a layer
+  of its own, which is where a presentation concern belongs.
 - **Documentation from types, lazily.** `RouteSet::add` requires
   `H: Handler<T, S> + OperationHandler<I, O>`; `I` (argument tuple) and `O` (return type) drive
   the OpenAPI document through `OperationInput`/`OperationOutput`. Operations are described in
@@ -256,8 +259,8 @@ Recorded here because they are not derivable from the code. Do not undo them cas
   missing attribute yields `expected type, found function`.
 - A nested `/` route is documented at the prefix itself (that is where axum serves it).
 - **Problems are rendered once.** `ProblemLayer` publishes the request URI and the
-  `ErrorFormat` in a `tokio::task_local!` (`error::RENDER`); `Problem::into_response` reads it,
-  fills `instance`, serializes in that format and marks the response with the `ProblemRendered`
+  the request URI in a `tokio::task_local!` (`error::RENDER`); `Problem::into_response` reads
+  it, fills `instance`, serializes once and marks the response with the `ProblemRendered`
   extension. A `problem+json` response *without* that marker — built by hand, or built where
   the task-local is not visible, as in a spawned task — still takes the layer's slow path
   (buffer, parse, rewrite), which is also what keeps `instance` working there.

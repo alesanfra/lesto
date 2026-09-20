@@ -391,7 +391,7 @@ pub fn legacy_router() -> lesto::axum::Router {
     lesto::axum::Router::new()
         .route("/legacy", lesto::axum::routing::get(legacy_handler))
         .layer(CatchPanicLayer)
-        .layer(ProblemLayer::new())
+        .layer(ProblemLayer)
         .layer(RequestSpanLayer::new())
 }
 

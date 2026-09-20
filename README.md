@@ -7,7 +7,7 @@ A Rust web micro-framework with **FastAPI**'s ergonomics, built on [axum](https:
 - Errors follow **RFC 9457 Problem Details** (`application/problem+json`): `type`, `title`, `status`,
   `detail`, `instance`, plus an `errors` extension with a JSON Pointer for every failed check.
   Unknown routes (`404`), wrong methods (`405`) and panicking handlers (`500`) answer the same
-  way. FastAPI's format (`{"detail": ...}`) is available with `App::error_format(ErrorFormat::FastApi)`.
+  way. One format, no switch: a client that needs another shape gets it from a layer of its own.
 - The **OpenAPI 3.1** document is derived from the argument and return types via
   [schemars](https://github.com/GREsau/schemars), with no extra annotations. Scalar at `/docs`,
   Swagger UI at `/swagger` (pinned versions with integrity hashes, or your own mirror), JSON at
@@ -200,12 +200,6 @@ overridden with `with_type` / `with_title`. `with_extension` adds extension memb
     {"in": "body", "pointer": "/email", "detail": "missing field `email`", "code": "missing"}
   ]
 }
-```
-
-For clients expecting FastAPI's format:
-
-```rust
-App::new().error_format(ErrorFormat::FastApi)   // {"detail": "..."} and {"detail": [{"loc","msg","type"}]}
 ```
 
 ### Authentication and security schemes

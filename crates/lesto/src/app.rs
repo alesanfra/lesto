@@ -14,7 +14,7 @@ use tower_layer::Layer;
 use tower_service::Service;
 
 use crate::docs::{self, DocsAssets};
-use crate::error::{ErrorFormat, HttpError};
+use crate::error::HttpError;
 use crate::openapi::{self, Components, OpenApi, SecurityRequirement, SecurityScheme, Tag};
 use crate::operation::{OperationHandler, OperationInput, OperationOutput};
 use crate::route::{PendingOperation, RouteMeta, RouteSet};
@@ -30,7 +30,6 @@ pub struct App<S = ()> {
     /// (final OpenAPI path, operation) pairs, documented lazily so configuration order does not matter.
     operations: Vec<(String, PendingOperation)>,
     security_schemes: indexmap::IndexMap<String, SecurityScheme>,
-    error_format: ErrorFormat,
     openapi_url: Option<String>,
     docs_url: Option<String>,
     swagger_url: Option<String>,
@@ -77,7 +76,6 @@ where
             spec: OpenApi::default(),
             operations: Vec::new(),
             security_schemes: indexmap::IndexMap::new(),
-            error_format: ErrorFormat::default(),
             openapi_url: Some("/openapi.json".to_string()),
             docs_url: Some("/docs".to_string()),
             swagger_url: Some("/swagger".to_string()),
@@ -140,13 +138,6 @@ where
             .security
             .get_or_insert_with(Vec::new)
             .push(requirement);
-        self
-    }
-
-    /// Wire format of error responses: RFC 9457 `application/problem+json` (default) or
-    /// FastAPI's `{"detail": ...}`.
-    pub fn error_format(mut self, format: ErrorFormat) -> Self {
-        self.error_format = format;
         self
     }
 
@@ -298,7 +289,6 @@ where
             spec: self.spec,
             operations: self.operations,
             security_schemes: self.security_schemes,
-            error_format: self.error_format,
             openapi_url: self.openapi_url,
             docs_url: self.docs_url,
             swagger_url: self.swagger_url,
@@ -316,12 +306,7 @@ where
         let mut generator = schema_generator();
         let mut security_schemes = self.security_schemes.clone();
         for (path, pending) in &self.operations {
-            let operation = pending.operation(
-                path,
-                &mut generator,
-                self.error_format,
-                &mut security_schemes,
-            );
+            let operation = pending.operation(path, &mut generator, &mut security_schemes);
             let item = spec.paths.entry(path.clone()).or_default();
             if let Some(slot) = item.slot_mut(&pending.meta.method) {
                 *slot = Some(operation);
@@ -355,7 +340,6 @@ where
     /// problem (unless [`App::fallback`] was called), a known route with the wrong method a
     /// `405`, and a handler that panics a `500` with the panic message kept out of the response.
     pub fn into_router(self) -> Router<S> {
-        let error_format = self.error_format;
         let spec = self.openapi_url.as_ref().map(|_| self.openapi());
         let mut router = self.router;
 
@@ -392,10 +376,7 @@ where
         // One `Router::layer` call, not three: axum re-boxes every route (and its future) on
         // each one, so the layers are stacked first and added together.
         let layers = tower_layer::Stack::new(
-            tower_layer::Stack::new(
-                crate::layers::CatchPanicLayer,
-                crate::layers::ProblemLayer::format(error_format),
-            ),
+            tower_layer::Stack::new(crate::layers::CatchPanicLayer, crate::layers::ProblemLayer),
             // Outermost, so the span covers the fallbacks, the panic catcher and the rendering
             // of the problem body — everything the client waits for. It still runs *inside*
             // routing, which is what makes `MatchedPath` (and so `http.route`) available.

@@ -42,6 +42,9 @@ Same machine and harness as the baseline above.
 | `GET /missing` 404, `ErrorFormat::FastApi` | 388 ns | 2,391 ns | **1,195 ns** | — |
 | `POST /items` invalid, `ErrorFormat::FastApi` | 1,176 ns | 5,958 ns | **3,273 ns** | — |
 
+(The two `ErrorFormat::FastApi` rows are history: the format was removed on 2026-09-20, so the
+benchmark no longer has those cases.)
+
 Against goal 3: the 404 path is 872 ns over axum (**under 1 µs**, B2's target) and the happy
 path 295 ns, which is not yet "within measurement noise" — what is left there is the request
 span and the two extra services, not work that can be deleted. The `422` path stays the most

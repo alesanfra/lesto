@@ -87,10 +87,6 @@ process with `lsof -i :8000`.
 With the current lesto version the order is preserved (schemars' `preserve_order` feature). If
 you use schemars directly elsewhere, enable the same feature for consistency.
 
-## I want FastAPI's error format
-
-`App::new().error_format(ErrorFormat::FastApi)`.
-
 ## `/docs` is blank behind a firewall
 
 The documentation pages load Scalar and Swagger UI from jsDelivr (pinned versions, integrity

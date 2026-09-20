@@ -102,12 +102,11 @@ use lesto::layers::{CatchPanicLayer, ProblemLayer, RequestSpanLayer};
 let router = lesto::axum::Router::new()
     .route("/legacy", lesto::axum::routing::get(legacy_handler))
     .layer(CatchPanicLayer)
-    .layer(ProblemLayer::new())
+    .layer(ProblemLayer)
     .layer(RequestSpanLayer::new());
 ```
 
-- `ProblemLayer` gives every RFC 9457 response its `instance` (the request path) and writes it
-  in the format you chose — `ProblemLayer::format(ErrorFormat::FastApi)` for FastAPI's shape.
+- `ProblemLayer` gives every RFC 9457 response its `instance` (the request path).
 - `CatchPanicLayer` turns a panic into a `500` problem.
 - `RequestSpanLayer` opens the request span of chapter 15. `RequestSpanLayer::with(Trace::off())`
   is the same layer with the span switched off.

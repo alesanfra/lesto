@@ -69,8 +69,8 @@ pub mod trace;
 pub use app::{App, bind_address, listener, shutdown_signal};
 pub use docs::DocsAssets;
 pub use error::{
-    ErrorFormat, HttpError, HttpErrorBody, HttpValidationError, IntoStatus, Problem, ProblemError,
-    ProblemRendered, Rejection, ValidationError, ValidationErrorItem,
+    HttpError, IntoStatus, Problem, ProblemError, ProblemRendered, Rejection, ValidationError,
+    ValidationErrorItem,
 };
 pub use extract::{Json, Path, Query};
 pub use operation::{OperationBuilder, OperationHandler, OperationInput, OperationOutput};
@@ -101,7 +101,7 @@ pub mod prelude {
     pub use crate::openapi::{ApiKeyIn, OAuthFlows, SecurityScheme};
     pub use crate::security::{ApiKey, ApiKeyScheme, AuthScheme, Basic, Bearer, Security};
     pub use crate::{
-        App, ErrorFormat, Extension, HttpError, Json, Path, Query, State, StatusCode, Trace, routes,
+        App, Extension, HttpError, Json, Path, Query, State, StatusCode, Trace, routes,
     };
     pub use garde::Validate;
     pub use schemars::JsonSchema;

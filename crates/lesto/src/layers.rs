@@ -9,7 +9,7 @@
 //! let router: axum::Router = axum::Router::new()
 //!     .route("/hello", axum::routing::get(|| async { "hi" }))
 //!     .layer(CatchPanicLayer)
-//!     .layer(ProblemLayer::new());
+//!     .layer(ProblemLayer);
 //! ```
 //!
 //! Order matters: `Router::layer` makes the last one added the outermost, and
@@ -28,50 +28,32 @@ use std::task::{Context, Poll};
 
 use axum::body::Body;
 use axum::response::{IntoResponse, Response};
-use http::{HeaderValue, Request, header};
+use http::{Request, header};
 use pin_project_lite::pin_project;
 use tokio::task::futures::TaskLocalFuture;
 use tower_layer::Layer;
 use tower_service::Service;
 
-use crate::error::{ErrorFormat, HttpError, PROBLEM_JSON, Problem, ProblemRendered, RenderContext};
+use crate::error::{HttpError, PROBLEM_JSON, Problem, ProblemRendered, RenderContext};
 use crate::trace::Trace;
 
 // ---- problems -----------------------------------------------------------------------------
 
-/// Finishes every RFC 9457 response of the requests below it: `instance` is the request path,
-/// and the body is written in the [`ErrorFormat`] the application asked for.
+/// Finishes every RFC 9457 response of the requests below it: `instance` is the request path.
 ///
 /// The work happens where the problem is *built* ([`Problem::into_response`]): the layer only
-/// publishes the request path and the format, so a problem is serialized once. A
+/// publishes the request path, so a problem is serialized once. A
 /// `application/problem+json` response built by hand somewhere below — without the
 /// [`ProblemRendered`] marker — still takes the slow path, where the body is buffered, parsed
-/// and rewritten.
+/// and completed.
 #[derive(Debug, Clone, Copy, Default)]
-pub struct ProblemLayer {
-    format: ErrorFormat,
-}
-
-impl ProblemLayer {
-    /// RFC 9457 responses (`application/problem+json`).
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Render errors in the given format instead.
-    pub fn format(format: ErrorFormat) -> Self {
-        Self { format }
-    }
-}
+pub struct ProblemLayer;
 
 impl<S> Layer<S> for ProblemLayer {
     type Service = ProblemService<S>;
 
     fn layer(&self, inner: S) -> Self::Service {
-        ProblemService {
-            inner,
-            format: self.format,
-        }
+        ProblemService { inner }
     }
 }
 
@@ -79,7 +61,6 @@ impl<S> Layer<S> for ProblemLayer {
 #[derive(Debug, Clone, Copy)]
 pub struct ProblemService<S> {
     inner: S,
-    format: ErrorFormat,
 }
 
 impl<S, B> Service<Request<B>> for ProblemService<S>
@@ -99,7 +80,6 @@ where
         // a `String` if a problem is actually rendered.
         let context = RenderContext {
             uri: req.uri().clone(),
-            format: self.format,
         };
         ProblemFuture {
             state: ProblemState::Running {
@@ -170,8 +150,8 @@ fn is_problem(response: &Response) -> bool {
         .is_some_and(|content_type| content_type.starts_with(PROBLEM_JSON))
 }
 
-/// Slow path: a `problem+json` response somebody else built. Buffer it, parse it, fill in
-/// `instance` and rewrite it in the configured format.
+/// Slow path: a `problem+json` response somebody else built. Buffer it, parse it and fill in
+/// `instance`.
 ///
 /// Problem bodies are produced by this process, never by the client, so buffering them whole is
 /// bounded by what the application already built in memory.
@@ -188,17 +168,7 @@ async fn rewrite(response: Response, context: RenderContext) -> Response {
     if problem.instance.is_none() {
         problem.instance = Some(context.uri.path().to_owned());
     }
-    let body = match context.format {
-        ErrorFormat::Problem => serde_json::to_vec(&problem),
-        ErrorFormat::FastApi => {
-            parts.headers.insert(
-                header::CONTENT_TYPE,
-                HeaderValue::from_static("application/json"),
-            );
-            serde_json::to_vec(&crate::error::problem_to_fastapi(&problem))
-        }
-    };
-    let body = body.unwrap_or_else(|_| bytes.to_vec());
+    let body = serde_json::to_vec(&problem).unwrap_or_else(|_| bytes.to_vec());
     let mut response = Response::from_parts(parts, Body::from(body));
     response.extensions_mut().insert(ProblemRendered);
     response

@@ -14,7 +14,7 @@ use schemars::SchemaGenerator;
 
 use indexmap::IndexMap;
 
-use crate::error::{ErrorFormat, IntoStatus};
+use crate::error::IntoStatus;
 use crate::openapi::{self, Operation, SecurityScheme};
 use crate::operation::{
     OperationBuilder, OperationHandler, OperationInput, OperationOutput, reason_phrase,
@@ -194,7 +194,6 @@ impl PendingOperation {
         &self,
         path: &str,
         generator: &mut SchemaGenerator,
-        error_format: ErrorFormat,
         security_schemes: &mut IndexMap<String, SecurityScheme>,
     ) -> Operation {
         let mut operation = self.meta.base_operation(path);
@@ -204,7 +203,6 @@ impl PendingOperation {
                 generator,
                 path,
                 method: &self.meta.method,
-                error_format,
                 security_schemes,
             };
             (self.describe)(&mut builder);

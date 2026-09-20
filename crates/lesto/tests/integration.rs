@@ -184,7 +184,7 @@ async fn valid_body_is_accepted_and_status_overridden() {
 }
 
 #[tokio::test]
-async fn garde_failures_become_fastapi_422() {
+async fn garde_failures_become_a_422_problem() {
     let (status, body) = send(
         app(),
         json_request(
@@ -428,6 +428,7 @@ async fn openapi_document_is_derived_from_types() {
     assert!(schemas["Problem"].is_object());
     assert!(schemas["ProblemError"].is_object());
     assert!(schemas.get("HttpErrorBody").is_none());
+    assert!(schemas.get("HTTPValidationError").is_none());
 
     // docs routes never leak into the spec
     assert!(spec["paths"].get("/docs").is_none());
@@ -465,51 +466,6 @@ async fn docs_can_be_disabled() {
 }
 
 #[tokio::test]
-async fn fastapi_error_format_is_available() {
-    fn fastapi_app() -> App<()> {
-        App::new()
-            .error_format(ErrorFormat::FastApi)
-            .routes(routes![create_user, get_user])
-            .with_state(Db::default())
-    }
-
-    let (status, content_type, body) = send_full(fastapi_app(), get("/users/42")).await;
-    assert_eq!(status, StatusCode::NOT_FOUND);
-    assert_eq!(content_type, "application/json");
-    assert_eq!(body, json!({"detail": "no such user"}));
-
-    let (status, body) = send(
-        fastapi_app(),
-        json_request(
-            "POST",
-            "/users",
-            json!({"name": "", "email": "ada@example.com", "addresses": [{"city": ""}]}),
-        ),
-    )
-    .await;
-    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
-    let detail = body["detail"].as_array().unwrap();
-    let locs: Vec<Value> = detail.iter().map(|d| d["loc"].clone()).collect();
-    assert!(locs.contains(&json!(["body", "name"])), "{locs:?}");
-    assert!(
-        locs.contains(&json!(["body", "addresses", 0, "city"])),
-        "{locs:?}"
-    );
-    assert_eq!(detail[0]["type"], "value_error");
-
-    let spec = serde_json::to_value(fastapi_app().openapi()).unwrap();
-    let post = &spec["paths"]["/users"]["post"];
-    assert_eq!(
-        post["responses"]["422"]["content"]["application/json"]["schema"]["$ref"],
-        "#/components/schemas/HTTPValidationError"
-    );
-    assert_eq!(
-        post["responses"]["409"]["content"]["application/json"]["schema"]["$ref"],
-        "#/components/schemas/HttpErrorBody"
-    );
-}
-
-#[tokio::test]
 async fn problem_type_and_extensions_are_kept() {
     #[lesto::get("/teapot")]
     async fn teapot() -> Result<(), HttpError> {
@@ -531,19 +487,6 @@ async fn problem_type_and_extensions_are_kept() {
             "instance": "/teapot",
             "volume_ml": 500
         })
-    );
-}
-
-#[tokio::test]
-async fn error_format_can_be_set_after_routes() {
-    let app: App<()> = App::new()
-        .routes(routes![get_user])
-        .error_format(ErrorFormat::FastApi)
-        .with_state(Db::default());
-    let spec = serde_json::to_value(app.openapi()).unwrap();
-    assert!(
-        spec["paths"]["/users/{id}"]["get"]["responses"]["404"]["content"]["application/json"]
-            .is_object()
     );
 }
 
@@ -1016,12 +959,6 @@ async fn unknown_route_is_a_problem_404() {
     assert_eq!(body["title"], "Not Found");
     assert_eq!(body["status"], 404);
     assert_eq!(body["instance"], "/nope");
-
-    let (status, content_type, body) =
-        send_full(app().error_format(ErrorFormat::FastApi), get("/nope")).await;
-    assert_eq!(status, StatusCode::NOT_FOUND);
-    assert_eq!(content_type, "application/json");
-    assert_eq!(body, json!({"detail": "Not Found"}));
 }
 
 #[tokio::test]
@@ -1266,14 +1203,6 @@ async fn a_hand_built_problem_is_still_finished() {
     assert_eq!(content_type, "application/problem+json");
     assert_eq!(body["instance"], "/hand-rolled");
     assert_eq!(body["detail"], "by hand");
-
-    let app = App::<()>::new()
-        .routes(routes![hand_rolled])
-        .error_format(ErrorFormat::FastApi);
-    let (status, content_type, body) = send_full(app, get("/hand-rolled")).await;
-    assert_eq!(status, StatusCode::CONFLICT);
-    assert_eq!(content_type, "application/json");
-    assert_eq!(body, json!({"detail": "by hand"}));
 }
 
 /// Built where the layer's request context cannot be seen. It must come out like any other.
@@ -1327,7 +1256,7 @@ async fn the_problem_layer_works_on_a_plain_axum_router() {
             "/gone",
             lesto::axum::routing::get(|| async { HttpError::not_found("gone") }),
         )
-        .layer(ProblemLayer::new());
+        .layer(ProblemLayer);
     let response = router.oneshot(get("/gone")).await.unwrap();
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
     let bytes = response.into_body().collect().await.unwrap().to_bytes();

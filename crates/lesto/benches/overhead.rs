@@ -95,10 +95,9 @@ fn axum_router() -> axum::Router {
         .route("/err", axum::routing::get(axum_err))
 }
 
-fn lesto_router(trace: Trace, format: ErrorFormat) -> axum::Router {
+fn lesto_router(trace: Trace) -> axum::Router {
     App::new()
         .trace(trace)
-        .error_format(format)
         .routes(routes![hello, create, err])
         .into_router()
 }
@@ -149,9 +148,8 @@ fn env_u32(name: &str, default: u32) -> u32 {
 async fn main() {
     let iters = env_u32("LESTO_BENCH_ITERS", 200_000);
     let rounds = env_u32("LESTO_BENCH_ROUNDS", 5);
-    let default = || lesto_router(Trace::new(), ErrorFormat::Problem);
-    let quiet = || lesto_router(Trace::off(), ErrorFormat::Problem);
-    let fastapi = || lesto_router(Trace::new(), ErrorFormat::FastApi);
+    let default = || lesto_router(Trace::new());
+    let quiet = || lesto_router(Trace::off());
 
     for (case, label) in [
         (Case::Hello, "GET /hello"),
@@ -186,20 +184,4 @@ async fn main() {
         .await;
         println!();
     }
-    run(
-        "lesto fastapi   GET /missing 404",
-        fastapi(),
-        Case::Missing,
-        iters,
-        rounds,
-    )
-    .await;
-    run(
-        "lesto fastapi   POST /items invalid 422",
-        fastapi(),
-        Case::CreateInvalid,
-        iters,
-        rounds,
-    )
-    .await;
 }

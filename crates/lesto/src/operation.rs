@@ -12,7 +12,7 @@ use indexmap::IndexMap;
 use schemars::{JsonSchema, Schema, SchemaGenerator};
 use serde_json::Value;
 
-use crate::error::{ErrorFormat, HttpErrorBody, HttpValidationError, Problem};
+use crate::error::Problem;
 use crate::openapi::{
     self, MediaType, Operation, Parameter, ParameterIn, RequestBody, Response, SecurityRequirement,
     SecurityScheme,
@@ -25,8 +25,6 @@ pub struct OperationBuilder<'a> {
     /// OpenAPI path template of the route, e.g. `/users/{id}`.
     pub path: &'a str,
     pub method: &'a http::Method,
-    /// Wire format the app uses for `HttpError` / `ValidationError` responses.
-    pub error_format: ErrorFormat,
     /// `components.securitySchemes`, shared by every operation.
     pub security_schemes: &'a mut IndexMap<String, SecurityScheme>,
 }
@@ -58,28 +56,14 @@ impl OperationBuilder<'_> {
         }
     }
 
-    /// Document an error response with the app's error body (`Problem` or FastAPI's `{"detail"}`).
+    /// Document an error response: an RFC 9457 [`Problem`].
     pub fn error_response(&mut self, status: impl ResponseKey, description: &str) {
-        match self.error_format {
-            ErrorFormat::Problem => {
-                self.response::<Problem>(status, description, crate::error::PROBLEM_JSON)
-            }
-            ErrorFormat::FastApi => {
-                self.response::<HttpErrorBody>(status, description, "application/json")
-            }
-        }
+        self.response::<Problem>(status, description, crate::error::PROBLEM_JSON);
     }
 
     /// Document the `422` every validating extractor can produce.
     pub fn validation_error_response(&mut self) {
-        match self.error_format {
-            ErrorFormat::Problem => {
-                self.response::<Problem>(422, "Validation Error", crate::error::PROBLEM_JSON)
-            }
-            ErrorFormat::FastApi => {
-                self.response::<HttpValidationError>(422, "Validation Error", "application/json")
-            }
-        }
+        self.response::<Problem>(422, "Validation Error", crate::error::PROBLEM_JSON);
     }
 
     /// Schema (usually a `$ref`) for `T`, registering it in components when named.

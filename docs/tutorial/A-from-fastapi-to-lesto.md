@@ -35,7 +35,7 @@
 | `/docs`, `/redoc`, `/openapi.json` | `/docs` (Scalar), `/swagger` (Swagger UI), `/openapi.json` |
 | `docs_url=None` | `.docs_url(None)` |
 | `uvicorn.run(app, host="0.0.0.0", port=8000)` | `.serve().await` with `LESTO_HOST=0.0.0.0 LESTO_PORT=8000` (or `.serve_at("0.0.0.0:8000")`) |
-| `{"detail": ...}` errors | RFC 9457 `application/problem+json` (or `ErrorFormat::FastApi`) |
+| `{"detail": ...}` errors | RFC 9457 `application/problem+json` |
 
 ## Differences to keep in mind
 

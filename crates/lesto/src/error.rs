@@ -3,8 +3,8 @@
 //! Errors are serialized as **RFC 9457 Problem Details** (`application/problem+json`) by default.
 //! [`HttpError`] is the equivalent of FastAPI's `HTTPException`; [`ValidationError`] is the
 //! `422` produced by the validating extractors, with one entry per failed check in the `errors`
-//! extension member. [`ErrorFormat::FastApi`] switches the wire format to FastAPI's
-//! `{"detail": ...}` shape for clients that expect it.
+//! extension member. There is one wire format: a client that wants another one rewrites the
+//! body in a layer of its own.
 
 use axum::response::{IntoResponse, Response};
 use http::{HeaderMap, HeaderValue, StatusCode, header};
@@ -14,16 +14,6 @@ use serde_json::{Map, Value};
 
 /// Media type of RFC 9457 responses.
 pub const PROBLEM_JSON: &str = "application/problem+json";
-
-/// Wire format used for `HttpError` and `ValidationError` responses.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum ErrorFormat {
-    /// RFC 9457 Problem Details, `application/problem+json` (default).
-    #[default]
-    Problem,
-    /// FastAPI's `{"detail": "..."}` / `{"detail": [{"loc", "msg", "type"}]}`.
-    FastApi,
-}
 
 /// Anything that can be turned into a [`StatusCode`]: a `StatusCode` or a bare `u16`.
 pub trait IntoStatus {
@@ -112,17 +102,18 @@ impl IntoResponse for Problem {
 
 // ---- rendering ----------------------------------------------------------------------------
 
-/// What a problem needs to know about the request it answers, to be serialized **once**.
+/// What a problem needs to know about the request it answers: the `instance` to fill in.
 ///
 /// Set by [`ProblemLayer`](crate::layers::ProblemLayer) around every request it handles, read
 /// by [`render`]. Outside that layer (a plain `axum::Router`, a problem built in a spawned
-/// task) there is none, and a problem renders as RFC 9457 without `instance`.
+/// task) there is none, and a problem renders without `instance`.
+///
+/// The request URI is cloned once per request (reference-counted bytes); only the path is
+/// used, and only when a problem is actually rendered, so the `String` is paid for on the
+/// error path alone.
 #[derive(Clone)]
 pub(crate) struct RenderContext {
-    /// The request URI, cloned once per request. Only the path is used, and only when a
-    /// problem is actually rendered, so the `String` is paid for on the error path alone.
     pub(crate) uri: http::Uri,
-    pub(crate) format: ErrorFormat,
 }
 
 tokio::task_local! {
@@ -139,60 +130,34 @@ tokio::task_local! {
 #[derive(Debug, Clone, Copy)]
 pub struct ProblemRendered;
 
-/// Turn a problem into its final response, in the format and with the `instance` the current
-/// request asks for.
+/// Turn a problem into its final response, with the `instance` the current request asks for.
 pub(crate) fn render(mut problem: Problem) -> Response {
     let status = StatusCode::from_u16(problem.status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
-    let context = RENDER.try_with(Clone::clone).ok();
-    let format = match &context {
-        Some(context) => {
+    let rendered = RENDER
+        .try_with(|context| {
             if problem.instance.is_none() {
                 problem.instance = Some(context.uri.path().to_owned());
             }
-            context.format
-        }
-        None => ErrorFormat::Problem,
-    };
-    let (content_type, body) = match format {
-        ErrorFormat::Problem => (PROBLEM_JSON, serde_json::to_vec(&problem)),
-        ErrorFormat::FastApi => ("application/json", fastapi_body(&problem)),
-    };
-    let Ok(body) = body else {
+        })
+        .is_ok();
+    let Ok(body) = serde_json::to_vec(&problem) else {
         // Only an extension member can fail to serialize, and only a custom `Serialize` can do
         // that; the status still says what happened.
         return status.into_response();
     };
     let mut response = (
         status,
-        [(header::CONTENT_TYPE, HeaderValue::from_static(content_type))],
+        [(header::CONTENT_TYPE, HeaderValue::from_static(PROBLEM_JSON))],
         body,
     )
         .into_response();
-    if context.is_some() {
-        // Without a context there is no `instance` and no format to obey, so the response is
-        // *not* final: a problem built in a spawned task still goes through the layer's slow
-        // path and comes out like every other one.
+    if rendered {
+        // Without a context there is no `instance`, so the response is *not* final: a problem
+        // built in a spawned task still goes through the layer's slow path and comes out like
+        // every other one.
         response.extensions_mut().insert(ProblemRendered);
     }
     response
-}
-
-/// FastAPI's shape, serialized straight to bytes (no intermediate `Value`).
-fn fastapi_body(problem: &Problem) -> Result<Vec<u8>, serde_json::Error> {
-    if problem.errors.is_empty() {
-        let detail = problem
-            .detail
-            .clone()
-            .unwrap_or_else(|| problem.title.clone());
-        serde_json::to_vec(&HttpErrorBody { detail })
-    } else {
-        let detail = problem
-            .errors
-            .iter()
-            .map(ValidationErrorItem::from_problem_error)
-            .collect();
-        serde_json::to_vec(&HttpValidationError { detail })
-    }
 }
 
 // ---- HttpError ----------------------------------------------------------------------------
@@ -216,12 +181,6 @@ struct HttpErrorExtras {
     title: Option<String>,
     extensions: Map<String, Value>,
     headers: HeaderMap,
-}
-
-/// FastAPI-shaped body of an [`HttpError`] (used with [`ErrorFormat::FastApi`]).
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct HttpErrorBody {
-    pub detail: String,
 }
 
 impl HttpError {
@@ -415,13 +374,6 @@ impl ValidationErrorItem {
     }
 }
 
-/// FastAPI-shaped body of a `422` (used with [`ErrorFormat::FastApi`]).
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
-#[schemars(rename = "HTTPValidationError")]
-pub struct HttpValidationError {
-    pub detail: Vec<ValidationErrorItem>,
-}
-
 /// A failed deserialization or [`garde`] validation. Always a 422.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ValidationError {
@@ -565,27 +517,6 @@ impl IntoResponse for Rejection {
     }
 }
 
-// ---- FastAPI conversion -------------------------------------------------------------------
-
-/// Render a problem in FastAPI's shape: `{"detail": [...]}` for validation problems,
-/// `{"detail": "..."}` otherwise.
-pub fn problem_to_fastapi(problem: &Problem) -> Value {
-    if problem.errors.is_empty() {
-        let detail = problem
-            .detail
-            .clone()
-            .unwrap_or_else(|| problem.title.clone());
-        serde_json::to_value(HttpErrorBody { detail }).expect("serializable")
-    } else {
-        let detail = problem
-            .errors
-            .iter()
-            .map(ValidationErrorItem::from_problem_error)
-            .collect();
-        serde_json::to_value(HttpValidationError { detail }).expect("serializable")
-    }
-}
-
 // ---- OpenAPI ------------------------------------------------------------------------------
 
 /// With the `anyhow` feature: any `anyhow::Error` becomes a 500 with the detail hidden and the
@@ -664,11 +595,7 @@ mod tests {
     async fn rendering_without_a_context_is_rfc_9457_and_not_final() {
         let response = HttpError::not_found("gone").into_response();
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
-        assert_eq!(
-            response.headers()[header::CONTENT_TYPE],
-            PROBLEM_JSON,
-            "the default format"
-        );
+        assert_eq!(response.headers()[header::CONTENT_TYPE], PROBLEM_JSON);
         assert!(
             response.extensions().get::<ProblemRendered>().is_none(),
             "`instance` is still missing, so the layer must finish this one"
@@ -679,10 +606,8 @@ mod tests {
 
     #[tokio::test]
     async fn a_context_fills_in_the_instance_once() {
-        let response = render_in("/users/42", ErrorFormat::Problem, || {
-            HttpError::not_found("gone").into_response()
-        })
-        .await;
+        let response =
+            render_in("/users/42", || HttpError::not_found("gone").into_response()).await;
         assert!(response.extensions().get::<ProblemRendered>().is_some());
         let problem = body_json(response).await;
         assert_eq!(problem["instance"], "/users/42");
@@ -691,7 +616,7 @@ mod tests {
 
     #[tokio::test]
     async fn an_instance_set_by_the_user_is_kept() {
-        let response = render_in("/users/42", ErrorFormat::Problem, || {
+        let response = render_in("/users/42", || {
             let mut problem = HttpError::not_found("gone").into_problem();
             problem.instance = Some("urn:uuid:1234".to_string());
             problem.into_response()
@@ -700,39 +625,10 @@ mod tests {
         assert_eq!(body_json(response).await["instance"], "urn:uuid:1234");
     }
 
-    #[tokio::test]
-    async fn the_fastapi_format_is_rendered_in_place() {
-        let response = render_in("/users/42", ErrorFormat::FastApi, || {
-            HttpError::not_found("gone").into_response()
-        })
-        .await;
-        assert_eq!(response.headers()[header::CONTENT_TYPE], "application/json");
-        assert_eq!(body_json(response).await, json!({"detail": "gone"}));
-
-        let response = render_in("/users", ErrorFormat::FastApi, || {
-            ValidationError::single(
-                vec!["body".into(), "name".into()],
-                "too short",
-                "value_error",
-            )
-            .into_response()
-        })
-        .await;
-        assert_eq!(
-            body_json(response).await,
-            json!({"detail": [{"loc": ["body", "name"], "msg": "too short", "type": "value_error"}]})
-        );
-    }
-
     /// Render `build` as if [`crate::layers::ProblemLayer`] were running around `path`.
-    async fn render_in(
-        path: &str,
-        format: ErrorFormat,
-        build: impl FnOnce() -> Response,
-    ) -> Response {
+    async fn render_in(path: &str, build: impl FnOnce() -> Response) -> Response {
         let context = RenderContext {
             uri: path.parse().unwrap(),
-            format,
         };
         RENDER.scope(context, async move { build() }).await
     }

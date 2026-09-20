@@ -148,17 +148,6 @@ The last three come from the router itself, so even a request that never reaches
 a problem+json body with `instance`. `App::fallback(handler)` replaces the `404` when you need
 something else there (a single-page app, a redirect).
 
-## The FastAPI format
-
-If you have clients written for a FastAPI API, you can keep their format:
-
-```rust
-App::new().error_format(ErrorFormat::FastApi)
-```
-
-Errors become `{"detail": "..."}` and `422`s `{"detail": [{"loc": [...], "msg": "...", "type": "..."}]}`,
-with content type `application/json`. The documentation follows along.
-
 ## Recap
 
 - `Err(HttpError::not_found("..."))`, with `?` and `From` for domain errors.
