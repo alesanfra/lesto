@@ -57,6 +57,7 @@ pub mod error;
 pub mod extract;
 #[cfg(feature = "lambda")]
 pub mod lambda;
+pub mod layers;
 pub mod openapi;
 pub mod operation;
 #[cfg(feature = "otel")]
@@ -69,7 +70,7 @@ pub use app::{App, bind_address, listener, shutdown_signal};
 pub use docs::DocsAssets;
 pub use error::{
     ErrorFormat, HttpError, HttpErrorBody, HttpValidationError, IntoStatus, Problem, ProblemError,
-    Rejection, ValidationError, ValidationErrorItem,
+    ProblemRendered, Rejection, ValidationError, ValidationErrorItem,
 };
 pub use extract::{Json, Path, Query};
 pub use operation::{OperationBuilder, OperationHandler, OperationInput, OperationOutput};

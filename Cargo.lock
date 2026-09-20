@@ -1215,6 +1215,7 @@ dependencies = [
  "opentelemetry-appender-tracing",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
+ "pin-project-lite",
  "schemars",
  "serde",
  "serde_html_form",

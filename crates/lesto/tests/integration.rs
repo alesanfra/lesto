@@ -1242,3 +1242,95 @@ async fn docs_pages_pin_their_assets_and_carry_integrity_hashes() {
     );
     assert!(!html.contains("integrity="), "{html}");
 }
+
+// ---- problem rendering ---------------------------------------------------------------------
+
+/// A response built by hand, not through `Problem`: the marker is absent, so `ProblemLayer`
+/// takes its slow path (buffer, parse, rewrite).
+#[lesto::get("/hand-rolled", responses(409))]
+async fn hand_rolled() -> lesto::axum::response::Response {
+    lesto::axum::response::Response::builder()
+        .status(StatusCode::CONFLICT)
+        .header(header::CONTENT_TYPE, "application/problem+json")
+        .body(Body::from(
+            r#"{"type":"about:blank","title":"Conflict","status":409,"detail":"by hand"}"#,
+        ))
+        .unwrap()
+}
+
+#[tokio::test]
+async fn a_hand_built_problem_is_still_finished() {
+    let app = App::<()>::new().routes(routes![hand_rolled]);
+    let (status, content_type, body) = send_full(app, get("/hand-rolled")).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(content_type, "application/problem+json");
+    assert_eq!(body["instance"], "/hand-rolled");
+    assert_eq!(body["detail"], "by hand");
+
+    let app = App::<()>::new()
+        .routes(routes![hand_rolled])
+        .error_format(ErrorFormat::FastApi);
+    let (status, content_type, body) = send_full(app, get("/hand-rolled")).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(content_type, "application/json");
+    assert_eq!(body, json!({"detail": "by hand"}));
+}
+
+/// Built where the layer's request context cannot be seen. It must come out like any other.
+#[lesto::get("/spawned", responses(404))]
+async fn spawned() -> lesto::axum::response::Response {
+    use lesto::axum::response::IntoResponse;
+    tokio::spawn(async { HttpError::not_found("from another task").into_response() })
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn a_problem_built_in_a_spawned_task_is_finished_too() {
+    let app = App::<()>::new().routes(routes![spawned]);
+    let (status, content_type, body) = send_full(app, get("/spawned")).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(content_type, "application/problem+json");
+    assert_eq!(body["instance"], "/spawned");
+    assert_eq!(body["detail"], "from another task");
+}
+
+/// A `problem+json` body that is not a problem document at all is passed through unchanged.
+#[lesto::get("/not-a-problem", responses(400))]
+async fn not_a_problem() -> lesto::axum::response::Response {
+    lesto::axum::response::Response::builder()
+        .status(StatusCode::BAD_REQUEST)
+        .header(header::CONTENT_TYPE, "application/problem+json")
+        .body(Body::from("not json at all"))
+        .unwrap()
+}
+
+#[tokio::test]
+async fn an_unparsable_problem_body_is_left_alone() {
+    let app = App::<()>::new().routes(routes![not_a_problem]);
+    let response = app
+        .into_router()
+        .oneshot(get("/not-a-problem"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    assert_eq!(&bytes[..], b"not json at all");
+}
+
+#[tokio::test]
+async fn the_problem_layer_works_on_a_plain_axum_router() {
+    use lesto::layers::ProblemLayer;
+
+    let router = lesto::axum::Router::new()
+        .route(
+            "/gone",
+            lesto::axum::routing::get(|| async { HttpError::not_found("gone") }),
+        )
+        .layer(ProblemLayer::new());
+    let response = router.oneshot(get("/gone")).await.unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    let problem: Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(problem["instance"], "/gone", "the layer alone is enough");
+}

@@ -6,12 +6,11 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
-use axum::body::Body;
 use axum::extract::Request;
 use axum::middleware::{self, Next};
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::{Router, get};
-use http::{HeaderValue, StatusCode, header};
+use http::{StatusCode, header};
 use schemars::SchemaGenerator;
 use schemars::generate::SchemaSettings;
 use schemars::transform::ReplaceBoolSchemas;
@@ -19,7 +18,7 @@ use tower_layer::Layer;
 use tower_service::Service;
 
 use crate::docs::{self, DocsAssets};
-use crate::error::{ErrorFormat, HttpError, PROBLEM_JSON, Problem, problem_to_fastapi};
+use crate::error::{ErrorFormat, HttpError};
 use crate::openapi::{self, Components, OpenApi, SecurityRequirement, SecurityScheme, Tag};
 use crate::operation::{OperationHandler, OperationInput, OperationOutput};
 use crate::route::{PendingOperation, RouteMeta, RouteSet};
@@ -418,12 +417,9 @@ where
             HttpError::new(StatusCode::METHOD_NOT_ALLOWED, "Method Not Allowed")
         });
 
-        router =
-            router.layer(CatchPanicLayer).layer(middleware::from_fn(
-                move |req: Request, next: Next| async move {
-                    finish_problem(req, next, error_format).await
-                },
-            ));
+        router = router
+            .layer(CatchPanicLayer)
+            .layer(crate::layers::ProblemLayer::format(error_format));
 
         // Outermost, so the span covers the fallbacks, the panic catcher and the rewriting of
         // the problem body — everything the client waits for. It still runs *inside* routing,
@@ -590,51 +586,6 @@ where
     fn from(app: App<S>) -> Self {
         app.into_router()
     }
-}
-
-fn is_problem(response: &Response) -> bool {
-    response
-        .headers()
-        .get(header::CONTENT_TYPE)
-        .and_then(|v| v.to_str().ok())
-        .is_some_and(|ct| ct.starts_with(PROBLEM_JSON))
-}
-
-/// Post-process `application/problem+json` responses: fill in `instance` with the request
-/// path and, for [`ErrorFormat::FastApi`], rewrite the body into FastAPI's shape.
-///
-/// Problem bodies are produced by this process (handlers, extractors, fallbacks), never by the
-/// client, so buffering them whole is bounded by what the application already built in memory.
-async fn finish_problem(req: Request, next: Next, format: ErrorFormat) -> Response {
-    let instance = req.uri().path().to_owned();
-    let response = next.run(req).await;
-    if !is_problem(&response) {
-        return response;
-    }
-    let (mut parts, body) = response.into_parts();
-    parts.headers.remove(header::CONTENT_LENGTH);
-    let Ok(bytes) = axum::body::to_bytes(body, usize::MAX).await else {
-        tracing::error!("problem+json body could not be read; answering without a body");
-        return Response::from_parts(parts, Body::empty());
-    };
-    let Ok(mut problem) = serde_json::from_slice::<Problem>(&bytes) else {
-        return Response::from_parts(parts, Body::from(bytes));
-    };
-    if problem.instance.is_none() {
-        problem.instance = Some(instance);
-    }
-    let body = match format {
-        ErrorFormat::Problem => serde_json::to_vec(&problem),
-        ErrorFormat::FastApi => {
-            parts.headers.insert(
-                header::CONTENT_TYPE,
-                HeaderValue::from_static("application/json"),
-            );
-            serde_json::to_vec(&problem_to_fastapi(&problem))
-        }
-    };
-    let body = body.unwrap_or_else(|_| bytes.to_vec());
-    Response::from_parts(parts, Body::from(body))
 }
 
 // ---- panics -------------------------------------------------------------------------------

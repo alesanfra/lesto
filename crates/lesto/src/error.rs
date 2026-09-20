@@ -106,16 +106,92 @@ impl Problem {
 
 impl IntoResponse for Problem {
     fn into_response(self) -> Response {
-        let status = StatusCode::from_u16(self.status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
-        match serde_json::to_vec(&self) {
-            Ok(bytes) => (
-                status,
-                [(header::CONTENT_TYPE, HeaderValue::from_static(PROBLEM_JSON))],
-                bytes,
-            )
-                .into_response(),
-            Err(_) => status.into_response(),
+        render(self)
+    }
+}
+
+// ---- rendering ----------------------------------------------------------------------------
+
+/// What a problem needs to know about the request it answers, to be serialized **once**.
+///
+/// Set by [`ProblemLayer`](crate::layers::ProblemLayer) around every request it handles, read
+/// by [`render`]. Outside that layer (a plain `axum::Router`, a problem built in a spawned
+/// task) there is none, and a problem renders as RFC 9457 without `instance`.
+#[derive(Clone)]
+pub(crate) struct RenderContext {
+    /// The request URI, cloned once per request. Only the path is used, and only when a
+    /// problem is actually rendered, so the `String` is paid for on the error path alone.
+    pub(crate) uri: http::Uri,
+    pub(crate) format: ErrorFormat,
+}
+
+tokio::task_local! {
+    pub(crate) static RENDER: RenderContext;
+}
+
+/// Marker extension on a response whose body is final: `instance` is filled in and the format
+/// is the one the application asked for.
+///
+/// [`ProblemLayer`](crate::layers::ProblemLayer) leaves such a response alone. A
+/// `problem+json` response without it — built by hand, or built where the layer's context
+/// could not be seen (a spawned task) — goes through the layer's slow path, which parses and
+/// rewrites it.
+#[derive(Debug, Clone, Copy)]
+pub struct ProblemRendered;
+
+/// Turn a problem into its final response, in the format and with the `instance` the current
+/// request asks for.
+pub(crate) fn render(mut problem: Problem) -> Response {
+    let status = StatusCode::from_u16(problem.status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+    let context = RENDER.try_with(Clone::clone).ok();
+    let format = match &context {
+        Some(context) => {
+            if problem.instance.is_none() {
+                problem.instance = Some(context.uri.path().to_owned());
+            }
+            context.format
         }
+        None => ErrorFormat::Problem,
+    };
+    let (content_type, body) = match format {
+        ErrorFormat::Problem => (PROBLEM_JSON, serde_json::to_vec(&problem)),
+        ErrorFormat::FastApi => ("application/json", fastapi_body(&problem)),
+    };
+    let Ok(body) = body else {
+        // Only an extension member can fail to serialize, and only a custom `Serialize` can do
+        // that; the status still says what happened.
+        return status.into_response();
+    };
+    let mut response = (
+        status,
+        [(header::CONTENT_TYPE, HeaderValue::from_static(content_type))],
+        body,
+    )
+        .into_response();
+    if context.is_some() {
+        // Without a context there is no `instance` and no format to obey, so the response is
+        // *not* final: a problem built in a spawned task still goes through the layer's slow
+        // path and comes out like every other one.
+        response.extensions_mut().insert(ProblemRendered);
+    }
+    response
+}
+
+/// FastAPI's shape, serialized straight to bytes (no intermediate `Value`).
+fn fastapi_body(problem: &Problem) -> Result<Vec<u8>, serde_json::Error> {
+    if problem.errors.is_empty() {
+        let detail = problem
+            .detail
+            .clone()
+            .unwrap_or_else(|| problem.title.clone());
+        serde_json::to_vec(&HttpErrorBody { detail })
+    } else {
+        let detail = problem
+            .errors
+            .iter()
+            .map(ValidationErrorItem::from_problem_error)
+            .collect();
+        serde_json::to_vec(&HttpValidationError { detail })
     }
 }
 
@@ -582,6 +658,90 @@ mod tests {
             "{}",
             std::mem::size_of::<HttpError>()
         );
+    }
+
+    #[tokio::test]
+    async fn rendering_without_a_context_is_rfc_9457_and_not_final() {
+        let response = HttpError::not_found("gone").into_response();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        assert_eq!(
+            response.headers()[header::CONTENT_TYPE],
+            PROBLEM_JSON,
+            "the default format"
+        );
+        assert!(
+            response.extensions().get::<ProblemRendered>().is_none(),
+            "`instance` is still missing, so the layer must finish this one"
+        );
+        let problem = body_json(response).await;
+        assert_eq!(problem["instance"], Value::Null);
+    }
+
+    #[tokio::test]
+    async fn a_context_fills_in_the_instance_once() {
+        let response = render_in("/users/42", ErrorFormat::Problem, || {
+            HttpError::not_found("gone").into_response()
+        })
+        .await;
+        assert!(response.extensions().get::<ProblemRendered>().is_some());
+        let problem = body_json(response).await;
+        assert_eq!(problem["instance"], "/users/42");
+        assert_eq!(problem["detail"], "gone");
+    }
+
+    #[tokio::test]
+    async fn an_instance_set_by_the_user_is_kept() {
+        let response = render_in("/users/42", ErrorFormat::Problem, || {
+            let mut problem = HttpError::not_found("gone").into_problem();
+            problem.instance = Some("urn:uuid:1234".to_string());
+            problem.into_response()
+        })
+        .await;
+        assert_eq!(body_json(response).await["instance"], "urn:uuid:1234");
+    }
+
+    #[tokio::test]
+    async fn the_fastapi_format_is_rendered_in_place() {
+        let response = render_in("/users/42", ErrorFormat::FastApi, || {
+            HttpError::not_found("gone").into_response()
+        })
+        .await;
+        assert_eq!(response.headers()[header::CONTENT_TYPE], "application/json");
+        assert_eq!(body_json(response).await, json!({"detail": "gone"}));
+
+        let response = render_in("/users", ErrorFormat::FastApi, || {
+            ValidationError::single(
+                vec!["body".into(), "name".into()],
+                "too short",
+                "value_error",
+            )
+            .into_response()
+        })
+        .await;
+        assert_eq!(
+            body_json(response).await,
+            json!({"detail": [{"loc": ["body", "name"], "msg": "too short", "type": "value_error"}]})
+        );
+    }
+
+    /// Render `build` as if [`crate::layers::ProblemLayer`] were running around `path`.
+    async fn render_in(
+        path: &str,
+        format: ErrorFormat,
+        build: impl FnOnce() -> Response,
+    ) -> Response {
+        let context = RenderContext {
+            uri: path.parse().unwrap(),
+            format,
+        };
+        RENDER.scope(context, async move { build() }).await
+    }
+
+    async fn body_json(response: Response) -> Value {
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        serde_json::from_slice(&bytes).unwrap()
     }
 
     #[test]

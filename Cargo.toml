@@ -27,6 +27,9 @@ tower = { version = "0.5", features = ["util"] }
 http = "1"
 http-body-util = "0.1"
 indexmap = { version = "2", features = ["serde"] }
+# Safe pin projection for the hand-written layer futures in `lesto::layers`. Macro-only crate,
+# already in the tree through tokio and hyper.
+pin-project-lite = "0.2"
 syn = { version = "2", features = ["full", "extra-traits"] }
 quote = "1"
 proc-macro2 = "1"
