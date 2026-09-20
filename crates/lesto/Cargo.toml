@@ -85,3 +85,7 @@ http-body-util.workspace = true
 
 [target.'cfg(unix)'.dev-dependencies]
 libc = "0.2"
+
+[[bench]]
+name = "overhead"
+harness = false
