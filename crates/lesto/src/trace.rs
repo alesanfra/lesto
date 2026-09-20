@@ -352,18 +352,24 @@ fn redact_query(query: &str) -> Cow<'_, str> {
 ///
 /// **A propagator has to be installed**, once, next to the tracer — the OpenTelemetry API ships
 /// a no-op by default and lesto does not choose for you (W3C, B3 and the others live in
-/// different crates):
+/// different crates) — and lesto has to be told, so that an application exporting nothing pays
+/// nothing:
 ///
 /// ```ignore
 /// opentelemetry::global::set_text_map_propagator(
 ///     opentelemetry_sdk::propagation::TraceContextPropagator::new(),
 /// );
+/// lesto::otel::enable_propagation();
 /// ```
+///
+/// [`otel::init`](crate::otel::init) and `App::serve` do both by themselves.
 ///
 /// Attaching the parent also needs `tracing_opentelemetry::layer()` in the subscriber; without
 /// it the call is a no-op and the span is simply a root.
 #[cfg(feature = "otel")]
 pub mod propagation {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
     use http::HeaderMap;
     use opentelemetry::propagation::Extractor;
     use tracing::Span;
@@ -382,8 +388,19 @@ pub mod propagation {
         }
     }
 
+    /// Whether a propagator worth asking has been installed. See
+    /// [`otel::enable_propagation`](crate::otel::enable_propagation).
+    pub(crate) static ACTIVE: AtomicBool = AtomicBool::new(false);
+
     /// Make the context carried by `headers` the parent of `span`.
+    ///
+    /// Nothing at all until [`otel::enable_propagation`](crate::otel::enable_propagation) has
+    /// run: the global propagator defaults to a no-op, and asking it on every request buys a
+    /// lookup and a header walk for an answer that is always "no parent".
     pub fn set_parent(span: &Span, headers: &HeaderMap) {
+        if !ACTIVE.load(Ordering::Relaxed) {
+            return;
+        }
         let context =
             opentelemetry::global::get_text_map_propagator(|p| p.extract(&Headers(headers)));
         // `Err` means the subscriber has no `tracing_opentelemetry::layer()`, so there is no

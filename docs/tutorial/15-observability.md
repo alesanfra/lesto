@@ -129,6 +129,18 @@ The span lands in trace `4bf92f35…` with `00f067aa0ba902b7` as its parent. les
 W3C propagator; for B3 or another format, set yours with
 `opentelemetry::global::set_text_map_propagator` after `init`.
 
+Reading the header is switched on by `init` (and by `App::serve`), not by the feature: until
+then lesto never asks the global propagator, which by default is a no-op with a lookup and a
+header walk to answer "no parent" on every request. An application that installs **its own**
+subscriber — the escape hatch below — installs its own propagator too, and has to say so:
+
+```rust,ignore
+opentelemetry::global::set_text_map_propagator(
+    opentelemetry_sdk::propagation::TraceContextPropagator::new(),
+);
+lesto::otel::enable_propagation();
+```
+
 ## Store spans
 
 With the `db` feature, `read`, `write`, `read_with` and `write_with` open a client span around

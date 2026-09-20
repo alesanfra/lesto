@@ -173,6 +173,25 @@ impl Drop for Telemetry {
     }
 }
 
+/// Read the incoming `traceparent` on every request from now on.
+///
+/// [`init`] and [`init_named`] call this, because they install a propagator themselves. An
+/// application that builds its own subscriber (the escape hatch: gRPC, a sampler, another
+/// propagator) calls it once, after `opentelemetry::global::set_text_map_propagator`:
+///
+/// ```no_run
+/// opentelemetry::global::set_text_map_propagator(
+///     opentelemetry_sdk::propagation::TraceContextPropagator::new(),
+/// );
+/// lesto::otel::enable_propagation();
+/// ```
+///
+/// Until then lesto does not ask the global propagator anything. The API's default is a no-op
+/// that would answer "no parent" to every request, at the price of a lookup per request.
+pub fn enable_propagation() {
+    crate::trace::propagation::ACTIVE.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
 /// Install the console subscriber and, when the environment points at a collector, the OTLP
 /// export of spans and logs plus the W3C trace context propagator.
 ///
@@ -239,6 +258,7 @@ fn install(config: Config) -> Telemetry {
     // Continue traces started by the caller. Set after the subscriber so the choice is visible
     // in the logs of whoever wonders why a `traceparent` was ignored.
     opentelemetry::global::set_text_map_propagator(TraceContextPropagator::new());
+    enable_propagation();
 
     if let Some(protocol) = &config.unsupported_protocol {
         tracing::warn!(
