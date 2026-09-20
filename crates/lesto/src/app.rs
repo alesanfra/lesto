@@ -1,14 +1,10 @@
 //! `App`: an `axum::Router` that also accumulates an OpenAPI document.
 
 use std::convert::Infallible;
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
-use std::task::{Context, Poll};
 
 use axum::extract::Request;
-use axum::middleware::{self, Next};
-use axum::response::{Html, IntoResponse, Response};
+use axum::response::{Html, IntoResponse};
 use axum::routing::{Router, get};
 use http::{StatusCode, header};
 use schemars::SchemaGenerator;
@@ -417,22 +413,19 @@ where
             HttpError::new(StatusCode::METHOD_NOT_ALLOWED, "Method Not Allowed")
         });
 
-        router = router
-            .layer(CatchPanicLayer)
-            .layer(crate::layers::ProblemLayer::format(error_format));
-
-        // Outermost, so the span covers the fallbacks, the panic catcher and the rewriting of
-        // the problem body — everything the client waits for. It still runs *inside* routing,
-        // which is what makes `MatchedPath` (and so `http.route`) available.
-        let trace = self.trace;
-        if trace.enabled {
-            router = router.layer(middleware::from_fn(
-                move |req: Request, next: Next| async move {
-                    crate::trace::trace_request(req, next, trace).await
-                },
-            ));
-        }
-        router
+        // One `Router::layer` call, not three: axum re-boxes every route (and its future) on
+        // each one, so the layers are stacked first and added together.
+        let layers = tower_layer::Stack::new(
+            tower_layer::Stack::new(
+                crate::layers::CatchPanicLayer,
+                crate::layers::ProblemLayer::format(error_format),
+            ),
+            // Outermost, so the span covers the fallbacks, the panic catcher and the rendering
+            // of the problem body — everything the client waits for. It still runs *inside*
+            // routing, which is what makes `MatchedPath` (and so `http.route`) available.
+            crate::layers::RequestSpanLayer::with(self.trace),
+        );
+        router.layer(layers)
     }
 }
 
@@ -586,95 +579,6 @@ where
     fn from(app: App<S>) -> Self {
         app.into_router()
     }
-}
-
-// ---- panics -------------------------------------------------------------------------------
-
-/// Turns a panic anywhere below (extractor, handler, inner middleware) into a `500` problem.
-///
-/// Without it hyper drops the connection and the client sees a transport error rather than a
-/// response. The panic message is not sent to the client; the panic hook has already printed
-/// it (and `tracing` gets a record).
-#[derive(Clone, Copy)]
-struct CatchPanicLayer;
-
-impl<S> Layer<S> for CatchPanicLayer {
-    type Service = CatchPanic<S>;
-
-    fn layer(&self, inner: S) -> Self::Service {
-        CatchPanic { inner }
-    }
-}
-
-#[derive(Clone)]
-struct CatchPanic<S> {
-    inner: S,
-}
-
-impl<S> Service<Request> for CatchPanic<S>
-where
-    S: Service<Request, Response = Response, Error = Infallible>,
-    S::Future: Send + 'static,
-{
-    type Response = Response;
-    type Error = Infallible;
-    type Future = Pin<Box<dyn Future<Output = Result<Response, Infallible>> + Send + 'static>>;
-
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.inner.poll_ready(cx)
-    }
-
-    fn call(&mut self, req: Request) -> Self::Future {
-        // A panic while *building* the future is caught too.
-        let future =
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.inner.call(req)));
-        Box::pin(async move {
-            let future = match future {
-                Ok(future) => future,
-                Err(payload) => return Ok(panic_response(payload)),
-            };
-            Ok(CaughtFuture {
-                inner: Some(Box::pin(future)),
-            }
-            .await)
-        })
-    }
-}
-
-struct CaughtFuture<F> {
-    inner: Option<Pin<Box<F>>>,
-}
-
-impl<F> Future for CaughtFuture<F>
-where
-    F: Future<Output = Result<Response, Infallible>>,
-{
-    type Output = Response;
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let inner = self.inner.as_mut().expect("polled after completion");
-        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| inner.as_mut().poll(cx))) {
-            Ok(Poll::Pending) => Poll::Pending,
-            Ok(Poll::Ready(Ok(response))) => {
-                self.inner = None;
-                Poll::Ready(response)
-            }
-            Err(payload) => {
-                self.inner = None;
-                Poll::Ready(panic_response(payload))
-            }
-        }
-    }
-}
-
-fn panic_response(payload: Box<dyn std::any::Any + Send>) -> Response {
-    let message = payload
-        .downcast_ref::<&str>()
-        .map(|s| s.to_string())
-        .or_else(|| payload.downcast_ref::<String>().cloned())
-        .unwrap_or_else(|| "non-string panic payload".to_string());
-    tracing::error!(panic = %message, "handler panicked");
-    HttpError::internal("Internal Server Error").into_response()
 }
 
 #[cfg(test)]

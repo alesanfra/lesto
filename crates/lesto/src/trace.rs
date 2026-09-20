@@ -6,8 +6,9 @@
 //! (`http.request.method`, `http.route`, `http.response.status_code`, ...) plus the `otel.*`
 //! fields [`tracing-opentelemetry`] reads (`otel.name`, `otel.kind`, `otel.status_code`). With
 //! that layer installed the span is exported as an OpenTelemetry `SERVER` span; with a plain
-//! `tracing_subscriber::fmt` it is an ordinary span, and with no subscriber at all it costs
-//! one atomic load.
+//! `tracing_subscriber::fmt` it is an ordinary span, and with no subscriber interested in it
+//! the request runs on the inner future itself: what is left is the callsite check `tracing`
+//! does to find that out ([`crate::layers::RequestSpanLayer`]).
 //!
 //! Spans are emitted at `INFO`. There is no level knob: filtering is the subscriber's job
 //! (`RUST_LOG=lesto=info`), and `tracing` levels have to be compile-time constants.
@@ -29,12 +30,11 @@
 use std::borrow::Cow;
 use std::net::SocketAddr;
 
-use axum::extract::{ConnectInfo, MatchedPath, Request};
-use axum::middleware::Next;
+use axum::extract::{ConnectInfo, MatchedPath};
 use axum::response::Response;
 use http::{HeaderMap, Method, Version, header};
+use tracing::Span;
 use tracing::field::Empty;
-use tracing::{Instrument, Span};
 
 /// What the request span records.
 ///
@@ -96,22 +96,13 @@ impl Trace {
     }
 }
 
-/// The middleware installed by `into_router`: open the span, run the request inside it, record
-/// the response.
-pub(crate) async fn trace_request(req: Request, next: Next, config: Trace) -> Response {
-    let span = request_span(&req, config);
-    let response = next.run(req).instrument(span.clone()).await;
-    record_response(&span, &response);
-    response
-}
-
 /// The `SERVER` span for `req`.
 ///
 /// Every field is declared here, because `tracing` metadata is static: the ones that are only
 /// known later (the status, the error) start [`Empty`] and are recorded by
 /// [`record_response`]. `otel.name` carries the `{method} {route}` name, which a `tracing` span
 /// name cannot (it must be a constant).
-fn request_span(req: &Request, config: Trace) -> Span {
+pub(crate) fn request_span<B>(req: &http::Request<B>, config: Trace) -> Span {
     let (method, method_original) = method_names(req.method());
     let span = tracing::info_span!(
         "http.server.request",
@@ -209,7 +200,7 @@ fn request_span(req: &Request, config: Trace) -> Span {
 ///
 /// A `5xx` is the server's own failure, so it sets `error.type` and the span status; a `4xx` is
 /// the client's, and the conventions are explicit that a `SERVER` span must stay unset for it.
-fn record_response(span: &Span, response: &Response) {
+pub(crate) fn record_response(span: &Span, response: &Response) {
     let status = response.status();
     span.record("http.response.status_code", status.as_u16());
     if status.is_server_error() {
@@ -256,7 +247,7 @@ fn protocol_version(version: Version) -> Option<&'static str> {
 }
 
 /// `url.scheme`: what the request line says, else what a trusted proxy says, else `http`.
-fn scheme(req: &Request, config: Trace) -> &str {
+fn scheme<B>(req: &http::Request<B>, config: Trace) -> &str {
     if let Some(scheme) = req.uri().scheme_str() {
         return scheme;
     }
@@ -272,7 +263,7 @@ fn scheme(req: &Request, config: Trace) -> &str {
 
 /// `server.address` and `server.port`, in the order the conventions prescribe: the forwarded
 /// host (when trusted), then the `:authority` of HTTP/2 and HTTP/3, then `Host`.
-fn server_address(req: &Request, config: Trace) -> Option<(&str, Option<u16>)> {
+fn server_address<B>(req: &http::Request<B>, config: Trace) -> Option<(&str, Option<u16>)> {
     let forwarded = config
         .forwarded
         .then(|| first_forwarded(req.headers(), "x-forwarded-host"))

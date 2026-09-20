@@ -4,32 +4,38 @@
 //! inside a larger axum one) can keep the behavior it had by adding these:
 //!
 //! ```
-//! use lesto::layers::ProblemLayer;
+//! use lesto::layers::{CatchPanicLayer, ProblemLayer};
 //!
 //! let router: axum::Router = axum::Router::new()
 //!     .route("/hello", axum::routing::get(|| async { "hi" }))
+//!     .layer(CatchPanicLayer)
 //!     .layer(ProblemLayer::new());
 //! ```
 //!
 //! Order matters: `Router::layer` makes the last one added the outermost, and
 //! [`ProblemLayer`] belongs outside the panic catcher, so the `500` a caught panic produces
-//! gets its `instance` too. It runs *inside* routing, like everything a `Router::layer` adds.
+//! gets its `instance` too. [`RequestSpanLayer`] goes outside both, so the span sees the status
+//! the client sees. They all run *inside* routing, which is what makes `MatchedPath` (and so
+//! `http.route`) available.
 //!
 //! Every future here is a concrete type: no `Box::pin` on the happy path.
 
+use std::any::Any;
+use std::convert::Infallible;
 use std::marker::PhantomData;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use axum::body::Body;
-use axum::response::Response;
+use axum::response::{IntoResponse, Response};
 use http::{HeaderValue, Request, header};
 use pin_project_lite::pin_project;
 use tokio::task::futures::TaskLocalFuture;
 use tower_layer::Layer;
 use tower_service::Service;
 
-use crate::error::{ErrorFormat, PROBLEM_JSON, Problem, ProblemRendered, RenderContext};
+use crate::error::{ErrorFormat, HttpError, PROBLEM_JSON, Problem, ProblemRendered, RenderContext};
+use crate::trace::Trace;
 
 // ---- problems -----------------------------------------------------------------------------
 
@@ -196,4 +202,197 @@ async fn rewrite(response: Response, context: RenderContext) -> Response {
     let mut response = Response::from_parts(parts, Body::from(body));
     response.extensions_mut().insert(ProblemRendered);
     response
+}
+
+// ---- panics -------------------------------------------------------------------------------
+
+/// Turns a panic anywhere below (extractor, handler, inner middleware) into a `500` problem.
+///
+/// Without it hyper drops the connection and the client sees a transport error rather than a
+/// response. The panic message is not sent to the client; the panic hook has already printed
+/// it (and `tracing` gets a record).
+#[derive(Debug, Clone, Copy)]
+pub struct CatchPanicLayer;
+
+impl<S> Layer<S> for CatchPanicLayer {
+    type Service = CatchPanic<S>;
+
+    fn layer(&self, inner: S) -> Self::Service {
+        CatchPanic { inner }
+    }
+}
+
+/// The service [`CatchPanicLayer`] produces.
+#[derive(Debug, Clone, Copy)]
+pub struct CatchPanic<S> {
+    inner: S,
+}
+
+impl<S, B> Service<Request<B>> for CatchPanic<S>
+where
+    S: Service<Request<B>, Response = Response, Error = Infallible>,
+{
+    type Response = Response;
+    type Error = Infallible;
+    type Future = CaughtFuture<S::Future>;
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx)
+    }
+
+    fn call(&mut self, req: Request<B>) -> Self::Future {
+        // A panic while *building* the future is caught too.
+        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.inner.call(req))) {
+            Ok(future) => CaughtFuture::Running { future },
+            Err(payload) => CaughtFuture::Panicked {
+                response: Some(panic_response(payload)),
+            },
+        }
+    }
+}
+
+pin_project! {
+    /// The future of [`CatchPanic`].
+    #[project = CaughtFutureProj]
+    pub enum CaughtFuture<F> {
+        Running { #[pin] future: F },
+        Panicked { response: Option<Response> },
+    }
+}
+
+impl<F> Future for CaughtFuture<F>
+where
+    F: Future<Output = Result<Response, Infallible>>,
+{
+    type Output = Result<Response, Infallible>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        match self.project() {
+            CaughtFutureProj::Running { future } => {
+                match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| future.poll(cx))) {
+                    Ok(polled) => polled,
+                    Err(payload) => Poll::Ready(Ok(panic_response(payload))),
+                }
+            }
+            CaughtFutureProj::Panicked { response } => {
+                Poll::Ready(Ok(response.take().expect("polled after completion")))
+            }
+        }
+    }
+}
+
+fn panic_response(payload: Box<dyn Any + Send>) -> Response {
+    let message = payload
+        .downcast_ref::<&str>()
+        .map(|s| s.to_string())
+        .or_else(|| payload.downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "non-string panic payload".to_string());
+    tracing::error!(panic = %message, "handler panicked");
+    HttpError::internal("Internal Server Error").into_response()
+}
+
+// ---- request span -------------------------------------------------------------------------
+
+/// Opens the request span described in [`crate::trace`] and records the response on it.
+///
+/// Named `RequestSpanLayer` rather than `TraceLayer` so it can live next to
+/// `tower_http::trace::TraceLayer` in one `use` list.
+///
+/// With no subscriber interested in the span the cost is the callsite check `tracing` does and
+/// nothing else: the future is the inner one, not wrapped.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct RequestSpanLayer {
+    trace: Trace,
+}
+
+impl RequestSpanLayer {
+    /// The default configuration ([`Trace::new`]).
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Record what `trace` says. [`Trace::off`] leaves the request alone: the inner future is
+    /// returned as it is, and the layer costs a branch.
+    pub fn with(trace: Trace) -> Self {
+        Self { trace }
+    }
+}
+
+impl<S> Layer<S> for RequestSpanLayer {
+    type Service = RequestSpan<S>;
+
+    fn layer(&self, inner: S) -> Self::Service {
+        RequestSpan {
+            inner,
+            trace: self.trace,
+        }
+    }
+}
+
+/// The service [`RequestSpanLayer`] produces.
+#[derive(Debug, Clone, Copy)]
+pub struct RequestSpan<S> {
+    inner: S,
+    trace: Trace,
+}
+
+impl<S, B> Service<Request<B>> for RequestSpan<S>
+where
+    S: Service<Request<B>, Response = Response>,
+{
+    type Response = Response;
+    type Error = S::Error;
+    type Future = RequestSpanFuture<S::Future>;
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx)
+    }
+
+    fn call(&mut self, req: Request<B>) -> Self::Future {
+        let span = match self.trace.enabled {
+            true => crate::trace::request_span(&req, self.trace),
+            false => tracing::Span::none(),
+        };
+        if span.is_disabled() {
+            return RequestSpanFuture::Disabled {
+                future: self.inner.call(req),
+            };
+        }
+        let future = {
+            let _entered = span.enter();
+            self.inner.call(req)
+        };
+        RequestSpanFuture::Recording { future, span }
+    }
+}
+
+pin_project! {
+    /// The future of [`RequestSpan`].
+    #[project = RequestSpanFutureProj]
+    pub enum RequestSpanFuture<F> {
+        // Nobody is listening: the inner future, polled as if the layer were not there.
+        Disabled { #[pin] future: F },
+        Recording { #[pin] future: F, span: tracing::Span },
+    }
+}
+
+impl<F, E> Future for RequestSpanFuture<F>
+where
+    F: Future<Output = Result<Response, E>>,
+{
+    type Output = Result<Response, E>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        match self.project() {
+            RequestSpanFutureProj::Disabled { future } => future.poll(cx),
+            RequestSpanFutureProj::Recording { future, span } => {
+                let _entered = span.enter();
+                let polled = std::task::ready!(future.poll(cx));
+                if let Ok(response) = &polled {
+                    crate::trace::record_response(span, response);
+                }
+                Poll::Ready(polled)
+            }
+        }
+    }
 }
