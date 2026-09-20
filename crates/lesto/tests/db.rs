@@ -662,3 +662,57 @@ async fn declared_permissions_are_checked_without_a_requirement_argument() {
         2
     );
 }
+
+// ---- one authentication per request ----------------------------------------------------------
+
+static AUTHENTICATIONS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// Counts how often it is authenticated, to prove two stores share one principal.
+#[derive(Debug)]
+struct Counted;
+
+impl Authenticated for Counted {
+    type State = AppState;
+    type Credential = Bearer;
+
+    async fn authenticate(_token: Bearer, _state: &AppState) -> Result<Self, HttpError> {
+        AUTHENTICATIONS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Ok(Counted)
+    }
+
+    fn has_permission(&self, _permission: &str) -> bool {
+        true
+    }
+}
+
+#[lesto::get("/two-stores")]
+async fn two_stores(
+    _reader: Store<ReadOnly, Counted, Sqlite>,
+    _writer: Store<ReadWrite, Counted, Sqlite>,
+) -> &'static str {
+    "ok"
+}
+
+#[tokio::test]
+async fn two_stores_in_one_handler_authenticate_once() {
+    let db = Db::new(pool(&[]).await);
+    let router = App::<AppState>::new()
+        .routes(routes![two_stores])
+        .with_state(AppState { db })
+        .into_router();
+
+    for expected in 1..=2 {
+        let request = Request::builder()
+            .uri("/two-stores")
+            .header(header::AUTHORIZATION, "Bearer anything")
+            .body(Body::empty())
+            .unwrap();
+        let (status, _) = send(&router, request).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            AUTHENTICATIONS.load(std::sync::atomic::Ordering::SeqCst),
+            expected,
+            "once per request, however many stores the handler takes"
+        );
+    }
+}

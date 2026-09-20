@@ -103,6 +103,9 @@ impl Authenticated for User {
   header, the security scheme in OpenAPI.
 - `authenticate` turns the credential into an identity. Here a lookup table; in a real
   application, a JWT check or a session query. Failing with `HttpError::unauthorized` answers 401.
+  It runs **once per request**, however many stores the handler takes: the first store to be
+  extracted keeps the principal in the request extensions and the others share it
+  (`store.principal()` still hands out a `&User`; `into_principal()` gives the `Arc<User>`).
 - `has_permission` is asked before every store method that declares a permission.
 
 `State` is an associated type, so a principal belongs to one application state. `Public` works

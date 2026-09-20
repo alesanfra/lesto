@@ -4,6 +4,7 @@
 use std::borrow::Cow;
 use std::future::Future;
 use std::marker::PhantomData;
+use std::sync::Arc;
 
 use crate::axum::extract::{FromRef, FromRequestParts};
 use crate::axum::response::Response;
@@ -37,7 +38,9 @@ use crate::db::trace;
 /// ```
 pub struct Store<M, P, DB: Database> {
     db: Db<DB>,
-    principal: P,
+    /// Shared, so that two stores in one handler authenticate once: the extractor caches it in
+    /// the request extensions and the second extraction is a reference-count increment.
+    principal: Arc<P>,
     /// Read off the principal once, when the store is built, rather than per method: they
     /// cannot change while the store lives, and this is what keeps `read` and `write` free of
     /// a `P: PrincipalDocs` bound that every user's store `impl` block would have to repeat.
@@ -48,6 +51,14 @@ pub struct Store<M, P, DB: Database> {
 impl<M: Mode, P, DB: Dialect> Store<M, P, DB> {
     /// Build a store by hand (tests, background jobs). Handlers get theirs by extraction.
     pub fn new(db: Db<DB>, principal: P) -> Self
+    where
+        P: PrincipalDocs,
+    {
+        Self::from_shared(db, Arc::new(principal))
+    }
+
+    /// [`new`](Self::new) with a principal somebody else already holds.
+    pub fn from_shared(db: Db<DB>, principal: Arc<P>) -> Self
     where
         P: PrincipalDocs,
     {
@@ -65,7 +76,8 @@ impl<M: Mode, P, DB: Dialect> Store<M, P, DB> {
         &self.principal
     }
 
-    pub fn into_principal(self) -> P {
+    /// The principal, still shared: a handler holding two stores holds one principal.
+    pub fn into_principal(self) -> Arc<P> {
         self.principal
     }
 
@@ -274,7 +286,7 @@ impl<M: Mode, P: std::fmt::Debug, DB: Database> std::fmt::Debug for Store<M, P, 
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Store")
             .field("mode", &std::any::type_name::<M>())
-            .field("principal", &self.principal)
+            .field("principal", &*self.principal)
             .field("settings", &self.settings)
             .field("db", &self.db)
             .finish()
@@ -291,9 +303,19 @@ where
 {
     type Rejection = Response;
 
+    /// The principal is authenticated once per request: the first store to be extracted puts
+    /// it in the request extensions, and every store after that shares it. A failure is not
+    /// cached — a `401` is answered as many times as it is asked for, which happens once.
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Response> {
-        let principal = P::extract(parts, state).await?;
-        Ok(Store::new(Db::from_ref(state), principal))
+        let principal = match parts.extensions.get::<Arc<P>>() {
+            Some(principal) => principal.clone(),
+            None => {
+                let principal = Arc::new(P::extract(parts, state).await?);
+                parts.extensions.insert(principal.clone());
+                principal
+            }
+        };
+        Ok(Store::from_shared(Db::from_ref(state), principal))
     }
 }
 
