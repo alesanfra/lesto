@@ -4,6 +4,8 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
+use pin_project_lite::pin_project;
+
 use axum::handler::Handler;
 use axum::response::Response;
 use axum::routing::{MethodFilter, MethodRouter};
@@ -319,17 +321,38 @@ impl<H, T, S> Handler<T, S> for WithStatus<H>
 where
     H: Handler<T, S>,
 {
-    type Future = Pin<Box<dyn Future<Output = Response> + Send + 'static>>;
+    type Future = WithStatusFuture<H::Future>;
 
     fn call(self, req: axum::extract::Request, state: S) -> Self::Future {
-        let status = self.status;
-        let fut = self.inner.call(req, state);
-        Box::pin(async move {
-            let mut response = fut.await;
-            if response.status() == StatusCode::OK {
-                *response.status_mut() = status;
-            }
-            response
-        })
+        WithStatusFuture {
+            inner: self.inner.call(req, state),
+            status: self.status,
+        }
+    }
+}
+
+pin_project! {
+    /// The future of [`WithStatus`]: the handler's own, with the status rewritten on the way
+    /// out. Concrete, so a `status = N` route allocates no more than any other.
+    pub struct WithStatusFuture<F> {
+        #[pin]
+        inner: F,
+        status: StatusCode,
+    }
+}
+
+impl<F> Future for WithStatusFuture<F>
+where
+    F: Future<Output = Response>,
+{
+    type Output = Response;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Response> {
+        let this = self.project();
+        let mut response = std::task::ready!(this.inner.poll(cx));
+        if response.status() == StatusCode::OK {
+            *response.status_mut() = *this.status;
+        }
+        std::task::Poll::Ready(response)
     }
 }
