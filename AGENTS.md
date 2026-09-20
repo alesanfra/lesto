@@ -389,6 +389,12 @@ Recorded here because they are not derivable from the code. Do not undo them cas
 
 ## Roadmap and non-goals
 
+The ordered, executable queue lives in [`docs/review/plan-production-ready.md`](docs/review/plan-production-ready.md):
+what blocks publication (the `preserve_order` feature leak, the panicking `IntoStatus`), then
+"batteries included" (`#[lesto::main]`, `#[lesto::model]`, one line in every manifest), then axum
+interoperability and the tower-http batteries. [`plan-B-performance.md`](docs/review/plan-B-performance.md)
+is the finished performance workstream, with its numbers.
+
 Bigger items, easiest first (mirrored in `README.md`, keep the two lists in sync):
 
 1. Lambda adapter tested end to end on floci (<https://floci.io/>: local AWS emulator, Lambda +
