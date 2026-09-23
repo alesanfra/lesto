@@ -283,7 +283,10 @@ Recorded here because they are not derivable from the code. Do not undo them cas
   hundred lines.
 - `App::serve` → `serve_at` → `serve_on` → `serve_until(listener, shutdown)`;
   `shutdown_signal()` is `SIGTERM` or `Ctrl-C`. Graceful shutdown is `axum::serve(..)
-  .with_graceful_shutdown`, nothing more.
+  .with_graceful_shutdown`, raced against `shutdown_timeout` (30 s default) once the signal
+  fires: a hung handler must not outlive the orchestrator's grace period. Connections still open
+  then are dropped with the runtime when `main` returns (axum spawns them; there is nothing to
+  abort from here).
 - `status = N` wraps the handler (`WithStatus`) and rewrites a `200` into `N` at runtime, in a
   pin-projected future around the handler's own — no boxing.
 - The docs routes (`/openapi.json`, `/docs`, `/swagger`) are built once into `Bytes` and carry

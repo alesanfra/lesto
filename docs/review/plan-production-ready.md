@@ -185,14 +185,19 @@ else. One hung handler keeps the process alive until the orchestrator sends `SIG
 turns a rolling deploy into dropped connections.
 
 **Tasks**
-- [ ] `App::shutdown_timeout(Duration)`, default something sane (30 s matches Kubernetes' own
+- [x] `App::shutdown_timeout(Duration)`, default something sane (30 s matches Kubernetes' own
       grace period) or `None` to keep today's behavior — decide and write down which.
-- [ ] Implement by racing the server future against `tokio::time::sleep` after the shutdown
+- [x] Implement by racing the server future against `tokio::time::sleep` after the shutdown
       signal fires; log at `warn` when the deadline is hit, with the number of in-flight requests
       if it is cheap to know.
-- [ ] Test in `tests/shutdown.rs`: a handler that never returns does not keep `serve_until` from
+- [x] Test in `tests/shutdown.rs`: a handler that never returns does not keep `serve_until` from
       resolving.
-- [ ] Tutorial chapter 11 ("Shutdown and panics") documents it.
+- [x] Tutorial chapter 11 ("Shutdown and panics") documents it.
+
+**Done (2026-09-23):** `App::shutdown_timeout(impl Into<Option<Duration>>)`, default
+`DEFAULT_SHUTDOWN_TIMEOUT` = 30 s. The in-flight count is not logged: axum does not expose it and
+counting would add work to every request. Two tests: a hung handler with a 200 ms deadline, and
+`None` still waiting.
 
 ## P1-2. Request timeout and body limit
 

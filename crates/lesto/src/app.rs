@@ -1,6 +1,7 @@
 //! `App`: an `axum::Router` that also accumulates an OpenAPI document.
 
 use std::convert::Infallible;
+use std::time::Duration;
 
 use axum::body::Bytes;
 use axum::extract::Request;
@@ -37,7 +38,12 @@ pub struct App<S = ()> {
     trace: Trace,
     /// A fallback was installed through [`App::fallback`]: keep it instead of the problem 404.
     custom_fallback: bool,
+    /// How long in-flight requests may run after the shutdown signal.
+    shutdown_timeout: Option<Duration>,
 }
+
+/// Default of [`App::shutdown_timeout`]: Kubernetes' own termination grace period.
+pub const DEFAULT_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(30);
 
 fn schema_generator() -> SchemaGenerator {
     SchemaSettings::draft2020_12()
@@ -83,6 +89,7 @@ where
             docs_assets: DocsAssets::default(),
             trace: Trace::default(),
             custom_fallback: false,
+            shutdown_timeout: Some(DEFAULT_SHUTDOWN_TIMEOUT),
         }
     }
 
@@ -196,6 +203,17 @@ where
         self
     }
 
+    /// How long requests still in flight may run once shutdown starts: 30 s by default
+    /// ([`DEFAULT_SHUTDOWN_TIMEOUT`]), `None` to wait for them however long they take.
+    ///
+    /// When the deadline passes, the serve future resolves anyway (with a `warn` log), so one
+    /// hung handler cannot keep the process alive until the orchestrator's `SIGKILL`. Keep it
+    /// below your platform's grace period (Kubernetes: `terminationGracePeriodSeconds`, 30 s).
+    pub fn shutdown_timeout(mut self, timeout: impl Into<Option<Duration>>) -> Self {
+        self.shutdown_timeout = timeout.into();
+        self
+    }
+
     // ---- routes -----------------------------------------------------------------------
 
     /// Register a set of routes, typically built with [`routes!`](crate::routes).
@@ -303,6 +321,7 @@ where
             docs_assets: self.docs_assets,
             trace: self.trace,
             custom_fallback: self.custom_fallback,
+            shutdown_timeout: self.shutdown_timeout,
         }
     }
 
@@ -400,8 +419,9 @@ impl App<()> {
     /// see [`listener`]), until `SIGTERM` or `Ctrl-C`.
     ///
     /// Shutdown is graceful: the listener closes at once, requests already in flight run to
-    /// completion, then the future resolves. Pair it with your platform's termination grace
-    /// period (Kubernetes gives 30 s by default).
+    /// completion, then the future resolves — after [`shutdown_timeout`](Self::shutdown_timeout)
+    /// at the latest (30 s by default). Requests still running then are dropped when `main`
+    /// returns and the runtime shuts down.
     ///
     /// With `LESTO_OPENAPI_PATH` set, nothing is served: the OpenAPI document is written to that
     /// file and this returns `Ok(())`. That is how `lesto openapi` reads the document of an
@@ -448,9 +468,35 @@ impl App<()> {
         }
         #[cfg(feature = "otel")]
         let _telemetry = crate::otel::auto_init(&self.spec.info.title);
-        axum::serve(listener, self.into_router())
+        let timeout = self.shutdown_timeout;
+        let (started, shutdown_started) = tokio::sync::oneshot::channel::<()>();
+        let shutdown = async move {
+            shutdown.await;
+            let _ = started.send(());
+        };
+        let server = axum::serve(listener, self.into_router())
             .with_graceful_shutdown(shutdown)
-            .await
+            .into_future();
+        let Some(timeout) = timeout else {
+            return server.await;
+        };
+        let deadline = async move {
+            match shutdown_started.await {
+                Ok(()) => tokio::time::sleep(timeout).await,
+                // The server finished without a shutdown signal: nothing to time.
+                Err(_) => std::future::pending().await,
+            }
+        };
+        tokio::select! {
+            result = server => result,
+            () = deadline => {
+                tracing::warn!(
+                    timeout_ms = timeout.as_millis() as u64,
+                    "shutdown deadline reached, abandoning requests still in flight"
+                );
+                Ok(())
+            }
+        }
     }
 }
 
