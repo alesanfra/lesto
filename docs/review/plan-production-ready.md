@@ -487,13 +487,21 @@ production: migrations, the pool, a replica" (`examples/02-notes` now runs `sqlx
 
 ## P5-4. README positioning and policies
 
-- [ ] Goals first: "batteries included, like FastAPI", then the comparison table from review §11.
-- [ ] axum version policy, stated plainly: "lesto X.Y tracks axum 0.8; an axum 0.9 release forces
+- [x] Goals first: "batteries included, like FastAPI", then the comparison table from review §11.
+- [x] axum version policy, stated plainly: "lesto X.Y tracks axum 0.8; an axum 0.9 release forces
       a lesto major" (review §4.6), next to the re-export policy from P0-4.
-- [ ] MSRV 1.94 with its reason (sqlx 0.9).
-- [ ] `scalar_script_url` / `swagger_ui_base_url` mentioned near the docs section, for offline or
+- [x] MSRV 1.94 with its reason (sqlx 0.9).
+- [x] `scalar_script_url` / `swagger_ui_base_url` mentioned near the docs section, for offline or
       firewalled deployments.
-- [ ] OTel auto-init and the subscriber escape hatch on the first page.
+- [x] OTel auto-init and the subscriber escape hatch on the first page.
+
+**Done (2026-09-23):** the README opens with the goal (batteries included, like FastAPI), the
+one-line manifest and a five-column comparison (lesto, axum + utoipa/aide, poem-openapi,
+dropshot, loco.rs) reduced from review §11 to qualitative facts; the maturity and performance
+columns were left out, since the review asks for them to be verified before being quoted.
+Versioning (axum, re-exports, MSRV) was written in P0-4; the docs-asset mirrors and OTel
+auto-init are in the feature list. The stale `Store::atomic` / `strict_docs()` roadmap entries
+(one contradicts a design decision, the other is done) are gone.
 
 ## P5-5. Publication
 
