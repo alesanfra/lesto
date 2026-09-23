@@ -507,11 +507,18 @@ auto-init are in the feature list. The stale `Store::atomic` / `strict_docs()` r
 
 **Depends on:** P0, and ideally P1 and P2.
 
-- [ ] `cargo publish --dry-run` for `lesto-macros`, then `lesto`, then `lesto-cli` (the manifests
+- [x] `cargo publish --dry-run` for `lesto-macros`, then `lesto`, then `lesto-cli` (the manifests
       are ready; that is the order).
-- [ ] `cargo deny check` locally (it is CI-only today; `cargo install cargo-deny`), including the
+- [x] `cargo deny check` locally (it is CI-only today; `cargo install cargo-deny`), including the
       licenses of anything P1–P3 add.
-- [ ] Decide the version: `0.1.0` with the axum and re-export policies above.
+- [x] Decide the version: `0.1.0` with the axum and re-export policies above.
+
+**Done (2026-09-23), except the upload itself:** `cargo publish --dry-run --workspace` (examples
+excluded) packages and verifies `lesto-macros`, `lesto` and `lesto-cli` in that order (the
+vendored garde `NOTICE.md` is in the package); `cargo deny check`: advisories, bans, licenses,
+sources ok, with tower-http, flate2 and the metrics crates in the graph. Version `0.1.0`, with
+the policies in the README. `lesto openapi` was implemented and `lesto new` removed in P0-3.
+**The real `cargo publish` is left to the maintainer**: it cannot be undone.
 
 ---
 
