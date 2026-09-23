@@ -1296,3 +1296,108 @@ async fn the_documentation_routes_answer_304_to_a_matching_etag() {
         assert_eq!(response.status(), StatusCode::OK, "{url}");
     }
 }
+
+// ---- key order ------------------------------------------------------------------------------
+
+/// Keys in the raw bytes, top level only, in the order they appear. Parsing into a `Value` would
+/// hide a regression: `Value`'s map order depends on the same `preserve_order` feature.
+fn raw_keys(bytes: &[u8]) -> Vec<String> {
+    let text = std::str::from_utf8(bytes).unwrap();
+    let mut keys = Vec::new();
+    let mut depth = 0;
+    let mut chars = text.char_indices().peekable();
+    while let Some((i, c)) = chars.next() {
+        match c {
+            '{' | '[' => depth += 1,
+            '}' | ']' => {
+                depth -= 1;
+                if depth == 0 {
+                    break;
+                }
+            }
+            '"' => {
+                let start = i + 1;
+                let mut end = start;
+                while let Some((j, c)) = chars.next() {
+                    if c == '\\' {
+                        chars.next();
+                    } else if c == '"' {
+                        end = j;
+                        break;
+                    }
+                }
+                let is_key = text[end + 1..].trim_start().starts_with(':');
+                if depth == 1 && is_key {
+                    keys.push(text[start..end].to_owned());
+                }
+            }
+            _ => {}
+        }
+    }
+    keys
+}
+
+#[derive(Serialize, JsonSchema)]
+struct Ordered {
+    zeta: u8,
+    alpha: u8,
+    mid: u8,
+}
+
+#[lesto::get("/ordered/typed")]
+async fn ordered_typed() -> Json<Ordered> {
+    Json(Ordered {
+        zeta: 1,
+        alpha: 2,
+        mid: 3,
+    })
+}
+
+#[lesto::get("/ordered/value")]
+async fn ordered_value() -> Json<Value> {
+    let mut map = serde_json::Map::new();
+    for key in ["zeta", "alpha", "mid"] {
+        map.insert(key.into(), json!(1));
+    }
+    Json(Value::Object(map))
+}
+
+#[lesto::get("/ordered/problem")]
+async fn ordered_problem() -> HttpError {
+    HttpError::conflict("taken")
+        .with_extension("zeta", 1)
+        .with_extension("alpha", 2)
+        .with_extension("mid", 3)
+}
+
+#[tokio::test]
+async fn response_bodies_keep_key_order() {
+    let router = App::new()
+        .routes(routes![ordered_typed, ordered_value, ordered_problem])
+        .into_router();
+    for (uri, expected) in [
+        ("/ordered/typed", vec!["zeta", "alpha", "mid"]),
+        ("/ordered/value", vec!["zeta", "alpha", "mid"]),
+        (
+            "/ordered/problem",
+            vec![
+                "type", "title", "status", "detail", "instance", "zeta", "alpha", "mid",
+            ],
+        ),
+    ] {
+        let response = router.clone().oneshot(get(uri)).await.unwrap();
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        assert_eq!(raw_keys(&bytes), expected, "{uri}");
+    }
+}
+
+#[tokio::test]
+async fn openapi_bytes_keep_declaration_order() {
+    let router = App::new().routes(routes![ordered_typed]).into_router();
+    let response = router.oneshot(get("/openapi.json")).await.unwrap();
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    let text = std::str::from_utf8(&bytes).unwrap();
+    let schema = &text[text.find("\"Ordered\"").unwrap()..];
+    let properties = &schema[schema.find("\"properties\":").unwrap() + 13..];
+    assert_eq!(raw_keys(properties.as_bytes()), ["zeta", "alpha", "mid"]);
+}

@@ -26,8 +26,10 @@ Every field of a `#[derive(Validate)]` struct needs exactly one `#[garde(...)]` 
 | `custom(fn)` | your own function | `#[garde(custom(is_even))]` |
 | `skip` | no check | `#[garde(skip)]` |
 
-`email` and `url` need the garde features of the same name (`features = ["derive", "email", "url"]`);
-`pattern` needs `regex`.
+`email` and `url` need the garde features of the same name. lesto turns them on through its own
+`email` and `url` features, which are on by default; `default-features = false` on lesto drops
+them (and garde's regex and idna dependencies) when you do not use those rules. `pattern` needs
+`regex`.
 
 ## A complete example
 

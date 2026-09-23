@@ -15,7 +15,7 @@ them as direct dependencies of your crate, exactly as happens with `serde` in an
 [dependencies]
 lesto = { path = "../lesto/crates/lesto" }   # or the published version
 serde = { version = "1", features = ["derive"] }
-garde = { version = "0.23", features = ["derive", "email"] }
+garde = { version = "0.23", features = ["derive"] }
 schemars = { version = "1", features = ["derive"] }
 tokio = { version = "1", features = ["full"] }
 ```

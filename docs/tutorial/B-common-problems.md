@@ -84,8 +84,12 @@ process with `lsof -i :8000`.
 
 ## Fields in the documentation are not in the struct's order
 
-With the current lesto version the order is preserved (schemars' `preserve_order` feature). If
-you use schemars directly elsewhere, enable the same feature for consistency.
+They are: lesto guarantees declaration order for JSON keys, in the OpenAPI document and in
+response bodies (struct fields, problem extensions, a `serde_json::Map` filled in order). It does
+so by enabling `serde_json` and `schemars`' `preserve_order` feature. Cargo unifies features
+across a build, so every `serde_json::Map` in your application is insertion-ordered too, not
+sorted by key. If a field is out of order, it is almost always a `HashMap`, which has no order to
+keep: use `indexmap::IndexMap` (or `BTreeMap` for sorted keys).
 
 ## `/docs` is blank behind a firewall
 

@@ -156,6 +156,13 @@ Recorded here because they are not derivable from the code. Do not undo them cas
   through `App`, `RouteSet`, `OperationBuilder` and the problem layer, and a second body to
   keep in step with the first. A client that needs another shape rewrites the body in a layer
   of its own, which is where a presentation concern belongs.
+- **JSON keys keep declaration order, always** (decided 2026-09-23): in the OpenAPI document and
+  in response bodies. That is `preserve_order` on `serde_json` and `schemars`. Without it
+  `serde_json::Map` is a `BTreeMap`, so schemars hands over alphabetical properties and the
+  order is gone before lesto sees it; problem extensions and `Json<Value>` bodies sort too. The
+  cost is accepted: the feature is unified, so every `serde_json::Map` in a dependent's graph is
+  an `IndexMap`. A separate crate would not scope it (unification is per graph). Tests read the
+  raw bytes (`response_bodies_keep_key_order`): parsing into a `Value` would hide a regression.
 - **Documentation from types, lazily.** `RouteSet::add` requires
   `H: Handler<T, S> + OperationHandler<I, O>`; `I` (argument tuple) and `O` (return type) drive
   the OpenAPI document through `OperationInput`/`OperationOutput`. Operations are described in
@@ -293,8 +300,7 @@ Recorded here because they are not derivable from the code. Do not undo them cas
   into `ModelCreate`/`ModelUpdate`; `?` → `Option<T>` + `serde(default)` + garde rules wrapped
   in `inner(..)` (schemars does not mirror `inner(..)` rules into the schema); also emits
   `Model::apply_<view>`. It must sit above `#[derive]` because views inherit what is below it.
-- schemars runs with `preserve_order` and a transform replacing boolean schemas (Swagger UI
-  cannot render `true`).
+- schemars runs with a transform replacing boolean schemas (Swagger UI cannot render `true`).
 - **`lesto::db` coherence trick**: `Principal<S>` has a blanket impl for every `Authenticated`
   (with `S = <P as Authenticated>::State`) plus one for `Public` (any `S`). That compiles only
   because `Authenticated` has no type parameters and `State` is an associated type, not a trait
