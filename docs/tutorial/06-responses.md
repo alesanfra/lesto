@@ -43,6 +43,26 @@ async fn delete(Path(_id): Path<u64>) {}
 The status applies both at runtime and in the documentation. A handler returning `()` produces an
 empty body, and with `status = 204` that is the classic deletion response.
 
+`status = N` rewrites *every* `200` the handler returns, and the status is not visible in the
+signature. The alternative puts it in the type:
+
+```rust
+#[lesto::post("/jobs")]
+async fn enqueue(Json(job): Json<Job>) -> Accepted<Json<JobId>> {
+    Accepted(Json(queue(job)))                         // 202, documented as 202
+}
+
+#[lesto::delete("/items/{id}")]
+async fn delete_item(Path(id): Path<u64>) -> NoContent {
+    remove(id);
+    NoContent                                          // 204, no body
+}
+```
+
+`Created<T>`, `Accepted<T>` and `NoContent` (all in the prelude) wrap any response and are
+documented under their own status. They only turn a `200` into their status, so an inner
+failure (a body that cannot be serialized) still answers `500`.
+
 ## Text and HTML
 
 ```rust
@@ -174,6 +194,8 @@ the available ones.
 | `Result<T, E>` | `T` or `E` | union of both |
 | `(StatusCode, T)` | `T` with the given status | like `T` (status unknown at compile time) |
 | `(HeaderMap, T)` | `T` with extra headers | like `T` |
+| `Created<T>`, `Accepted<T>` | `T` with `201` / `202` | like `T`, under `201` / `202` |
+| `NoContent` | `204`, empty body | `204` |
 | `StatusCode`, `Response`, `Redirect` | as in axum | none |
 
 You can document a type of your own by implementing `lesto::OperationOutput`.
@@ -181,7 +203,8 @@ You can document a type of your own by implementing `lesto::OperationOutput`.
 ## Recap
 
 - `Json<T>` for JSON, `String` for text, `()` for empty bodies.
-- `status = N` on the attribute changes the success code, at runtime too.
+- `status = N` on the attribute changes the success code, at runtime too; `Created<T>`,
+  `Accepted<T>` and `NoContent` put the status in the type.
 - `Result<T, HttpError>` for handlers that can fail; `responses(404, ...)` to document them.
 - Two structs, one in and one out, when the fields differ; `#[lesto::views]` generates them
   from one model.

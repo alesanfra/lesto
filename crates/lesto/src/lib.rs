@@ -65,6 +65,7 @@ pub mod openapi;
 pub mod operation;
 #[cfg(feature = "otel")]
 pub mod otel;
+pub mod response;
 pub mod route;
 pub mod security;
 pub mod trace;
@@ -77,6 +78,7 @@ pub use error::{
 };
 pub use extract::{Json, Path, Query};
 pub use operation::{OperationBuilder, OperationHandler, OperationInput, OperationOutput};
+pub use response::{Accepted, Created, NoContent};
 pub use route::{
     PendingOperation, RouteInfo, RouteMeta, RouteSet, delete, get, head, options, patch, post, put,
 };
@@ -114,7 +116,8 @@ pub mod prelude {
     pub use crate::openapi::{ApiKeyIn, OAuthFlows, SecurityScheme};
     pub use crate::security::{ApiKey, ApiKeyScheme, AuthScheme, Basic, Bearer, Security};
     pub use crate::{
-        App, Extension, HttpError, Json, Path, Query, State, StatusCode, Trace, routes,
+        Accepted, App, Created, Extension, HttpError, Json, NoContent, Path, Query, State,
+        StatusCode, Trace, routes,
     };
     pub use garde::Validate;
     pub use schemars::JsonSchema;

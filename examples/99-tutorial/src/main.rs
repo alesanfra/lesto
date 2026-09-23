@@ -221,6 +221,23 @@ async fn page() -> Html<String> {
 #[lesto::delete("/items/{item_id}", status = 204)]
 async fn delete_item(Path(_item_id): Path<u64>) {}
 
+#[lesto::model]
+struct Job {
+    #[garde(length(min = 1))]
+    task: String,
+}
+
+/// Queue a job: the status is in the type.
+#[lesto::post("/jobs")]
+async fn enqueue(Json(job): Json<Job>) -> Accepted<Json<u64>> {
+    Accepted(Json(job.task.len() as u64))
+}
+
+#[lesto::delete("/jobs/{id}")]
+async fn cancel_job(Path(_id): Path<u64>) -> NoContent {
+    NoContent
+}
+
 // ---- Chapter 6: one model, several views -------------------------------------------------------
 
 #[lesto::model(views(Create(author, text), Update(text?)))]
@@ -420,6 +437,8 @@ pub fn build_app(state: AppState) -> App<()> {
             health,
             page,
             delete_item,
+            enqueue,
+            cancel_job,
             purchase,
             create_note,
             update_note,
@@ -761,6 +780,20 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    }
+
+    /// Chapter 6: the status comes from the type, at runtime and in the document.
+    #[lesto::test]
+    async fn status_types() {
+        let (status, body) = call(
+            build_app(AppState::for_tests()),
+            post_json("/jobs", json!({"task": "mail"})),
+        )
+        .await;
+        assert_eq!((status, body), (StatusCode::ACCEPTED, json!(4)));
+        let spec = serde_json::to_value(build_app(AppState::for_tests()).openapi()).unwrap();
+        assert!(spec["paths"]["/jobs"]["post"]["responses"]["202"].is_object());
+        assert!(spec["paths"]["/jobs/{id}"]["delete"]["responses"]["204"].is_object());
     }
 
     #[lesto::test]
