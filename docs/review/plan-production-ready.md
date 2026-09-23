@@ -393,10 +393,14 @@ Return types still require `OperationOutput`.
 **Depends on:** P3-2 (so the chapter can list the layers a leaver keeps).
 
 **Tasks**
-- [ ] New chapter showing the exit step by step: `into_router()`, the layers from
+- [x] New chapter showing the exit step by step: `into_router()`, the layers from
       `lesto::layers`, `lesto::Json`/`Query`, `HttpError` on a plain `axum::Router`.
-- [ ] Compile the snippets in `examples/99-tutorial`.
-- [ ] Link it from `README.md`: "nobody is locked in" is an adoption argument, not an admission.
+- [x] Compile the snippets in `examples/99-tutorial`.
+- [x] Link it from `README.md`: "nobody is locked in" is an adoption argument, not an admission.
+
+**Done (2026-09-23):** appendix D, "Leaving lesto" (an appendix next to "From FastAPI to lesto"
+rather than a sixteenth chapter: it is about the project, not about building an API). Its handler
+and router compile in `examples/99-tutorial` with a test; README links it.
 
 ---
 
