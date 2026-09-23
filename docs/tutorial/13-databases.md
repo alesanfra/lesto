@@ -38,6 +38,13 @@ sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio",
 
 `sqlite`, `postgres` and `mysql` each imply the `db` feature and the matching sqlx driver.
 
+sqlx is the one dependency lesto cannot absorb. Its query functions are all reachable through
+`lesto::db::sqlx` (`lesto::db::sqlx::query_as(..)`), but `#[derive(sqlx::FromRow)]` and the
+`query!` macros generate code that names `::sqlx` and offer no way to point it elsewhere, so a
+crate that uses them lists sqlx itself. Keep the version in step with lesto's (0.9): two sqlx
+versions in one build are two incompatible sets of types. Without `FromRow` (tuples, or a
+hand-written impl) the line can go.
+
 The database handle lives in your state. `Db` holds the primary pool and, optionally, a read
 replica; stores fetch it with axum's `FromRef`:
 
