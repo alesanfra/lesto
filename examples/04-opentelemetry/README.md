@@ -25,13 +25,14 @@ docker compose up -d jaeger
 export OTEL_SERVICE_NAME=lesto-demo
 export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
 export OTEL_LOGS_EXPORTER=none          # Jaeger ingests traces only
+export OTEL_METRICS_EXPORTER=none
 export LESTO_PORT=8000
 
 cargo run -p opentelemetry-example
 ```
 
-`OTEL_LOGS_EXPORTER=none` matters: Jaeger answers `404` on `/v1/logs`, so without it every batch
-of log records fails. Traces are at <http://localhost:16686>, service `lesto-demo`.
+`OTEL_LOGS_EXPORTER=none` and `OTEL_METRICS_EXPORTER=none` matter: Jaeger answers `404` on
+`/v1/logs` and `/v1/metrics`, so without them every batch of log records and metrics fails. Traces are at <http://localhost:16686>, service `lesto-demo`.
 
 ## Option B — OpenObserve (traces and logs)
 
@@ -108,8 +109,10 @@ docker compose down -v
 
 - Nothing is exported while `OTEL_EXPORTER_OTLP_ENDPOINT` is unset: without it the application
   only logs to the console, which is what you want in tests and in `lesto dev`.
-- `OTEL_SDK_DISABLED=true` keeps the console and turns both exports off; `OTEL_TRACES_EXPORTER=none`
-  and `OTEL_LOGS_EXPORTER=none` turn off one signal each.
+- `OTEL_SDK_DISABLED=true` keeps the console and turns every export off; `OTEL_TRACES_EXPORTER=none`,
+  `OTEL_LOGS_EXPORTER=none` and `OTEL_METRICS_EXPORTER=none` turn off one signal each.
+- Metrics: `http.server.request.duration` is exported every 60 s (`OTEL_METRIC_EXPORT_INTERVAL`
+  in milliseconds shortens it for a demo); in OpenObserve it is under Metrics.
 - `RUST_LOG` filters the console and the exported logs (`RUST_LOG=warn,lesto=info`); spans are
   emitted at `INFO`. `RUST_LOG=sqlx::query=debug` adds each SQL statement, with its timing,
   inside the span of the store method that ran it.

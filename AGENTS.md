@@ -32,7 +32,7 @@ crates/lesto/             library
                           services, pin-projected futures
   src/trace.rs            request span (HTTP semconv), Trace config, feature `otel`: propagation
   src/otel.rs             feature `otel`: Config from the OTEL_* variables, init/init_named,
-                          Telemetry guard (tracer + logger providers), auto_init called by
+                          Telemetry guard (tracer + logger + meter providers), auto_init called by
                           App::serve_until, the tracing→OTLP logs bridge and its feedback filter
   src/lib.rs              re-exports, prelude, routes! macro, __private compile-time checks
   src/db/                 feature `db` (+ postgres/mysql/sqlite): sqlx stores
@@ -53,7 +53,9 @@ crates/lesto/             library
   tests/db_postgres.rs    RLS end to end; skipped unless LESTO_TEST_POSTGRES_URL is set. Also the
                           compiled home of the chapter 13 row level security snippets, which
                           examples/02-notes cannot host (it is SQLite)
+  src/metrics.rs          feature `otel`: http.server.request.duration, gated on an AtomicBool
   tests/trace.rs          the span fields, through a hand-rolled capturing tracing::Subscriber
+  tests/metrics.rs        the duration histogram through the SDK's in-memory exporter
   tests/lambda.rs         API Gateway v1/v2, Function URL and ALB event fixtures
   tests/listener.rs       LISTEN_FDS socket inheritance
   tests/shutdown.rs       graceful shutdown (serve_until) finishes in-flight requests
@@ -103,7 +105,7 @@ sh scripts/bench-http.sh                      # throughput over a socket (needs 
 LESTO_PORT=8765 cargo run -p notes            # port 8000 may be taken on dev machines
 docker run --rm -e POSTGRES_PASSWORD=lesto -p 5432:5432 postgres:18   # for tests/db_postgres.rs
 (cd examples/04-opentelemetry && docker compose up -d openobserve && sh verify.sh)  # OTLP end to end
-(cd examples/04-opentelemetry && docker compose up -d jaeger)        # traces only, OTEL_LOGS_EXPORTER=none
+(cd examples/04-opentelemetry && docker compose up -d jaeger)        # traces only: OTEL_LOGS_EXPORTER=none OTEL_METRICS_EXPORTER=none
 LESTO_TEST_POSTGRES_URL=postgres://postgres:lesto@127.0.0.1:5432/postgres cargo test -p lesto --test db_postgres
 cargo run -p lesto-cli -- dev -p notes --port 8765      # lesto dev from this checkout
 ```
@@ -214,7 +216,16 @@ Recorded here because they are not derivable from the code. Do not undo them cas
   them. The bridge layer carries a `Targets` filter turning `opentelemetry*`, `reqwest`, `hyper`,
   `h2` and `tower` off (`no_feedback`): those crates report through `tracing`, so without it an
   export failure is logged, exported, and fails again. Signals are switched off one at a time
-  with the spec's own `OTEL_TRACES_EXPORTER=none` / `OTEL_LOGS_EXPORTER=none`.
+  with the spec's own `OTEL_TRACES_EXPORTER=none` / `OTEL_LOGS_EXPORTER=none` /
+  `OTEL_METRICS_EXPORTER=none`.
+- **One metric, recorded by the request span layer** (decided 2026-09-23): `http.server.request.duration`,
+  the histogram the HTTP conventions require, with their bucket boundaries; rate, errors and
+  latency all derive from it. Gated like propagation, on an `AtomicBool` that
+  `otel::enable_metrics` sets (`install` calls it after `global::set_meter_provider`): without a
+  provider a request pays one relaxed load, no clock read (bench: within noise). The future
+  carries `Measured`, which is `()` without the feature. The meter provider becomes the global
+  one so application instruments are exported too. `tests/metrics.rs` is its own binary: the
+  provider is global.
 - **Telemetry is configured by the environment, not by an API.** `App::serve_until` calls
   `otel::auto_init` (feature `otel`): with `OTEL_EXPORTER_OTLP_ENDPOINT` set and no subscriber
   installed (`tracing::dispatcher::has_been_set`), lesto installs console + OTLP (traces and

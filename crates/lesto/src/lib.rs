@@ -59,6 +59,8 @@ pub mod extract;
 #[cfg(feature = "lambda")]
 pub mod lambda;
 pub mod layers;
+#[cfg(feature = "otel")]
+mod metrics;
 pub mod openapi;
 pub mod operation;
 #[cfg(feature = "otel")]
