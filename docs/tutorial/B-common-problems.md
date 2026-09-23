@@ -8,6 +8,13 @@ crate depends on them. Use `#[lesto::model]` instead: it derives the same traits
 re-exports. If you do want the plain derives, add the three crates to your manifest, at the
 versions lesto uses (`garde` 0.23, `schemars` 1, `serde` 1).
 
+## warning: `axum::Json<T>` / `axum::extract::Query<T>` does not run `T`'s garde rules
+
+The handler takes axum's `Json` or `Query`, not lesto's, and `T` has garde rules: the payload
+reaches the handler without being validated. Import `lesto::Json` / `lesto::Query` (they are in
+`lesto::prelude`). If skipping validation is what you want, put `#[allow(deprecated)]` on the
+handler: lesto reports this as a deprecation because that is the one warning a macro can raise.
+
 ## `field `x` has no validation rule`
 
 garde requires an attribute on every field. Add `#[garde(skip)]` to the field or

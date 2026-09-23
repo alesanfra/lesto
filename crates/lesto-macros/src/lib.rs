@@ -286,6 +286,17 @@ fn handler_checks(func: &ItemFn, explicit_state: Option<&Type>) -> (TokenStream2
     let mut checks = Vec::new();
     let mut bounds = Vec::new();
     let mut needs_marker = false;
+    for ty in &types {
+        // Autoref specialization: the deprecated method is picked for `axum::Json<T>` /
+        // `axum::extract::Query<T>` with `T: Validate`, and its warning points at the argument.
+        checks.push(quote_spanned! { ty.span() =>
+            {
+                #[allow(unused_imports)]
+                use ::lesto::__private::{NoUnvalidatedExtractor as _, UnvalidatedAxumExtractor as _};
+                (&::lesto::__private::ValidationProbe::<#ty>::new()).__lesto_validation();
+            }
+        });
+    }
     if let Some((last, init)) = types.split_last() {
         for ty in init {
             checks.push(quote_spanned! { ty.span() =>

@@ -179,6 +179,34 @@ pub mod __private {
     pub use axum::extract::FromRequestParts;
     pub use http::request::Parts;
 
+    /// Carries a handler argument type for the validation probe below.
+    pub struct ValidationProbe<T>(std::marker::PhantomData<fn() -> T>);
+
+    impl<T> ValidationProbe<T> {
+        /// A probe for `T`.
+        #[allow(clippy::new_without_default)]
+        pub fn new() -> Self {
+            Self(std::marker::PhantomData)
+        }
+    }
+
+    /// Picked (by autoref specialization) for `axum::Json<T>` / `axum::extract::Query<T>` with
+    /// `T: Validate`: the deprecation is the warning, since a proc macro cannot emit one.
+    pub trait UnvalidatedAxumExtractor {
+        #[deprecated(
+            note = "`axum::Json<T>` / `axum::extract::Query<T>` does not run `T`'s garde rules: the handler gets the payload unchecked although `T: Validate`. Use `lesto::Json<T>` / `lesto::Query<T>`, which validate and answer 422"
+        )]
+        fn __lesto_validation(&self) {}
+    }
+    impl<T: garde::Validate> UnvalidatedAxumExtractor for ValidationProbe<axum::Json<T>> {}
+    impl<T: garde::Validate> UnvalidatedAxumExtractor for ValidationProbe<axum::extract::Query<T>> {}
+
+    /// Every other argument: nothing to say.
+    pub trait NoUnvalidatedExtractor {
+        fn __lesto_validation(&self) {}
+    }
+    impl<T> NoUnvalidatedExtractor for &ValidationProbe<T> {}
+
     pub fn check_parts<T: PartsExtractor<S>, S: Send + Sync>() {}
     pub fn check_last<T: LastExtractor<S, M>, S: Send + Sync, M>() {}
     pub fn check_response<T: HandlerResponse>() {}

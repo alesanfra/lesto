@@ -1,0 +1,2 @@
+`axum::Json<T>` / `axum::extract::Query<T>` does not run `T`'s garde rules: the handler gets the payload unchecked although `T: Validate`. Use `lesto::Json<T>` / `lesto::Query<T>`, which validate and answer 422
+--> axum_json_skips_validation.rs:14
