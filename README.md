@@ -172,7 +172,9 @@ Input: `lesto::Json<T>`, `lesto::Query<T>`, `lesto::Path<T>` (validated), `axum:
 Output: `Json<T>`, `String`, `&'static str`, `()`, `Html<T>`, `Result<T, E>`, `Option<T>`, `(StatusCode, T)`,
 `(HeaderMap, T)`, `HttpError`, `StatusCode`, `Response`, `Redirect`.
 
-To add your own extractor or response type, implement `OperationInput` / `OperationOutput`.
+To document your own extractor or response type, implement `OperationInput` / `OperationOutput`.
+An extractor without `OperationInput` is accepted and left out of the document; the `strict-docs`
+feature makes that a compile error. A response type always needs `OperationOutput`.
 
 ### Validation
 

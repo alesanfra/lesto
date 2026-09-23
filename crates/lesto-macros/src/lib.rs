@@ -300,7 +300,7 @@ fn handler_checks(func: &ItemFn, explicit_state: Option<&Type>) -> (TokenStream2
     if let Some((last, init)) = types.split_last() {
         for ty in init {
             checks.push(quote_spanned! { ty.span() =>
-                ::lesto::__private::check_documented_input::<#ty>();
+                ::lesto::__private::check_strict_input::<#ty>();
             });
             match &known_state {
                 Some(state) => checks.push(quote_spanned! { ty.span() =>
@@ -312,7 +312,7 @@ fn handler_checks(func: &ItemFn, explicit_state: Option<&Type>) -> (TokenStream2
             }
         }
         checks.push(quote_spanned! { last.span() =>
-            ::lesto::__private::check_documented_input::<#last>();
+            ::lesto::__private::check_strict_input::<#last>();
         });
         match &known_state {
             Some(state) => checks.push(quote_spanned! { last.span() =>
@@ -391,6 +391,7 @@ fn expand(method: &str, args: RouteArgs, func: ItemFn) -> TokenStream2 {
     });
     let public = args.public.then(|| quote! { .public() });
     let (checks, deferred_checks) = handler_checks(&func, args.state.as_ref());
+    let describe = describe_fn(&func);
 
     quote! {
         #func
@@ -420,6 +421,39 @@ fn expand(method: &str, args: RouteArgs, func: ItemFn) -> TokenStream2 {
                     #(#security)*
                     #public
             }
+
+            #describe
+        }
+    }
+}
+
+/// `RouteInfo::describe`: the OpenAPI contribution of each argument and of the return type.
+///
+/// Arguments go through autoref specialization: an `OperationInput` type describes itself, any
+/// other extractor (a custom one nobody documented) contributes nothing instead of failing to
+/// compile. The `strict-docs` feature of lesto turns the second case back into an error
+/// (`check_strict_input` in `handler_checks`). The return type must be `OperationOutput`.
+fn describe_fn(func: &ItemFn) -> TokenStream2 {
+    let inputs = func.sig.inputs.iter().filter_map(|arg| match arg {
+        FnArg::Typed(pat) => {
+            let ty = &*pat.ty;
+            Some(quote_spanned! { ty.span() =>
+                (&::lesto::__private::DescribeProbe::<#ty>::new()).__lesto_describe(builder);
+            })
+        }
+        FnArg::Receiver(_) => None,
+    });
+    let output = match &func.sig.output {
+        syn::ReturnType::Type(_, ret) => quote! { #ret },
+        syn::ReturnType::Default => quote! { () },
+    };
+    quote! {
+        #[allow(unused_qualifications)]
+        fn describe(builder: &mut ::lesto::OperationBuilder<'_>, status: u16) {
+            #[allow(unused_imports)]
+            use ::lesto::__private::{DocumentedInput as _, UndocumentedInput as _};
+            #(#inputs)*
+            <#output as ::lesto::OperationOutput>::describe(builder, status);
         }
     }
 }

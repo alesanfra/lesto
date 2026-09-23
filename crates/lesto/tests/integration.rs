@@ -1766,3 +1766,53 @@ mod no_validation_warning_without_cause {
         let _ = App::<()>::new().routes(routes![plain, checked]);
     }
 }
+
+// ---- undocumented extractors ----------------------------------------------------------------------
+
+/// Without `strict-docs` (on under `--all-features`, where this module does not compile on
+/// purpose): a custom extractor with no `OperationInput` impl is accepted, served and left out
+/// of the document.
+#[cfg(not(feature = "strict-docs"))]
+mod undocumented_extractor {
+    use super::*;
+
+    /// A custom extractor with no `OperationInput` impl: accepted, served, left out of the document.
+    struct ClientTag(String);
+
+    impl<S: Send + Sync> lesto::axum::extract::FromRequestParts<S> for ClientTag {
+        type Rejection = HttpError;
+        async fn from_request_parts(
+            parts: &mut lesto::http::request::Parts,
+            _: &S,
+        ) -> Result<Self, HttpError> {
+            parts
+                .headers
+                .get("x-client")
+                .and_then(|v| v.to_str().ok())
+                .map(|v| ClientTag(v.to_owned()))
+                .ok_or_else(|| HttpError::bad_request("missing x-client"))
+        }
+    }
+
+    #[lesto::get("/tagged/{id}")]
+    async fn tagged(ClientTag(tag): ClientTag, Path(id): Path<u64>) -> String {
+        format!("{tag} {id}")
+    }
+
+    #[tokio::test]
+    async fn an_undocumented_extractor_is_served_and_the_rest_documented() {
+        let app = || App::new().routes(routes![tagged]);
+        let request = Request::builder()
+            .uri("/tagged/7")
+            .header("x-client", "cli")
+            .body(Body::empty())
+            .unwrap();
+        let (status, body) = send(app(), request).await;
+        assert_eq!((status, body), (StatusCode::OK, json!("cli 7")));
+
+        let spec = serde_json::to_value(app().openapi()).unwrap();
+        let operation = &spec["paths"]["/tagged/{id}"]["get"];
+        assert_eq!(operation["parameters"][0]["name"], "id");
+        assert_eq!(operation["parameters"].as_array().unwrap().len(), 1);
+    }
+}

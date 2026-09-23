@@ -137,8 +137,11 @@ Every handler that takes `CurrentUser` as an argument gets an already verified u
 documentation shows the lock icon. It plays the same role as
 `user: User = Depends(get_current_user)`.
 
-If the extractor has nothing to do with the client (it only reads state or extensions), leave
-`impl OperationInput for MyType {}` with an empty body: the default documents nothing.
+If the extractor has nothing to do with the client (it only reads state or extensions), you need
+no `OperationInput` at all: an extractor without one is accepted and simply left out of the
+document. Teams that want every argument documented turn on lesto's `strict-docs` feature, which
+makes a missing impl a compile error; `impl OperationInput for MyType {}` with an empty body then
+says "nothing to document" explicitly.
 
 ## Dependencies with parameters
 

@@ -49,9 +49,11 @@ The last argument is not usable as an extractor with that state. Typical causes:
 
 ## `lesto cannot document X as a handler argument / response`
 
-The type works at runtime but lesto does not know how to describe it in OpenAPI. For payloads,
-derive `JsonSchema` and use `Json<T>`/`Query<T>`/`Path<T>`; for a custom extractor or response
-type, add `impl lesto::OperationInput for X {}` / `impl lesto::OperationOutput for X {}`
+The type works at runtime but lesto does not know how to describe it in OpenAPI. For a response
+type this is always an error; for an argument only with lesto's `strict-docs` feature on (or
+when registering through `RouteSet::add` instead of `routes![]`). For payloads, derive
+`JsonSchema` (`#[lesto::model]`) and use `Json<T>`/`Query<T>`/`Path<T>`; for a custom extractor
+or response type, add `impl lesto::OperationInput for X {}` / `impl lesto::OperationOutput for X {}`
 (an empty impl documents nothing) or delegate to the wrapped extractor (chapter 8).
 
 ## `the trait bound `fn(...) {handler}: Handler<_, _>` is not satisfied`

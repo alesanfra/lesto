@@ -2,7 +2,8 @@ use lesto::axum::extract::FromRequestParts;
 use lesto::http::request::Parts;
 use lesto::prelude::*;
 
-// A custom extractor that works at runtime but does not say how to document itself.
+// A custom extractor that works at runtime but does not say how to document itself: accepted by
+// default, an error with the `strict-docs` feature (on for every ui case).
 struct RequestId(String);
 
 impl<S: Send + Sync> FromRequestParts<S> for RequestId {

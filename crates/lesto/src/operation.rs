@@ -259,7 +259,8 @@ pub fn reason_phrase(status: u16) -> String {
     message = "lesto cannot document `{Self}` as a handler argument",
     label = "`{Self}` does not implement `lesto::OperationInput`",
     note = "request data goes through `lesto::Json<T>`, `lesto::Query<T>` or `lesto::Path<T>`, with `T: serde::Deserialize + schemars::JsonSchema` (+ `garde::Validate` for Json/Query)",
-    note = "for a custom extractor, add `impl lesto::OperationInput for {Self} {{}}` (an empty impl documents nothing) or delegate to the extractor it wraps, e.g. `Bearer::<BearerAuth>::describe(builder)`"
+    note = "for a custom extractor, add `impl lesto::OperationInput for {Self} {{}}` (an empty impl documents nothing) or delegate to the extractor it wraps, e.g. `Bearer::<BearerAuth>::describe(builder)`",
+    note = "this is required with lesto's `strict-docs` feature, or when registering with `RouteSet::add`; `routes![]` without `strict-docs` accepts an undocumented extractor"
 )]
 pub trait OperationInput {
     /// Add what this argument contributes (parameters, body, security) to the operation.
