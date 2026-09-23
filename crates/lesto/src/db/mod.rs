@@ -98,6 +98,6 @@ pub use uuid;
 pub mod prelude {
     pub use crate::db::{
         Anyone, Authenticated, Db, Error, Isolation, Mode, NotFoundExt, Principal, Public,
-        ReadOnly, ReadWrite, ResultExt, Store, TransactionSettings, Writable,
+        ReadOnly, ReadWrite, Requirement, ResultExt, Store, TransactionSettings, Writable,
     };
 }

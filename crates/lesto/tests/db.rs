@@ -732,3 +732,77 @@ async fn two_stores_in_one_handler_authenticate_once() {
         );
     }
 }
+
+// ---- chapter 13: a requirement of your own -----------------------------------------------------
+
+/// Permissions as a type: a misspelled permission is a compile error, not a 403 in production.
+#[derive(Debug, Clone, Copy)]
+enum Permission {
+    ReadNotes,
+    WriteNotes,
+    Admin,
+}
+
+impl Permission {
+    fn name(self) -> &'static str {
+        match self {
+            Permission::ReadNotes => "notes:read",
+            Permission::WriteNotes => "notes:write",
+            Permission::Admin => "admin",
+        }
+    }
+}
+
+/// Every permission is granted to an admin; otherwise the principal needs that one.
+impl<P: Authenticated> Requirement<P> for Permission {
+    fn check(&self, principal: &P) -> Result<(), Error> {
+        if principal.has_permission(self.name()) || principal.has_permission("admin") {
+            Ok(())
+        } else {
+            Err(Error::Forbidden {
+                permission: self.name(),
+            })
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_user_defined_requirement() {
+    let db = Db::new(pool(&["one"]).await);
+    let store = |permissions: &[&str]| {
+        Store::<ReadWrite, User, Sqlite>::new(
+            db.clone(),
+            User {
+                name: "alice".into(),
+                permissions: permissions.iter().map(|p| (*p).to_string()).collect(),
+            },
+        )
+    };
+    let count = async |store: Store<ReadWrite, User, Sqlite>, permission: Permission| {
+        store
+            .read(permission, async |conn| {
+                sqlx::query_scalar::<_, i64>("SELECT count(*) FROM notes")
+                    .fetch_one(conn)
+                    .await
+            })
+            .await
+    };
+    assert_eq!(
+        count(store(&["notes:read"]), Permission::ReadNotes)
+            .await
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        count(store(&["admin"]), Permission::WriteNotes)
+            .await
+            .unwrap(),
+        1
+    );
+    let error = count(store(&["notes:read"]), Permission::WriteNotes)
+        .await
+        .unwrap_err();
+    assert_eq!(error.status(), StatusCode::FORBIDDEN);
+    assert!(error.to_string().contains("notes:write"), "{error}");
+    assert_eq!(Permission::Admin.name(), "admin");
+}

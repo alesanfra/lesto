@@ -223,6 +223,48 @@ A permission string on a `Public` store does not compile: `Public` can never hol
 The error message says to pass `Anyone` or to declare an authenticated principal in the handler.
 For your own combinators (any of, all of), implement `Requirement<P>`.
 
+### Permissions as a type
+
+Strings are easy to misspell, and a misspelled permission is a 403 nobody notices until
+production. An enum turns it into a compile error, and the rules that go with it (an admin may
+do everything) live in one place:
+
+```rust
+#[derive(Debug, Clone, Copy)]
+enum Permission {
+    ReadNotes,
+    WriteNotes,
+    Admin,
+}
+
+impl Permission {
+    fn name(self) -> &'static str {
+        match self {
+            Permission::ReadNotes => "notes:read",
+            Permission::WriteNotes => "notes:write",
+            Permission::Admin => "admin",
+        }
+    }
+}
+
+/// Every permission is granted to an admin; otherwise the principal needs that one.
+impl<P: Authenticated> Requirement<P> for Permission {
+    fn check(&self, principal: &P) -> Result<(), Error> {
+        if principal.has_permission(self.name()) || principal.has_permission("admin") {
+            Ok(())
+        } else {
+            Err(Error::Forbidden { permission: self.name() })
+        }
+    }
+}
+
+// then, in a store method:
+self.write(Permission::WriteNotes, async |conn| { .. }).await
+```
+
+`check` runs before the transaction opens, like the built-in string check, and the `403` it
+answers names the permission. `Requirement` is in `lesto::db::prelude`.
+
 ### Declaring the permission pair once
 
 Passing the permission at every call site means every call site can pass the wrong one. Declare
@@ -586,6 +628,45 @@ Two different stores can take part the same way: both helpers take `&mut Connect
 whichever store opened the transaction lends its connection to the other. What there is no way
 to do is call two *public* store methods and have them share a transaction — each one opens its
 own, by design.
+
+## In production: migrations, the pool, a replica
+
+**Migrations.** `sqlx::migrate!()` embeds the `.sql` files of `migrations/` in the binary at
+compile time and applies the ones the database has not seen, which makes "migrate on start" one
+line (`examples/02-notes` does it). It needs sqlx's `migrate` and `macros` features:
+
+```rust
+sqlx::migrate!().run(&pool).await?;
+```
+
+With several instances starting together, sqlx takes a lock so only one applies them. Migrations
+that must not run on every start (a long backfill) belong in a separate step of the deployment,
+with `sqlx migrate run` from `sqlx-cli`.
+
+**The pool.** Every store method holds one connection for the length of its transaction, so the
+pool size is the number of store methods that can run at once, per instance:
+
+```rust
+let primary = PgPoolOptions::new()
+    .max_connections(20)                                 // per instance
+    .acquire_timeout(Duration::from_secs(3))            // then the request answers 500
+    .connect(&database_url)
+    .await?;
+```
+
+- Instances × `max_connections` must stay under the database's own limit (Postgres: 100 by
+  default), with room left for migrations and your own psql.
+- `acquire_timeout` is how long a request waits for a free connection before failing with a
+  `500` (logged, `PoolTimedOut`). sqlx's default is 30 s, longer than most clients wait: pick a
+  few seconds, and keep it below `App::timeout` if you set one.
+- On AWS Lambda one instance serves one request at a time: `max_connections(1)` or `(2)`, and a
+  proxy (RDS Proxy) in front of the database, because instances come and go by the hundred.
+
+**A read replica.** `Db::new(primary).with_replica(replica)` sends `read` transactions to the
+replica and `write` ones to the primary. The replica lags: a read right after a write may not see
+it, which is why a decision that leads to a write must be made inside the write
+("Never read on the replica to decide a write", above). Size the replica's pool like the
+primary's.
 
 ## Testing
 

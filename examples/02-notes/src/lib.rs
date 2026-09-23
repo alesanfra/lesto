@@ -20,25 +20,19 @@ pub fn build_app() -> App<AppState> {
         .routes(notes::routes())
 }
 
-/// An in-memory SQLite database with the schema applied.
+/// An in-memory SQLite database with the migrations in `migrations/` applied.
 ///
 /// `sqlite::memory:` is per connection: with one connection the pool is one database. A real
-/// deployment would connect to a file or a server and run migrations.
+/// deployment connects to a file or a server, with a pool sized for it (chapter 13).
 pub async fn connect() -> Pool<Sqlite> {
     let pool = SqlitePoolOptions::new()
         .max_connections(1)
+        // A request waits this long for a free connection, then answers 500.
+        .acquire_timeout(std::time::Duration::from_secs(3))
         .connect("sqlite::memory:")
         .await
         .expect("open sqlite");
-    sqlx::query(
-        "CREATE TABLE IF NOT EXISTS notes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            author TEXT NOT NULL,
-            text TEXT NOT NULL UNIQUE
-        )",
-    )
-    .execute(&pool)
-    .await
-    .expect("create table");
+    // Embedded at compile time from `migrations/`; applied ones are skipped.
+    sqlx::migrate!().run(&pool).await.expect("migrate");
     pool
 }
