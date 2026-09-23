@@ -104,7 +104,7 @@ Your project's `Cargo.toml` (the derives need the crates as direct dependencies,
 [dependencies]
 lesto = { path = "../lesto/crates/lesto" }   # features = ["sqlite", "lambda"] as needed
 serde = { version = "1", features = ["derive"] }
-garde = { version = "0.23", features = ["derive", "email"] }
+garde = { version = "0.23", features = ["derive"] }   # email/url: lesto's default features
 schemars = { version = "1", features = ["derive"] }
 tokio = { version = "1", features = ["full"] }
 ```
@@ -180,6 +180,12 @@ To add your own extractor or response type, implement `OperationInput` / `Operat
 `#[garde(...)]` rule or `#[garde(skip)]`; alternatively `#[garde(allow_unvalidated)]` on the struct.
 schemars reads the same garde attributes, so `length`, `range`, `pattern` etc. also show up in the
 OpenAPI schema (`minLength`, `maximum`, ...).
+
+JSON keys keep declaration order, in the OpenAPI document and in response bodies: struct fields,
+problem extension members and `serde_json::Map`s built in order all come out in that order. lesto
+turns on `serde_json`'s `preserve_order` for this, which is a unified Cargo feature: every
+`serde_json::Map` in your build becomes insertion-ordered. A `HashMap` field has no order to keep;
+use `IndexMap` or `BTreeMap` when the order matters.
 
 ### Errors (RFC 9457)
 

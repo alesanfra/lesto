@@ -71,20 +71,24 @@ derive keep field order with or without the feature.
 lookups). Moving code into another crate would not scope it: feature unification is per graph.
 
 **Tasks**
-- [ ] Record the decision in `AGENTS.md` "Design decisions", with the cost above, and replace the
+- [x] Record the decision in `AGENTS.md` "Design decisions", with the cost above, and replace the
       "`preserve_order` feature leak" mention in its roadmap paragraph.
-- [ ] `README.md` and tutorial appendix B ("Fields in the documentation are not in the struct's
+- [x] `README.md` and tutorial appendix B ("Fields in the documentation are not in the struct's
       order"): state the guarantee and its side effect on the user's own `serde_json::Map`s.
       Mention that a `HashMap` field has no order to preserve (use `IndexMap` or `BTreeMap`).
-- [ ] Tests for the response side, next to `schema_properties_keep_declaration_order`: a typed
+- [x] Tests for the response side, next to `schema_properties_keep_declaration_order`: a typed
       response, a `Json<serde_json::Value>` response and a problem with several extensions keep
       their key order **in the raw body bytes** (not through `serde_json::from_slice` into a
       `Value`, which would hide a regression behind the same feature).
-- [ ] Replace `tokio/full` with the features lesto actually uses (`rt`, `rt-multi-thread`,
+- [x] Replace `tokio/full` with the features lesto actually uses (`rt`, `rt-multi-thread`,
       `macros`, `net`, `signal`, `time`, `sync`). Verify with `cargo check -p lesto` for each
       feature alone and the examples.
-- [ ] Put `garde/email` and `garde/url` behind lesto features (`email`, `url`), on by default —
+- [x] Put `garde/email` and `garde/url` behind lesto features (`email`, `url`), on by default —
       batteries included — but switchable off, so regex and idna are not forced on every build.
+
+**Done (2026-09-23):** tokio features `rt`, `rt-multi-thread`, `macros`, `net`, `signal`,
+`time`; `cargo tree -e features -p hello` shows no `tokio/full`. The order tests fail with
+`preserve_order` removed (checked) and pass with it.
 
 **Done when:** order tests cover schema, typed body, `Value` body and problem extensions;
 `cargo tree -e features -p hello` shows no `tokio/full`.
