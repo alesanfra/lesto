@@ -10,7 +10,7 @@
 
 use notes::{AppState, Tokens, build_app, connect};
 
-#[tokio::main]
+#[lesto::main]
 async fn main() -> std::io::Result<()> {
     let state = AppState {
         db: lesto::db::Db::new(connect().await),

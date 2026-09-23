@@ -43,7 +43,7 @@ async fn call(
     )
 }
 
-#[tokio::test]
+#[lesto::test]
 async fn full_crud() {
     let r = router().await;
 
@@ -103,7 +103,7 @@ async fn full_crud() {
     assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
 }
 
-#[tokio::test]
+#[lesto::test]
 async fn authentication_and_permissions() {
     let r = router().await;
 
@@ -157,7 +157,7 @@ async fn authentication_and_permissions() {
     assert_eq!(body["detail"], "Only the author can edit a note");
 }
 
-#[tokio::test]
+#[lesto::test]
 async fn validation_and_conflicts() {
     let r = router().await;
 

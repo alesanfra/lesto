@@ -87,7 +87,10 @@ pub use trace::Trace;
 // `#[lesto::get("/x")]` in attribute position and `lesto::get("/x")` in expression position.
 // Rust resolves attributes in the macro namespace and calls in the value namespace, so the
 // same path works for both.
-pub use lesto_macros::{delete, get, head, options, patch, post, put, views};
+pub use lesto_macros::{delete, get, head, main, options, patch, post, put, test, views};
+/// The async runtime lesto serves on, re-exported so `#[lesto::main]` and `#[lesto::test]` need
+/// no tokio dependency in the application.
+pub use tokio;
 
 pub use axum;
 pub use axum::extract::{Extension, State};

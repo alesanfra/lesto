@@ -60,8 +60,8 @@ crates/lesto/             library
   tests/ui/*.rs           compile-fail cases; *.expected lists the diagnostic fragments lesto owns
                           (db_*.rs for lesto::db), checked by tests/ui.rs
 crates/lesto-macros/      proc macros: #[lesto::get] and friends (RouteInfo marker type +
-                          per-argument checks), #[lesto::views], #[derive(Store)] with the
-                          optional #[store(read = .., write = ..)] permission pair with the
+                          per-argument checks), #[lesto::views], #[lesto::main]/#[lesto::test]
+                          (tokio's, through `lesto::tokio`), #[derive(Store)] with the
                           optional #[store(read = .., write = ..)] permission pair
 crates/lesto-cli/         the `lesto` binary: dev (watch + rebuild + restart, socket kept open),
                           run, openapi (runs the app with LESTO_OPENAPI_PATH: App::serve writes

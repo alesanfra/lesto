@@ -10,6 +10,9 @@ cd hello-lesto
 Open `Cargo.toml` and add the dependencies. Besides `lesto` you need `serde`, `garde` and
 `schemars`: their derive macros (`#[derive(Serialize)]`, `#[derive(Validate)]`, ...) must find
 them as direct dependencies of your crate, exactly as happens with `serde` in any Rust project.
+The async runtime is not on the list: `#[lesto::main]` and `#[lesto::test]` are tokio's
+`#[tokio::main]` and `#[tokio::test]` through lesto's own copy of tokio (`lesto::tokio`), with
+the same options (`#[lesto::main(flavor = "current_thread")]`).
 
 ```toml
 [dependencies]
@@ -17,7 +20,6 @@ lesto = { path = "../lesto/crates/lesto" }   # or the published version
 serde = { version = "1", features = ["derive"] }
 garde = { version = "0.23", features = ["derive"] }
 schemars = { version = "1", features = ["derive"] }
-tokio = { version = "1", features = ["full"] }
 ```
 
 ## The first route
@@ -33,7 +35,7 @@ async fn root() -> &'static str {
     "Hello, lesto!"
 }
 
-#[tokio::main]
+#[lesto::main]
 async fn main() -> std::io::Result<()> {
     App::new()
         .title("Hello API")

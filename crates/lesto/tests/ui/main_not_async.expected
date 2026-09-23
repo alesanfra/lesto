@@ -1,0 +1,2 @@
+error: `#[lesto::main]` goes on an `async fn`: write `async fn main()`, then `.await` inside it (e.g. `App::new().serve().await`)
+--> main_not_async.rs:3

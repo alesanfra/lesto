@@ -32,7 +32,7 @@ async fn call(app: App<()>, req: Request<Body>) -> (StatusCode, Value) {
     (status, body)
 }
 
-#[tokio::test]
+#[lesto::test]
 async fn creates_a_user() {
     let app = build_app(AppState::for_tests());
     let req = Request::post("/users")
@@ -47,7 +47,7 @@ async fn creates_a_user() {
     assert!(body.get("password").is_none());
 }
 
-#[tokio::test]
+#[lesto::test]
 async fn rejects_short_passwords() {
     let app = build_app(AppState::for_tests());
     let req = Request::post("/users")
@@ -88,7 +88,7 @@ A useful pattern is to save `openapi_json()` to a versioned file and compare it 
 Handlers remain ordinary functions: you can call them without HTTP.
 
 ```rust
-#[tokio::test]
+#[lesto::test]
 async fn health_says_ok() {
     assert_eq!(health().await, "ok");
 }

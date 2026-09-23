@@ -113,7 +113,7 @@ fn build_app() -> App<AppState> {
         .routes(routes![hello, list_notes, create_note, boom, broken])
 }
 
-#[tokio::main]
+#[lesto::main]
 async fn main() -> std::io::Result<()> {
     // One connection: every `sqlite::memory:` connection is a database of its own.
     let pool: Pool<Sqlite> = SqlitePoolOptions::new()

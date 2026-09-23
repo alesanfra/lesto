@@ -67,7 +67,7 @@ fn build_app() -> App<Notes> {
         .routes(routes![list_notes, get_note, create_note])
 }
 
-#[tokio::main]
+#[lesto::main]
 async fn main() -> Result<(), lesto::lambda::Error> {
     let app = build_app().with_state(Notes::default());
     // In Lambda this runs the function handler; elsewhere it binds LESTO_HOST:LESTO_PORT (or
@@ -97,7 +97,7 @@ mod tests {
         .to_string()
     }
 
-    #[tokio::test]
+    #[lesto::test]
     async fn create_and_read_through_api_gateway_events() {
         let router = build_app().with_state(Notes::default()).into_router();
 

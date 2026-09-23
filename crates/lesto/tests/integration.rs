@@ -1477,3 +1477,21 @@ async fn the_default_body_limit_is_axums_2_mb() {
     let (status, _) = send(unlimited, post_json("/echo", over)).await;
     assert_eq!(status, StatusCode::OK);
 }
+
+// ---- #[lesto::test] / #[lesto::main] -----------------------------------------------------------
+
+#[lesto::test]
+async fn lesto_test_runs_on_the_current_thread_runtime() {
+    assert_eq!(
+        lesto::tokio::runtime::Handle::current().runtime_flavor(),
+        lesto::tokio::runtime::RuntimeFlavor::CurrentThread
+    );
+}
+
+#[lesto::test(flavor = "multi_thread", worker_threads = 2)]
+async fn lesto_test_passes_options_through() {
+    assert_eq!(
+        lesto::tokio::runtime::Handle::current().runtime_flavor(),
+        lesto::tokio::runtime::RuntimeFlavor::MultiThread
+    );
+}

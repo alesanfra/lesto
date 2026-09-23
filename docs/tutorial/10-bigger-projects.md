@@ -75,7 +75,7 @@ mod users;
 use lesto::prelude::*;
 use state::AppState;
 
-#[tokio::main]
+#[lesto::main]
 async fn main() -> std::io::Result<()> {
     let users = App::<AppState>::new().routes(users::routes());
     let items = App::<AppState>::new().routes(items::routes());

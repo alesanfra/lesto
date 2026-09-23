@@ -14,7 +14,7 @@ lesto = { path = "../lesto/crates/lesto", features = ["lambda"] }
 Change one line in `main`:
 
 ```rust
-#[tokio::main]
+#[lesto::main]
 async fn main() -> Result<(), lesto::lambda::Error> {
     lesto::lambda::serve(build_app().with_state(Notes::default())).await
 }

@@ -717,6 +717,50 @@ fn expand_views(args: ViewsArgs, item: syn::ItemStruct) -> syn::Result<TokenStre
     })
 }
 
+/// `#[lesto::main]`: `#[tokio::main]` through lesto's re-export, so the application needs no
+/// tokio dependency of its own. Options (`flavor = "current_thread"`, `worker_threads = 4`)
+/// are passed through to `tokio::main`.
+#[proc_macro_attribute]
+pub fn main(attr: TokenStream, item: TokenStream) -> TokenStream {
+    runtime_entry("main", "async fn main()", attr, item)
+}
+
+/// `#[lesto::test]`: `#[tokio::test]` through lesto's re-export. Options are passed through.
+#[proc_macro_attribute]
+pub fn test(attr: TokenStream, item: TokenStream) -> TokenStream {
+    runtime_entry("test", "async fn my_test()", attr, item)
+}
+
+fn runtime_entry(which: &str, example: &str, attr: TokenStream, item: TokenStream) -> TokenStream {
+    let function = match syn::parse::<ItemFn>(item) {
+        Ok(f) => f,
+        Err(e) => return e.to_compile_error().into(),
+    };
+    if function.sig.asyncness.is_none() {
+        return syn::Error::new(
+            function.sig.fn_token.span(),
+            format!(
+                "`#[lesto::{which}]` goes on an `async fn`: write `{example}`, then `.await` \
+                 inside it (e.g. `App::new().serve().await`)"
+            ),
+        )
+        .to_compile_error()
+        .into();
+    }
+    let attr = proc_macro2::TokenStream::from(attr);
+    let options = if attr.is_empty() {
+        quote! {}
+    } else {
+        quote! { , #attr }
+    };
+    let which = Ident::new(which, proc_macro2::Span::call_site());
+    quote! {
+        #[::lesto::tokio::#which(crate = "::lesto::tokio" #options)]
+        #function
+    }
+    .into()
+}
+
 /// Generate view structs from a model: `#[lesto::views(Create(author, text), Update(text?))]`
 /// on `struct Note` emits `NoteCreate { author, text }` and `NoteUpdate { text: Option<String> }`,
 /// copying each field with its serde, garde, schemars and doc attributes, plus
@@ -1011,6 +1055,7 @@ fn expand_store(input: syn::DeriveInput) -> syn::Result<TokenStream2> {
 }
 
 #[cfg(test)]
+// `#[test]` alone would name this crate's own `test` attribute macro.
 mod tests {
     use super::*;
 
@@ -1020,7 +1065,7 @@ mod tests {
         expand_views(args, item).unwrap().to_string()
     }
 
-    #[test]
+    #[::core::prelude::v1::test]
     fn views_drop_derives_and_attributes_of_other_crates() {
         let out = expand(
             "Create(text)",
@@ -1049,7 +1094,7 @@ mod tests {
         assert!(view.contains("The text."), "{view}");
     }
 
-    #[test]
+    #[::core::prelude::v1::test]
     fn optional_fields_detect_serde_default_by_meaning_not_by_substring() {
         let out = expand(
             "Update(text?)",
@@ -1085,7 +1130,7 @@ mod tests {
         );
     }
 
-    #[test]
+    #[::core::prelude::v1::test]
     fn optional_fields_wrap_garde_rules_but_not_skip() {
         let out = expand(
             "Update(a?, b?)",

@@ -16,7 +16,7 @@ use lesto::prelude::*;
 use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 
-#[tokio::main]
+#[lesto::main]
 async fn main() -> std::io::Result<()> {
     tracing_subscriber::fmt().init();
 
@@ -96,7 +96,7 @@ App::new()
 
 // Or take the Router and carry on with axum
 let router: lesto::axum::Router = App::new().routes(routes![root]).into_router();
-let listener = tokio::net::TcpListener::bind("0.0.0.0:8000").await?;
+let listener = lesto::tokio::net::TcpListener::bind("0.0.0.0:8000").await?;
 lesto::axum::serve(listener, router).await?;
 ```
 

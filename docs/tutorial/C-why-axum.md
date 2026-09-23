@@ -44,7 +44,7 @@ actix-web uses `actix-rt`, built on tokio but with a **single-threaded worker** 
 worker has its own runtime and handlers may be `!Send`. It is a choice with real advantages, for
 instance using `Rc` and `RefCell` inside a handler, but it introduces rules that beginners meet as
 surprises: `tokio::spawn` inside a handler needs care, some libraries must be initialized per
-worker, tests must use `#[actix_web::test]` instead of `#[tokio::test]`. For a framework aimed at
+worker, tests must use `#[actix_web::test]` instead of `#[lesto::test]`. For a framework aimed at
 beginners, the road without exceptions matters more than the performance margin.
 
 ## 5. The extractor model is FastAPI's
