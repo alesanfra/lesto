@@ -419,6 +419,10 @@ where
     }
 
     fn call(&mut self, req: Request<B>) -> Self::Future {
+        #[cfg(feature = "otel")]
+        let measured = crate::metrics::start(&req, self.trace);
+        #[cfg(not(feature = "otel"))]
+        let measured = ();
         let span = match self.trace.enabled {
             true => crate::trace::request_span(&req, self.trace),
             false => tracing::Span::none(),
@@ -426,15 +430,37 @@ where
         if span.is_disabled() {
             return RequestSpanFuture::Disabled {
                 future: self.inner.call(req),
+                measured,
             };
         }
         let future = {
             let _entered = span.enter();
             self.inner.call(req)
         };
-        RequestSpanFuture::Recording { future, span }
+        RequestSpanFuture::Recording {
+            future,
+            span,
+            measured,
+        }
     }
 }
+
+/// The request's metric measurement: `Option<Pending>` with the `otel` feature, nothing
+/// without it, so the future carries no extra field when there is nothing to record.
+#[cfg(feature = "otel")]
+type Measured = Option<crate::metrics::Pending>;
+#[cfg(not(feature = "otel"))]
+type Measured = ();
+
+#[cfg(feature = "otel")]
+fn finish_measure<E>(measured: &mut Measured, polled: &Result<Response, E>) {
+    if let Some(pending) = measured.take() {
+        crate::metrics::finish(pending, polled.as_ref().ok().map(|r| r.status()));
+    }
+}
+
+#[cfg(not(feature = "otel"))]
+fn finish_measure<E>(_: &mut Measured, _: &Result<Response, E>) {}
 
 pin_project! {
     /// The future of [`RequestSpan`].
@@ -443,9 +469,9 @@ pin_project! {
     #[allow(missing_docs)]
     pub enum RequestSpanFuture<F> {
         /// Nobody is listening: the inner future, polled as if the layer were not there.
-        Disabled { #[pin] future: F },
+        Disabled { #[pin] future: F, measured: Measured },
         /// The inner future, polled inside the request span.
-        Recording { #[pin] future: F, span: tracing::Span },
+        Recording { #[pin] future: F, span: tracing::Span, measured: Measured },
     }
 }
 
@@ -457,13 +483,22 @@ where
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match self.project() {
-            RequestSpanFutureProj::Disabled { future } => future.poll(cx),
-            RequestSpanFutureProj::Recording { future, span } => {
+            RequestSpanFutureProj::Disabled { future, measured } => {
+                let polled = std::task::ready!(future.poll(cx));
+                finish_measure(measured, &polled);
+                Poll::Ready(polled)
+            }
+            RequestSpanFutureProj::Recording {
+                future,
+                span,
+                measured,
+            } => {
                 let _entered = span.enter();
                 let polled = std::task::ready!(future.poll(cx));
                 if let Ok(response) = &polled {
                     crate::trace::record_response(span, response);
                 }
+                finish_measure(measured, &polled);
                 Poll::Ready(polled)
             }
         }

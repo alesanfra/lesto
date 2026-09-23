@@ -218,7 +218,7 @@ pub(crate) fn record_response(span: &Span, response: &Response) {
 ///
 /// The comparison is case-sensitive on purpose: `Get` is not `GET`, and mapping it to `GET`
 /// would hide a misbehaving client.
-fn method_names(method: &Method) -> (&'static str, Option<String>) {
+pub(crate) fn method_names(method: &Method) -> (&'static str, Option<String>) {
     let known = match method.as_str() {
         "CONNECT" => "CONNECT",
         "DELETE" => "DELETE",
@@ -234,7 +234,7 @@ fn method_names(method: &Method) -> (&'static str, Option<String>) {
     (known, None)
 }
 
-fn protocol_version(version: Version) -> Option<&'static str> {
+pub(crate) fn protocol_version(version: Version) -> Option<&'static str> {
     // `http::Version` is an opaque struct, so this is a chain of comparisons, not a `match`.
     for (known, name) in [
         (Version::HTTP_11, "1.1"),
@@ -251,7 +251,7 @@ fn protocol_version(version: Version) -> Option<&'static str> {
 }
 
 /// `url.scheme`: what the request line says, else what a trusted proxy says, else `http`.
-fn scheme<B>(req: &http::Request<B>, config: Trace) -> &str {
+pub(crate) fn scheme<B>(req: &http::Request<B>, config: Trace) -> &str {
     if let Some(scheme) = req.uri().scheme_str() {
         return scheme;
     }

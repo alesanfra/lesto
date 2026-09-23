@@ -94,6 +94,9 @@ sqlx = { workspace = true, features = ["sqlite", "postgres", "uuid", "derive"] }
 anyhow.workspace = true
 tower.workspace = true
 http-body-util.workspace = true
+# `tests/metrics.rs`: the in-memory metric exporter.
+opentelemetry_sdk = { workspace = true, features = ["testing"] }
+opentelemetry.workspace = true
 
 [target.'cfg(unix)'.dev-dependencies]
 libc = "0.2"

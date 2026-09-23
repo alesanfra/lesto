@@ -414,13 +414,21 @@ have to be derived from spans in the backend, and the tutorial chapter is called
 "Observability" without saying so.
 
 **Tasks**
-- [ ] Decide: (a) add `opentelemetry/metrics` plus a meter provider in `otel::install` and a
+- [x] Decide: (a) add `opentelemetry/metrics` plus a meter provider in `otel::install` and a
       small set of HTTP server metrics from the request layer (`http.server.request.duration`
       at least), or (b) declare metrics out of scope and point at
       `tracing-opentelemetry`/`metrics-rs`.
-- [ ] Whichever is chosen, chapter 15 says it in one paragraph, near the top.
-- [ ] If (a): the metrics must cost nothing when no meter provider is installed, and
+- [x] Whichever is chosen, chapter 15 says it in one paragraph, near the top.
+- [x] If (a): the metrics must cost nothing when no meter provider is installed, and
       `cargo bench -p lesto` must show it.
+
+**Done (2026-09-23), option (a):** `opentelemetry{,_sdk,-otlp}/metrics`, an `SdkMeterProvider`
+with a periodic OTLP reader in `otel::install` (set as the global provider), `OTEL_METRICS_EXPORTER`,
+`otel::enable_metrics()` for applications with their own provider. The request layer records
+`http.server.request.duration` (seconds, semconv buckets; method, route, status, scheme,
+protocol version, `error.type` on 5xx). Bench with all features, no provider, same machine,
+before/after: 201 path 1490 → 1509 ns, 404 path 1229 → 1235 ns, `HttpError` 1192 → 1201 ns —
+noise (the "trace off" rows move the same way).
 
 ## P4-2. `otel` in the default features, with numbers
 

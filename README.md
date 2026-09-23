@@ -34,7 +34,8 @@ A Rust web micro-framework with **FastAPI**'s ergonomics, built on [axum](https:
 - **Observability by default**: every request runs in a `tracing` span named `{method} {http.route}`
   whose fields are the [OpenTelemetry semantic conventions](https://opentelemetry.io/docs/specs/semconv/http/http-spans/)
   for HTTP servers, and every store transaction in a client span with the database conventions.
-  With the `otel` feature, setup is environment only — `OTEL_EXPORTER_OTLP_ENDPOINT` and friends:
+  With the `otel` feature (traces, logs and the `http.server.request.duration` metric), setup is
+  environment only — `OTEL_EXPORTER_OTLP_ENDPOINT` and friends:
   `App::serve` installs the console subscriber and the OTLP export of **traces and logs** (every
   `tracing` event becomes a log record carrying its `trace_id`), flushes on shutdown, and
   continues a trace started upstream (`traceparent`). It stands aside if you install your own

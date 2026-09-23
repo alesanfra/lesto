@@ -5,7 +5,13 @@ Every request a lesto router handles runs inside a `tracing` span whose fields a
 and every store transaction (chapter 13) inside a client span with the
 [database conventions](https://opentelemetry.io/docs/specs/semconv/database/database-spans/).
 Nothing to add to a handler. With the `otel` feature, nothing to add to `main` either: the
-`OTEL_*` environment variables decide where the spans — and the log events — go.
+`OTEL_*` environment variables decide where the spans, the log events and the metrics go.
+
+Three signals, then. **Traces**: a span per request and per store transaction. **Logs**: every
+`tracing` event, tied to the span it happened in. **Metrics**: `http.server.request.duration`,
+the request-duration histogram of the HTTP conventions, by method, route and status — the
+request rate, error rate and latency percentiles a dashboard or an alert is built on — plus any
+instrument of your own on `opentelemetry::global::meter(..)`.
 
 The runnable version of this chapter is `examples/04-opentelemetry`: an API plus, in Docker,
 either [Jaeger](https://www.jaegertracing.io/) (traces, no configuration at all) or
@@ -31,27 +37,30 @@ export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318   # an OTLP collector, 
 cargo run
 ```
 
-A backend that takes traces but not logs (Jaeger answers `404` on `/v1/logs`) needs one more
-line, or every batch of log records fails:
+A backend that takes traces but not logs or metrics (Jaeger answers `404` on `/v1/logs` and
+`/v1/metrics`) needs two more lines, or every batch of those fails:
 
 ```sh
 export OTEL_LOGS_EXPORTER=none
+export OTEL_METRICS_EXPORTER=none
 ```
 
 `App::serve` sees the endpoint, installs a subscriber that prints to the console **and** exports
-over OTLP — spans as traces, `tracing` events as log records — and flushes what is buffered when
+over OTLP — spans as traces, `tracing` events as log records, the duration histogram as metrics
+(every 60 s, or `OTEL_METRIC_EXPORT_INTERVAL` milliseconds) — and flushes what is buffered when
 the server shuts down. Without the endpoint nothing is exported, which is what you want in tests
 and under `lesto dev`.
 
 | variable | meaning |
 |---|---|
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | where to send telemetry; `/v1/traces` and `/v1/logs` are appended. Unset: no export |
-| `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`, `..._LOGS_ENDPOINT` | the same per signal, used exactly as given |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | where to send telemetry; `/v1/traces`, `/v1/logs` and `/v1/metrics` are appended. Unset: no export |
+| `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`, `..._LOGS_ENDPOINT`, `..._METRICS_ENDPOINT` | the same per signal, used exactly as given |
 | `OTEL_EXPORTER_OTLP_HEADERS` | `key1=value1,key2=value2`, for a backend that wants an `Authorization` |
 | `OTEL_SERVICE_NAME` | `service.name`; defaults to the title of your OpenAPI document |
 | `OTEL_TRACES_EXPORTER=none` | keep the logs, stop exporting spans |
 | `OTEL_LOGS_EXPORTER=none` | keep the spans, stop exporting logs |
-| `OTEL_SDK_DISABLED=true` | keep the console, stop both |
+| `OTEL_METRICS_EXPORTER=none` | stop exporting metrics |
+| `OTEL_SDK_DISABLED=true` | keep the console, stop every export |
 | `RUST_LOG` | console and export filter, `info` by default |
 
 ## Logs, next to the trace they belong to

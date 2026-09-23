@@ -23,14 +23,20 @@
 //!
 //! | variable | meaning |
 //! |---|---|
-//! | `OTEL_EXPORTER_OTLP_ENDPOINT` | where to send telemetry; `/v1/traces` and `/v1/logs` are appended. Nothing is exported while it is unset |
-//! | `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` / `..._LOGS_ENDPOINT` | the same, per signal, and used as given |
+//! | `OTEL_EXPORTER_OTLP_ENDPOINT` | where to send telemetry; `/v1/traces`, `/v1/logs` and `/v1/metrics` are appended. Nothing is exported while it is unset |
+//! | `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` / `..._LOGS_ENDPOINT` / `..._METRICS_ENDPOINT` | the same, per signal, and used as given |
 //! | `OTEL_EXPORTER_OTLP_HEADERS` | `key1=value1,key2=value2`, for a backend that wants an `Authorization` |
 //! | `OTEL_SERVICE_NAME` | `service.name` of the exported resource; defaults to the title of the OpenAPI document |
 //! | `OTEL_TRACES_EXPORTER=none` | keep the logs, stop exporting spans |
 //! | `OTEL_LOGS_EXPORTER=none` | keep the spans, stop exporting logs |
-//! | `OTEL_SDK_DISABLED` | `true` turns both off and leaves the console |
+//! | `OTEL_METRICS_EXPORTER=none` | stop exporting metrics (`http.server.request.duration`) |
+//! | `OTEL_SDK_DISABLED` | `true` turns every signal off and leaves the console |
 //! | `RUST_LOG` | the console and export filter, `info` by default |
+//!
+//! Metrics: every request records `http.server.request.duration` (a histogram in seconds, with
+//! method, route, status, scheme and protocol version), and the meter provider becomes the
+//! global one, so the application's own instruments (`opentelemetry::global::meter(..)`) are
+//! exported with it.
 //!
 //! Every `tracing` event (`tracing::info!`, an error logged by lesto, one of your own) becomes
 //! an OTLP log record carrying the id of the span it happened in, so a backend shows the logs
@@ -48,6 +54,7 @@ use opentelemetry::trace::TracerProvider as _;
 use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::logs::SdkLoggerProvider;
+use opentelemetry_sdk::metrics::{PeriodicReader, SdkMeterProvider};
 use opentelemetry_sdk::propagation::TraceContextPropagator;
 use opentelemetry_sdk::trace::SdkTracerProvider;
 use tracing_subscriber::filter::{LevelFilter, Targets};
@@ -71,6 +78,8 @@ pub struct Config {
     pub traces: bool,
     /// `OTEL_LOGS_EXPORTER` is not `none`.
     pub logs: bool,
+    /// `OTEL_METRICS_EXPORTER` is not `none`.
+    pub metrics: bool,
     /// The console filter (`RUST_LOG`), `info` by default.
     pub filter: String,
     /// `OTEL_EXPORTER_OTLP_PROTOCOL`, when it asks for something this feature cannot do.
@@ -96,11 +105,13 @@ impl Config {
                 .unwrap_or_else(|| default_service_name.to_string()),
             has_endpoint: value("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")
                 .or_else(|| value("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"))
+                .or_else(|| value("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT"))
                 .or_else(|| value("OTEL_EXPORTER_OTLP_ENDPOINT"))
                 .is_some(),
             disabled: value("OTEL_SDK_DISABLED").is_some_and(|v| v.trim() == "true"),
             traces: wanted("OTEL_TRACES_EXPORTER"),
             logs: wanted("OTEL_LOGS_EXPORTER"),
+            metrics: wanted("OTEL_METRICS_EXPORTER"),
             filter: value("RUST_LOG").unwrap_or_else(|| "info".to_string()),
             unsupported_protocol: protocol.filter(|p| !p.starts_with("http/protobuf")),
         }
@@ -108,7 +119,11 @@ impl Config {
 
     /// Anything at all is exported only when a collector is configured and the SDK is on.
     fn exports(&self) -> bool {
-        self.has_endpoint && !self.disabled && (self.traces || self.logs)
+        self.has_endpoint && !self.disabled && (self.traces || self.logs || self.metrics)
+    }
+
+    fn exports_metrics(&self) -> bool {
+        self.exports() && self.metrics
     }
 
     fn exports_traces(&self) -> bool {
@@ -127,6 +142,7 @@ impl Config {
 pub struct Telemetry {
     traces: Option<SdkTracerProvider>,
     logs: Option<SdkLoggerProvider>,
+    metrics: Option<SdkMeterProvider>,
 }
 
 impl Telemetry {
@@ -135,6 +151,7 @@ impl Telemetry {
         Telemetry {
             traces: None,
             logs: None,
+            metrics: None,
         }
     }
 
@@ -148,6 +165,12 @@ impl Telemetry {
         self.logs.is_some()
     }
 
+    /// Are metrics (`http.server.request.duration`, and any instrument of the application's
+    /// on the global meter provider) being exported over OTLP?
+    pub fn is_exporting_metrics(&self) -> bool {
+        self.metrics.is_some()
+    }
+
     /// Flush and stop, instead of waiting for the drop.
     pub fn shutdown(mut self) {
         self.stop();
@@ -158,6 +181,11 @@ impl Telemetry {
             && let Err(error) = provider.shutdown()
         {
             tracing::warn!(%error, "the span exporter did not shut down cleanly");
+        }
+        if let Some(provider) = self.metrics.take()
+            && let Err(error) = provider.shutdown()
+        {
+            tracing::warn!(%error, "the metric exporter did not shut down cleanly");
         }
         if let Some(provider) = self.logs.take()
             && let Err(error) = provider.shutdown()
@@ -191,6 +219,16 @@ impl Drop for Telemetry {
 /// that would answer "no parent" to every request, at the price of a lookup per request.
 pub fn enable_propagation() {
     crate::trace::propagation::ACTIVE.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Record `http.server.request.duration` on every request from now on, through the global meter
+/// provider.
+///
+/// [`init`] and [`init_named`] call this after installing their meter provider. An application
+/// with its own (the escape hatch) calls it once, after `opentelemetry::global::set_meter_provider`:
+/// until then lesto records nothing, and a request pays one relaxed load for it.
+pub fn enable_metrics() {
+    crate::metrics::enable();
 }
 
 /// Install the console subscriber and, when the environment points at a collector, the OTLP
@@ -233,6 +271,10 @@ fn install(config: Config) -> Telemetry {
         .exports_logs()
         .then(|| logger_provider(&resource))
         .and_then(|built| unwrap_provider(built, "logs", &mut problems));
+    let metrics = config
+        .exports_metrics()
+        .then(|| meter_provider(&resource))
+        .and_then(|built| unwrap_provider(built, "metrics", &mut problems));
 
     let console =
         tracing_subscriber::registry()
@@ -260,6 +302,10 @@ fn install(config: Config) -> Telemetry {
     // in the logs of whoever wonders why a `traceparent` was ignored.
     opentelemetry::global::set_text_map_propagator(TraceContextPropagator::new());
     enable_propagation();
+    if let Some(provider) = &metrics {
+        opentelemetry::global::set_meter_provider(provider.clone());
+        enable_metrics();
+    }
 
     if let Some(protocol) = &config.unsupported_protocol {
         tracing::warn!(
@@ -274,9 +320,14 @@ fn install(config: Config) -> Telemetry {
         service_name = %config.service_name,
         traces = traces.is_some(),
         logs = logs.is_some(),
+        metrics = metrics.is_some(),
         "OTLP export configured"
     );
-    Telemetry { traces, logs }
+    Telemetry {
+        traces,
+        logs,
+        metrics,
+    }
 }
 
 /// Keep the telemetry stack out of the log pipeline it feeds.
@@ -339,6 +390,20 @@ fn logger_provider(
         .build()?;
     Ok(SdkLoggerProvider::builder()
         .with_batch_exporter(exporter)
+        .with_resource(resource.clone())
+        .build())
+}
+
+/// The periodic metric provider (its own thread, every 60 s or `OTEL_METRIC_EXPORT_INTERVAL`),
+/// reading `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` or the generic endpoint plus `/v1/metrics`.
+fn meter_provider(
+    resource: &Resource,
+) -> Result<SdkMeterProvider, opentelemetry_otlp::ExporterBuildError> {
+    let exporter = opentelemetry_otlp::MetricExporter::builder()
+        .with_http()
+        .build()?;
+    Ok(SdkMeterProvider::builder()
+        .with_reader(PeriodicReader::builder(exporter).build())
         .with_resource(resource.clone())
         .build())
 }

@@ -47,9 +47,9 @@ tracing = "0.1"
 # stack, no gRPC), the bridges that turn a `tracing` span into an OpenTelemetry span and a
 # `tracing` event into an OpenTelemetry log record, and the subscriber `lesto::otel::init`
 # installs.
-opentelemetry = { version = "0.32", default-features = false, features = ["trace", "logs"] }
-opentelemetry_sdk = { version = "0.32", default-features = false, features = ["trace", "logs"] }
-opentelemetry-otlp = { version = "0.32", default-features = false, features = ["trace", "logs", "http-proto", "reqwest-blocking-client"] }
+opentelemetry = { version = "0.32", default-features = false, features = ["trace", "logs", "metrics"] }
+opentelemetry_sdk = { version = "0.32", default-features = false, features = ["trace", "logs", "metrics"] }
+opentelemetry-otlp = { version = "0.32", default-features = false, features = ["trace", "logs", "metrics", "http-proto", "reqwest-blocking-client"] }
 opentelemetry-appender-tracing = { version = "0.32", default-features = false }
 tracing-opentelemetry = { version = "0.33", default-features = false }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
