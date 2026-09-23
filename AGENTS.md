@@ -285,6 +285,8 @@ Recorded here because they are not derivable from the code. Do not undo them cas
   a `State<T>` argument or `state = T` the checks run immediately, on the argument's span. A
   missing attribute yields `expected type, found function`.
 - A nested `/` route is documented at the prefix itself (that is where axum serves it).
+- `App::merge` / `nest_router` / `From<Router<S>>` take a finished `axum::Router`: served, not
+  documented (the handler types are gone by then), but inside every lesto layer.
 - **Problems are rendered once.** `ProblemLayer` publishes the request URI and the
   the request URI in a `tokio::task_local!` (`error::RENDER`); `Problem::into_response` reads
   it, fills `instance`, serializes once and marks the response with the `ProblemRendered`

@@ -326,10 +326,14 @@ test tooling, not part of the one-line claim.
 **Why:** goal 4's adoption path. Today it is `map_router(|r| r.merge(other))`, which nobody finds.
 
 **Tasks**
-- [ ] `App::merge(router)` and `App::nest_router(prefix, router)`; the routes they bring are not
+- [x] `App::merge(router)` and `App::nest_router(prefix, router)`; the routes they bring are not
       documented in OpenAPI, which is stated in the rustdoc.
-- [ ] Consider `impl From<Router<S>> for App<S>`.
-- [ ] Tutorial chapter 11 gains the "coming from axum" direction next to the existing exit path.
+- [x] Consider `impl From<Router<S>> for App<S>`.
+- [x] Tutorial chapter 11 gains the "coming from axum" direction next to the existing exit path.
+
+**Done (2026-09-23):** `App::merge(Router<S>)`, `App::nest_router(prefix, Router<S>)` and
+`impl From<Router<S>> for App<S>`; merged routes go through the problem, panic, span and timeout
+layers (tested). Chapter 11 opens its axum section with "Coming from axum".
 
 ## P3-2. The rest of the tower-http batteries
 

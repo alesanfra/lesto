@@ -84,6 +84,28 @@ async fn require_json(req: Request, next: Next) -> Result<Response, HttpError> {
 
 The response will be a problem+json like every other error.
 
+## Coming from axum
+
+An existing axum application does not have to be rewritten to start using lesto. Mount its
+router as it is and move handlers over one at a time:
+
+```rust
+let legacy: lesto::axum::Router<AppState> = old_routes();   // your axum code, unchanged
+
+App::new()
+    .routes(routes![create_user, get_user])                 // the handlers moved so far
+    .merge(legacy)                                          // everything else, as before
+    .nest_router("/admin", admin_routes())                  // or under a prefix
+    .with_state(state)
+    .serve()
+    .await
+```
+
+`merge` and `nest_router` take a plain `axum::Router` with the same state type. Its routes are
+served but **not documented**: lesto documents a handler from its argument and return types,
+and it never sees those of a finished router. They do get the rest: problem+json rendering, the
+panic catcher, the request span, the timeout. `App::from(router)` starts an app from a router.
+
 ## Dropping down to axum
 
 When you need something lesto does not expose:
