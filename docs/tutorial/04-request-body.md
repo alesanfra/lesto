@@ -6,7 +6,7 @@ JSON. In lesto the body is declared with a struct and extracted with `Json<T>`.
 ```rust
 use lesto::prelude::*;
 
-#[derive(Deserialize, JsonSchema, Validate)]
+#[lesto::model]
 struct Item {
     /// Item name.
     #[garde(length(min = 1, max = 100))]
@@ -20,7 +20,7 @@ struct Item {
     tax: Option<f64>,
 }
 
-#[derive(Serialize, JsonSchema)]
+#[lesto::model]
 struct ItemOut {
     name: String,
     price_with_tax: f64,
@@ -47,6 +47,38 @@ curl -X POST http://127.0.0.1:8000/items \
 HTTP/1.1 201 Created
 {"name":"Keyboard","price_with_tax":54.9}
 ```
+
+## `#[lesto::model]`: where the derives come from
+
+A type that travels as JSON needs four derives: serde's `Serialize` and `Deserialize` (the wire
+format), schemars' `JsonSchema` (the OpenAPI schema) and garde's `Validate` (the rules).
+`#[lesto::model]` writes them for you, through lesto's own copies of those crates, which is why
+your `Cargo.toml` does not list them. The two structs above expand to roughly:
+
+```rust
+#[derive(Serialize, Deserialize, JsonSchema, Validate)]
+#[serde(crate = "::lesto::serde")]
+#[schemars(crate = "::lesto::schemars")]
+struct Item { /* the fields, as written */ }
+
+#[derive(Serialize, Deserialize, JsonSchema, Validate)]
+#[serde(crate = "::lesto::serde")]
+#[schemars(crate = "::lesto::schemars")]
+#[garde(allow_unvalidated)]          // ItemOut has no rules at all
+struct ItemOut { /* ... */ }
+```
+
+Two things to know:
+
+- **Rules are all or nothing.** A model with no `#[garde(..)]` anywhere (`ItemOut`) accepts every
+  field as is. As soon as one field has a rule (`Item`), every field needs one: a rule, `skip`,
+  or `dive` for a nested model. That is what catches a forgotten `dive`, which would otherwise
+  leave a nested struct unchecked.
+- **Your other derives stay yours.** Write `#[derive(Debug, Clone)]` below the attribute as usual;
+  field attributes (`#[serde(rename = ..)]`, `#[schemars(..)]`, `#[garde(..)]`) work unchanged.
+
+The plain derives still work, if you prefer to spell them out or need one without the others:
+then `serde`, `schemars` and `garde` must be dependencies of your crate, as with any derive.
 
 ## What `Json<T>` does for you
 

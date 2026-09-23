@@ -14,7 +14,9 @@ First release, 0.1.0: `lesto`, `lesto-macros`, `lesto-cli`.
   handler types, Scalar at `/docs` and Swagger UI at `/swagger`.
 - Validating extractors `Json`, `Query`, `Path` (garde); RFC 9457 errors (`HttpError`, `Problem`).
 - Security extractors `Bearer`, `Basic`, `ApiKey`, documented as OpenAPI security schemes.
-- `#[lesto::views]` for create/update views of one model.
+- `#[lesto::model]` (serde, schemars and garde derives through lesto, garde's derive vendored)
+  and `#[lesto::views]` / `model(views(..))` for create/update views of one model.
+- `#[lesto::main]` and `#[lesto::test]`: tokio's, through `lesto::tokio`.
 - Feature `db`: sqlx stores with principals, permissions and one transaction per method.
 - Feature `lambda`: AWS Lambda adapter; feature `otel`: OTLP traces and logs from the environment.
 - Features `email` and `url` (default on) for the garde rules of the same name.

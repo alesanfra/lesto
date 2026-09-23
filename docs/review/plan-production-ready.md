@@ -265,17 +265,24 @@ names the crate's own macro.
 absolute paths, which is why `serde`, `schemars` and `garde` must be direct dependencies.
 
 **Tasks**
-- [ ] `#[lesto::model]` adds the derives and points them at lesto's re-exports:
+- [x] `#[lesto::model]` adds the derives and points them at lesto's re-exports:
       `#[serde(crate = "::lesto::serde")]`, `#[schemars(crate = "::lesto::schemars")]`.
       Add `pub use serde;` to lesto.
-- [ ] garde has no `crate` option (`garde_derive` 0.23 hard-codes `::garde::`). Decide, and write
+- [x] garde has no `crate` option (`garde_derive` 0.23 hard-codes `::garde::`). Decide, and write
       the decision here: (a) upstream PR adding `#[garde(crate = ..)]`, (b) document garde as the
       one remaining direct dependency until it lands, (c) vendor a patched derive. Recommended:
       (a) with (b) as the interim state.
-- [ ] One attribute: `#[lesto::model(views(Create(..), Update(..?)))]` (question 3,
+- [x] One attribute: `#[lesto::model(views(Create(..), Update(..?)))]` (question 3,
       recommended). It removes the "`views` must sit above `#[derive]`" ordering rule, because the
       macro emits the derives itself. Keep `#[lesto::views]` working for hand-derived models.
-- [ ] Document in the tutorial where the derives come from, so the magic is legible.
+- [x] Document in the tutorial where the derives come from, so the magic is legible.
+
+**Done (2026-09-23):** garde's derive vendored (option c, the maintainer's choice) in
+`lesto-macros/src/garde`, with `NOTICE.md` (provenance, license, changes, how to update).
+`#[lesto::model]` emits the four derives through `lesto::serde` / `lesto::schemars` /
+`lesto::__private::Validate`, `allow_unvalidated` when the type has no `#[garde]` at all, and
+takes `views(..)`. `pattern` became a lesto feature too (implied by `email`, as in garde).
+Tutorial chapters 4 and 6 and the README use it; the remaining snippets move in P2-4.
 
 ## P2-3. Re-export sqlx for `db` users
 

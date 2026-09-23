@@ -8,7 +8,7 @@ repository.workspace = true
 readme = "../../README.md"
 keywords.workspace = true
 categories.workspace = true
-description = "Attribute and derive macros for lesto: #[lesto::get], #[lesto::views], #[derive(Store)]"
+description = "Attribute and derive macros for lesto: #[lesto::get], #[lesto::model], #[lesto::views], #[derive(Store)]"
 
 [lib]
 proc-macro = true
@@ -17,3 +17,16 @@ proc-macro = true
 syn.workspace = true
 quote.workspace = true
 proc-macro2.workspace = true
+# The vendored garde derive (src/garde) checks `pattern` literals at compile time.
+regex = { workspace = true, optional = true }
+
+# The rules of the vendored garde derive that need a garde feature; `lesto` turns them on
+# together with garde's own (see src/garde/NOTICE.md).
+[features]
+email = ["regex"]
+url = []
+regex = ["dep:regex"]
+
+# The vendored garde derive tests features lesto never turns on (see src/garde/NOTICE.md).
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("js-sys", "credit-card", "phone-number"))'] }

@@ -108,14 +108,14 @@ async fn create_user(Json(input): Json<UserIn>) -> Json<UserOut> {
 
 The password cannot end up in the response: the type does not contain it.
 
-### One model, several views: `#[lesto::views]`
+### One model, several views: `views(..)`
 
 When the input and output structs are the *same fields minus a few*, writing them by hand
 duplicates every attribute. Declare the model once and let lesto generate the views:
 
 ```rust
-#[lesto::views(Create(author, text), Update(text?))]
-#[derive(Serialize, Deserialize, JsonSchema, Validate)]
+#[lesto::model(views(Create(author, text), Update(text?)))]
+#[derive(Clone)]
 struct Note {
     #[garde(skip)]
     id: u64,
@@ -146,8 +146,9 @@ async fn update_note(Path(id): Path<u64>, Json(body): Json<NoteUpdate>) -> Json<
 The attribute generates `NoteCreate { author, text }` and `NoteUpdate { text: Option<String> }`.
 Each field is copied with its doc comment and its serde, garde and schemars attributes, so the
 views validate and document exactly like the model. The views also inherit the model's derives and
-container attributes (`#[serde(rename_all = "camelCase")]`, `#[garde(allow_unvalidated)]`, ...):
-put `#[lesto::views]` **above** `#[derive]` so it can see them. Only what describes a request
+container attributes (`#[serde(rename_all = "camelCase")]`, `#[garde(allow_unvalidated)]`, ...).
+With plain derives, the standalone attribute does the same: `#[lesto::views(..)]`, written
+**above** `#[derive]` so it can see them. Only what describes a request
 payload is copied: the std derives (`Debug`, `Clone`, `PartialEq`, `Default`, ...), `Serialize`,
 `Deserialize`, `JsonSchema`, `Validate`, and the `serde`, `garde`, `schemars` and `doc`
 attributes. A `#[derive(sqlx::FromRow)]` on the model, and the `#[sqlx(..)]` attributes that go

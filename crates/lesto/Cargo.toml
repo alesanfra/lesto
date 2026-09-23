@@ -50,8 +50,10 @@ http-body-util = { workspace = true, optional = true }
 [features]
 default = ["email", "url"]
 # `#[garde(email)]` and `#[garde(url)]`; off drops garde's regex and idna dependencies.
-email = ["garde/email"]
-url = ["garde/url"]
+email = ["garde/email", "lesto-macros/email"]
+url = ["garde/url", "lesto-macros/url"]
+# `#[garde(pattern(..))]`; `email` includes it.
+pattern = ["garde/regex", "lesto-macros/regex"]
 # `From<anyhow::Error> for HttpError` (and `lesto::db::Error`): a 500 with the detail hidden
 # and the cause logged.
 anyhow = ["dep:anyhow"]

@@ -36,6 +36,7 @@ indexmap = { version = "2", features = ["serde"] }
 # already in the tree through tokio and hyper.
 pin-project-lite = "0.2"
 syn = { version = "2", features = ["full", "extra-traits"] }
+regex = { version = "1", default-features = false, features = ["std"] }
 quote = "1"
 proc-macro2 = "1"
 sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio"] }

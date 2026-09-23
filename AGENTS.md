@@ -60,9 +60,11 @@ crates/lesto/             library
   tests/ui/*.rs           compile-fail cases; *.expected lists the diagnostic fragments lesto owns
                           (db_*.rs for lesto::db), checked by tests/ui.rs
 crates/lesto-macros/      proc macros: #[lesto::get] and friends (RouteInfo marker type +
-                          per-argument checks), #[lesto::views], #[lesto::main]/#[lesto::test]
+                          per-argument checks), #[lesto::model], #[lesto::views],
+                          #[lesto::main]/#[lesto::test]
                           (tokio's, through `lesto::tokio`), #[derive(Store)] with the
                           optional #[store(read = .., write = ..)] permission pair
+  src/garde/              garde_derive 0.23.0, vendored (NOTICE.md): emits ::lesto::garde paths
 crates/lesto-cli/         the `lesto` binary: dev (watch + rebuild + restart, socket kept open),
                           run, openapi (runs the app with LESTO_OPENAPI_PATH: App::serve writes
                           the document there and returns)
@@ -179,6 +181,16 @@ Recorded here because they are not derivable from the code. Do not undo them cas
   name (type namespace only) implementing `RouteInfo`, so `routes![f]` finds both the fn and its
   metadata. Alternatives (renaming the fn, registering into a global) were rejected: the handler
   stays a plain function you can call in tests.
+- **`#[lesto::model]` and a vendored garde derive.** The four derives a model needs emit
+  absolute paths, which made `serde`, `schemars` and `garde` direct dependencies of every
+  application. serde and schemars take `crate = ".."`; `garde_derive` does not, so its source is
+  vendored in `lesto-macros/src/garde` with `::garde` → `::lesto::garde` (decided 2026-09-23,
+  over an upstream PR that would take a release cycle and a documented extra dependency). The
+  vendored version must match `garde` in `[workspace.dependencies]`: the generated code calls
+  its runtime API. A model with no `#[garde]` attribute gets `allow_unvalidated` (it has no
+  rules); one rule anywhere restores garde's all-fields strictness, which is what catches a
+  forgotten `dive`. `views(..)` is an option of `model` rather than a second attribute because
+  `model` emits the derives, so the "views above derive" ordering rule disappears.
 - **`#[lesto::views]` instead of `Note<View>` generics or hand-written DTOs.** One model with
   all attributes is the source of truth; generated `ModelCreate`/`ModelUpdate` keep handler
   signatures free of type parameters and produce ordinary OpenAPI schemas.
