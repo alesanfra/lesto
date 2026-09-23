@@ -287,10 +287,15 @@ Tutorial chapters 4 and 6 and the README use it; the remaining snippets move in 
 ## P2-3. Re-export sqlx for `db` users
 
 **Tasks**
-- [ ] Check whether `sqlx::FromRow`'s derive accepts a crate path. If it does, re-export sqlx as
+- [x] Check whether `sqlx::FromRow`'s derive accepts a crate path. If it does, re-export sqlx as
       `lesto::db::sqlx` and have `#[lesto::model]` (or a `db` variant) point at it.
-- [ ] If it does not, document sqlx as a direct dependency of `db` users and say why, next to the
+- [x] If it does not, document sqlx as a direct dependency of `db` users and say why, next to the
       garde note.
+
+**Done (2026-09-23):** `sqlx-macros-core` 0.9 hard-codes `::sqlx::` (`derives/row.rs`) and has
+no crate attribute, so `FromRow` users keep sqlx as a direct dependency; chapter 13 says why and
+that `lesto::db::sqlx` (already re-exported) covers everything else. Vendoring it like garde was
+not done: `FromRow` is optional (tuples work), and sqlx's macros are far larger than garde's.
 
 ## P2-4. One line in every manifest
 
