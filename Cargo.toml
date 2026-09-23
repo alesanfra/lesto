@@ -29,6 +29,8 @@ base64 = "0.22"
 # No features here: `lesto` lists the ones it uses, examples inherit them through unification.
 tokio = "1"
 tower = { version = "0.5", features = ["util"] }
+# `App::cors`, `App::request_id` and (feature `compression`) `App::compression`.
+tower-http = { version = "0.6", default-features = false }
 http = "1"
 http-body-util = "0.1"
 indexmap = { version = "2", features = ["serde"] }

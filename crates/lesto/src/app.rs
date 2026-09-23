@@ -44,6 +44,13 @@ pub struct App<S = ()> {
     timeout: Option<Duration>,
     /// Request body limit ([`App::body_limit`]); `None` keeps axum's 2 MB default.
     body_limit: Option<axum::extract::DefaultBodyLimit>,
+    /// [`App::cors`].
+    cors: Option<tower_http::cors::CorsLayer>,
+    /// [`App::compression`].
+    #[cfg(feature = "compression")]
+    compression: bool,
+    /// [`App::request_id`].
+    request_id: bool,
 }
 
 /// Default of [`App::shutdown_timeout`]: Kubernetes' own termination grace period.
@@ -96,6 +103,10 @@ where
             shutdown_timeout: Some(DEFAULT_SHUTDOWN_TIMEOUT),
             timeout: None,
             body_limit: None,
+            cors: None,
+            #[cfg(feature = "compression")]
+            compression: false,
+            request_id: false,
         }
     }
 
@@ -242,6 +253,37 @@ where
         self
     }
 
+    /// Answer CORS preflights and add the CORS headers, with tower-http's `CorsLayer`
+    /// (re-exported as [`lesto::cors`](crate::cors)):
+    ///
+    /// ```ignore
+    /// use lesto::cors::{Any, CorsLayer};
+    /// app.cors(CorsLayer::new().allow_origin(["https://app.example".parse()?]).allow_headers(Any))
+    /// ```
+    ///
+    /// Installed outside every other layer, so error responses (a `404` problem, a caught
+    /// panic) carry the headers too and a browser can read them.
+    pub fn cors(mut self, cors: tower_http::cors::CorsLayer) -> Self {
+        self.cors = Some(cors);
+        self
+    }
+
+    /// gzip response bodies for clients that send `Accept-Encoding: gzip` (tower-http's
+    /// `CompressionLayer`; feature `compression`, on by default). Small bodies and already
+    /// compressed media types are left alone.
+    #[cfg(feature = "compression")]
+    pub fn compression(mut self) -> Self {
+        self.compression = true;
+        self
+    }
+
+    /// Give every request an `x-request-id` (a UUID v4 unless the client or a proxy sent one)
+    /// and copy it to the response, so a log line, a trace and a client report can be matched.
+    pub fn request_id(mut self) -> Self {
+        self.request_id = true;
+        self
+    }
+
     // ---- routes -----------------------------------------------------------------------
 
     /// Register a set of routes, typically built with [`routes!`](crate::routes).
@@ -371,6 +413,10 @@ where
             shutdown_timeout: self.shutdown_timeout,
             timeout: self.timeout,
             body_limit: self.body_limit,
+            cors: self.cors,
+            #[cfg(feature = "compression")]
+            compression: self.compression,
+            request_id: self.request_id,
         }
     }
 
@@ -468,7 +514,28 @@ where
             // routing, which is what makes `MatchedPath` (and so `http.route`) available.
             crate::layers::RequestSpanLayer::with(self.trace),
         );
-        router.layer(layers)
+        router = router.layer(layers);
+
+        // Outside the shared stack, opt-in: CORS headers and compression apply to every
+        // response, problems included, and the request span sees the request id.
+        if self.request_id {
+            let header = http::HeaderName::from_static("x-request-id");
+            router = router.layer(tower_layer::Stack::new(
+                tower_http::request_id::PropagateRequestIdLayer::new(header.clone()),
+                tower_http::request_id::SetRequestIdLayer::new(
+                    header,
+                    tower_http::request_id::MakeRequestUuid,
+                ),
+            ));
+        }
+        #[cfg(feature = "compression")]
+        if self.compression {
+            router = router.layer(tower_http::compression::CompressionLayer::new());
+        }
+        if let Some(cors) = self.cors {
+            router = router.layer(cors);
+        }
+        router
     }
 }
 

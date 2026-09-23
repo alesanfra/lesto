@@ -245,7 +245,9 @@ Recorded here because they are not derivable from the code. Do not undo them cas
   a `tracing` level must be a constant, and filtering is the subscriber's job.
 - **Timeout and body limit are opt-in `Router::layer` calls of their own**, made before the
   shared stack: an application that does not set them pays nothing per request, and one that
-  does pays one re-boxing. The timeout is hand-written like the other layers (no tower-http:
+  does pays one re-boxing. CORS, compression and request ids (`App::cors`, `compression`,
+  `request_id`) are tower-http's layers, added *after* the shared stack, so problems and
+  caught panics carry CORS headers and get compressed. The timeout is hand-written (not tower-http:
   its `TimeoutLayer` answers an empty body, and a problem is the whole point) and answers `503`
   — `408` means the *client* was slow, `504` means an upstream gateway was. The body limit is
   axum's own `DefaultBodyLimit`; lesto's `Json` turns its rejection into a `413` problem.

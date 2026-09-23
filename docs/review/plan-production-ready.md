@@ -340,12 +340,18 @@ layers (tested). Chapter 11 opens its axum section with "Coming from axum".
 **Depends on:** nothing; P1-2 did not add tower-http after all, this task does.
 
 **Tasks**
-- [ ] Add `tower-http` with the features used; update `AGENTS.md`, which currently avoids it.
-- [ ] `App::cors(..)`, `App::compression()`, `App::request_id()`. Each installs the tower-http
+- [x] Add `tower-http` with the features used; update `AGENTS.md`, which currently avoids it.
+- [x] `App::cors(..)`, `App::compression()`, `App::request_id()`. Each installs the tower-http
       layer and stays usable directly through `App::layer` or on a plain `axum::Router`.
-- [ ] Tutorial chapter 11 documents the new builder methods; `README.md` "What the framework
+- [x] Tutorial chapter 11 documents the new builder methods; `README.md` "What the framework
       does" mentions them.
-- [ ] Re-run `cargo bench -p lesto`: the defaults must not cost anything when unused.
+- [x] Re-run `cargo bench -p lesto`: the defaults must not cost anything when unused.
+
+**Done (2026-09-23):** tower-http 0.6 with `cors` and `request-id` always, `compression-gzip`
+behind lesto's `compression` feature (default on: flate2 is the only heavy part).
+`App::cors(CorsLayer)` (tower-http's type, re-exported as `lesto::cors`), `App::compression()`,
+`App::request_id()`, each an opt-in `Router::layer` outside the shared stack, so the request path
+of an app that uses none of them is unchanged.
 
 ## P3-3. Warn when `axum::Json<T>` hides validation
 

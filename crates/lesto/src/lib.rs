@@ -101,6 +101,8 @@ pub use schemars;
 /// serde, re-exported for `#[lesto::model]` (`#[serde(crate = "::lesto::serde")]`).
 pub use serde;
 pub use serde_json;
+/// tower-http's CORS types, for [`App::cors`].
+pub use tower_http::cors;
 /// tracing, re-exported so an application can log (`lesto::tracing::info!`) into the spans lesto
 /// opens without a dependency of its own.
 pub use tracing;
