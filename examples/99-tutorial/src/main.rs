@@ -119,7 +119,7 @@ async fn list_tags(Query(t): Query<Tags>) -> String {
 
 // ---- Chapter 4 ------------------------------------------------------------------------------
 
-#[derive(Deserialize, JsonSchema, Validate)]
+#[lesto::model]
 struct Item {
     /// Item name.
     #[garde(length(min = 1, max = 100))]
@@ -134,7 +134,7 @@ struct Item {
     tax: Option<f64>,
 }
 
-#[derive(Serialize, JsonSchema)]
+#[lesto::model]
 #[serde(rename_all = "camelCase")]
 struct ItemOut {
     name: String,
@@ -223,8 +223,8 @@ async fn delete_item(Path(_item_id): Path<u64>) {}
 
 // ---- Chapter 6: one model, several views -------------------------------------------------------
 
-#[lesto::views(Create(author, text), Update(text?))]
-#[derive(Clone, Serialize, Deserialize, JsonSchema, Validate)]
+#[lesto::model(views(Create(author, text), Update(text?)))]
+#[derive(Clone)]
 struct Note {
     #[garde(skip)]
     id: u64,

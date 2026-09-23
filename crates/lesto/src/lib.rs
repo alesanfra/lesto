@@ -87,7 +87,7 @@ pub use trace::Trace;
 // `#[lesto::get("/x")]` in attribute position and `lesto::get("/x")` in expression position.
 // Rust resolves attributes in the macro namespace and calls in the value namespace, so the
 // same path works for both.
-pub use lesto_macros::{delete, get, head, main, options, patch, post, put, test, views};
+pub use lesto_macros::{delete, get, head, main, model, options, patch, post, put, test, views};
 /// The async runtime lesto serves on, re-exported so `#[lesto::main]` and `#[lesto::test]` need
 /// no tokio dependency in the application.
 pub use tokio;
@@ -98,6 +98,8 @@ pub use axum::http;
 pub use axum::http::StatusCode;
 pub use garde;
 pub use schemars;
+/// serde, re-exported for `#[lesto::model]` (`#[serde(crate = "::lesto::serde")]`).
+pub use serde;
 pub use serde_json;
 
 /// Everything a typical handler module needs.
@@ -134,6 +136,8 @@ macro_rules! routes {
 pub mod __private {
     use axum::extract::FromRequest;
     use axum::response::IntoResponse;
+    /// garde's `Validate` derive, vendored to emit `::lesto::garde` paths (`#[lesto::model]`).
+    pub use lesto_macros::Validate;
 
     /// Every argument except the last must be a parts extractor.
     #[diagnostic::on_unimplemented(

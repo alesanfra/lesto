@@ -1495,3 +1495,119 @@ async fn lesto_test_passes_options_through() {
         lesto::tokio::runtime::RuntimeFlavor::MultiThread
     );
 }
+
+// ---- #[lesto::model] ---------------------------------------------------------------------------
+
+/// A response model with no rules: no `#[garde]` anywhere, so no `skip` needed either.
+#[lesto::model]
+#[derive(Debug, Clone, PartialEq)]
+struct ModelBook {
+    id: u64,
+    title: String,
+}
+
+#[lesto::model(views(Create(title, pages), Update(title?)))]
+#[derive(Debug, Clone)]
+struct ModelPaper {
+    #[garde(skip)]
+    id: u64,
+    /// Title shown in listings.
+    #[garde(length(min = 1, max = 20))]
+    title: String,
+    #[garde(range(min = 1))]
+    pages: u32,
+    #[garde(pattern(r"^[a-z]+$"))]
+    #[serde(default = "default_slug")]
+    slug: String,
+}
+
+fn default_slug() -> String {
+    "paper".into()
+}
+
+#[lesto::post("/model/papers")]
+async fn model_create(Json(body): Json<ModelPaperCreate>) -> Json<ModelPaper> {
+    let mut paper = ModelPaper {
+        id: 1,
+        title: String::new(),
+        pages: 0,
+        slug: default_slug(),
+    };
+    paper.apply_create(body);
+    Json(paper)
+}
+
+#[lesto::get("/model/books")]
+async fn model_books() -> Json<Vec<ModelBook>> {
+    Json(vec![ModelBook {
+        id: 7,
+        title: "Dune".into(),
+    }])
+}
+
+#[tokio::test]
+async fn model_derives_through_lesto_and_validates() {
+    let app = || App::new().routes(routes![model_create, model_books]);
+    let (status, body) = send(
+        app(),
+        post_json(
+            "/model/papers",
+            json!({"title": "Hi", "pages": 3}).to_string(),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        body,
+        json!({"id": 1, "title": "Hi", "pages": 3, "slug": "paper"})
+    );
+
+    let (status, body) = send(
+        app(),
+        post_json(
+            "/model/papers",
+            json!({"title": "", "pages": 0}).to_string(),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    let mut pointers: Vec<_> = body["errors"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["pointer"].as_str().unwrap().to_owned())
+        .collect();
+    pointers.sort();
+    assert_eq!(pointers, ["/pages", "/title"]);
+
+    let (status, body) = send(app(), get("/model/books")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body, json!([{"id": 7, "title": "Dune"}]));
+
+    let spec = serde_json::to_value(app().openapi()).unwrap();
+    let schemas = &spec["components"]["schemas"];
+    assert_eq!(
+        schemas["ModelPaperCreate"]["properties"]["title"]["maxLength"],
+        20
+    );
+    assert_eq!(
+        schemas["ModelPaperCreate"]["properties"]["title"]["description"],
+        "Title shown in listings."
+    );
+    assert_eq!(
+        schemas["ModelPaper"]["properties"]["slug"]["pattern"],
+        "^[a-z]+$"
+    );
+    assert!(schemas["ModelBook"].is_object());
+}
+
+#[test]
+fn model_update_view_is_optional() {
+    use lesto::garde::Validate as _;
+    let update = ModelPaperUpdate { title: None };
+    assert!(update.validate().is_ok());
+    let update = ModelPaperUpdate {
+        title: Some(String::new()),
+    };
+    assert!(update.validate().is_err());
+}

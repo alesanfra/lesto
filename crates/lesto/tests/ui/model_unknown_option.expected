@@ -1,0 +1,2 @@
+error: `#[lesto::model]` takes one option, `views(..)`: `#[lesto::model(views(Create(a, b), Update(b?)))]`
+--> model_unknown_option.rs:2

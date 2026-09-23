@@ -13,6 +13,8 @@
 //! does not collide with the function, and `routes![create_user]` can reach both.
 #![warn(missing_docs)]
 
+mod garde;
+
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::{ToTokens, format_ident, quote, quote_spanned};
@@ -715,6 +717,98 @@ fn expand_views(args: ViewsArgs, item: syn::ItemStruct) -> syn::Result<TokenStre
         #item
         #(#generated)*
     })
+}
+
+/// `#[lesto::model]`: the derives a request or response type needs, through lesto's
+/// re-exports, so the application depends on no serde, schemars or garde of its own.
+///
+/// ```ignore
+/// #[lesto::model(views(Create(author, text), Update(text?)))]
+/// #[derive(Debug, Clone)]
+/// struct Note {
+///     #[garde(skip)]
+///     id: i64,
+///     #[garde(length(min = 1))]
+///     author: String,
+///     #[garde(length(min = 1, max = 280))]
+///     text: String,
+/// }
+/// ```
+///
+/// Adds `Serialize`, `Deserialize`, `JsonSchema` and `Validate` (`#[serde(crate = ..)]` and
+/// `#[schemars(crate = ..)]` point them at `lesto::serde` / `lesto::schemars`; `Validate` is
+/// garde's derive, vendored to generate `::lesto::garde` paths). A type with no `#[garde]`
+/// attribute at all gets `#[garde(allow_unvalidated)]`: it has no rules, so every field is
+/// accepted as is. As soon as one field has a rule, garde's usual strictness applies and every
+/// field needs one (or `skip`, or `dive` for a nested model).
+///
+/// `views(..)` takes what [`macro@views`] takes and generates the same view types.
+#[proc_macro_attribute]
+pub fn model(attr: TokenStream, item: TokenStream) -> TokenStream {
+    match model_impl(attr.into(), item.into()) {
+        Ok(tokens) => tokens.into(),
+        Err(e) => e.to_compile_error().into(),
+    }
+}
+
+fn model_impl(attr: TokenStream2, item: TokenStream2) -> syn::Result<TokenStream2> {
+    let input: syn::DeriveInput = syn::parse2(item.clone())?;
+    let views = if attr.is_empty() {
+        None
+    } else {
+        let meta: Meta = syn::parse2(attr)?;
+        match meta {
+            Meta::List(list) if list.path.is_ident("views") => Some(list.tokens),
+            other => {
+                return Err(syn::Error::new(
+                    other.span(),
+                    "`#[lesto::model]` takes one option, `views(..)`: \
+                     `#[lesto::model(views(Create(a, b), Update(b?)))]`",
+                ));
+            }
+        }
+    };
+    let views = views.map(|tokens| quote! { #[::lesto::views(#tokens)] });
+    let is_garde = |attrs: &[syn::Attribute]| attrs.iter().any(|a| a.path().is_ident("garde"));
+    let has_rules = is_garde(&input.attrs)
+        || match &input.data {
+            syn::Data::Struct(s) => s.fields.iter().any(|f| is_garde(&f.attrs)),
+            syn::Data::Enum(e) => e
+                .variants
+                .iter()
+                .any(|v| is_garde(&v.attrs) || v.fields.iter().any(|f| is_garde(&f.attrs))),
+            syn::Data::Union(u) => {
+                return Err(syn::Error::new(
+                    u.union_token.span(),
+                    "`#[lesto::model]` goes on a struct or an enum",
+                ));
+            }
+        };
+    let unvalidated = (!has_rules).then(|| quote! { #[garde(allow_unvalidated)] });
+    Ok(quote! {
+        #views
+        #[derive(
+            ::lesto::serde::Serialize,
+            ::lesto::serde::Deserialize,
+            ::lesto::schemars::JsonSchema,
+            ::lesto::__private::Validate
+        )]
+        #[serde(crate = "::lesto::serde")]
+        #[schemars(crate = "::lesto::schemars")]
+        #unvalidated
+        #item
+    })
+}
+
+/// garde's `Validate` derive, vendored (see `src/garde/NOTICE.md`) so the code it generates
+/// names `::lesto::garde`. `#[lesto::model]` uses it; reach it as `lesto::__private::Validate`.
+#[doc(hidden)]
+#[proc_macro_derive(Validate, attributes(garde))]
+pub fn derive_validate(item: TokenStream) -> TokenStream {
+    match syn::parse::<syn::DeriveInput>(item) {
+        Ok(input) => garde::derive_validate(input).into(),
+        Err(e) => e.to_compile_error().into(),
+    }
 }
 
 /// `#[lesto::main]`: `#[tokio::main]` through lesto's re-export, so the application needs no

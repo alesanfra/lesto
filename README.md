@@ -146,8 +146,7 @@ Contributing or driving an agent? Read [AGENTS.md](AGENTS.md).
 ### Views of a model
 
 ```rust
-#[lesto::views(Create(author, text), Update(text?))]   // above #[derive]
-#[derive(Serialize, Deserialize, JsonSchema, Validate)]
+#[lesto::model(views(Create(author, text), Update(text?)))]  // serde + schemars + garde derives
 struct Note { #[garde(skip)] id: u64, #[garde(length(min = 1))] author: String, #[garde(length(min = 1))] text: String }
 // generates NoteCreate { author, text }, NoteUpdate { text: Option<String> },
 // Note::apply_create(&mut self, NoteCreate), Note::apply_update(&mut self, NoteUpdate)
