@@ -467,10 +467,8 @@ Bigger items, easiest first (mirrored in `README.md`, keep the two lists in sync
 
 Smaller items, in rough priority order: crates.io publication (publish order: `lesto-macros`,
 `lesto`, `lesto-cli`; the manifests are ready); `lesto new`
-(scaffold); `Store::atomic` for several
-statements in one explicit transaction; `AnyOf`/`AllOf` requirements; documenting per-operation
-permissions as OpenAPI scopes; `--watch`/`--ignore` for `lesto dev`; a `strict_docs()` mode
-that fails on undocumented types; exporting the OpenAPI document as 3.0 with
+(scaffold); `AnyOf`/`AllOf` requirements; documenting per-operation
+permissions as OpenAPI scopes; `--watch`/`--ignore` for `lesto dev`; exporting the OpenAPI document as 3.0 with
 `x-amazon-apigateway-integration` extensions so an API Gateway can be created from it (API
 Gateway imports 3.0 only).
 

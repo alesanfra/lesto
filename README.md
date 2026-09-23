@@ -1,6 +1,29 @@
 # lesto
 
-A Rust web micro-framework with **FastAPI**'s ergonomics, built on [axum](https://github.com/tokio-rs/axum) 0.8.
+A Rust web framework with **FastAPI**'s ergonomics, built on [axum](https://github.com/tokio-rs/axum) 0.8.
+
+**Batteries included, like FastAPI.** One line in `Cargo.toml` gives an API validation, an
+OpenAPI document derived from the handler types, RFC 9457 errors, authentication, a database
+layer with permissions, OpenTelemetry, CORS, timeouts and a dev server that reloads. Everything
+is configured by values and environment variables, and all of it stays plain axum underneath:
+a lesto app is an `axum::Router`, and an axum router can be mounted in a lesto app.
+
+```toml
+[dependencies]
+lesto = "0.1"   # not on crates.io yet: path = "../lesto/crates/lesto"; features: sqlite, postgres, lambda, otel
+```
+
+| | lesto | axum + utoipa / aide | poem-openapi | dropshot | loco.rs |
+|---|---|---|---|---|---|
+| Built on | axum | axum | poem | hyper | axum |
+| OpenAPI | from handler types, no annotations | utoipa: annotations; aide: from types | from types | from types, spec-first | via utoipa |
+| Request validation | built in (garde) | third party | built in | via types | third party |
+| Error format | RFC 9457 | your own | typed enums | own shape | framework-defined |
+| Data layer | sqlx stores, permissions, RLS | — | — | — | SeaORM, full stack |
+| Observability | OTel traces, logs, metrics | — | — | — | — |
+
+lesto is for JSON APIs: API-first like poem-openapi and dropshot, with batteries like loco.rs,
+on axum.
 
 - A route is an annotated `async fn`: `#[lesto::get("/users/{id}")]`.
 - JSON bodies and query strings are deserialized **and validated** with [garde](https://github.com/jprochazk/garde).
@@ -10,10 +33,12 @@ A Rust web micro-framework with **FastAPI**'s ergonomics, built on [axum](https:
   way. One format, no switch: a client that needs another shape gets it from a layer of its own.
 - The **OpenAPI 3.1** document is derived from the argument and return types via
   [schemars](https://github.com/GREsau/schemars), with no extra annotations. Scalar at `/docs`,
-  Swagger UI at `/swagger` (pinned versions with integrity hashes, or your own mirror), JSON at
-  `/openapi.json`.
-- **One model, many views**: `#[lesto::views(Create(author, text), Update(text?))]` on a struct generates
-  `NoteCreate` and `NoteUpdate` with the same serde/garde/schemars attributes, plus `apply_*` methods.
+  Swagger UI at `/swagger` (pinned versions with integrity hashes), JSON at `/openapi.json`.
+  Offline or behind a firewall, `App::scalar_script_url(..)` and `App::swagger_ui_base_url(..)`
+  point the pages at your own copy.
+- **One model, many views**: `#[lesto::model(views(Create(author, text), Update(text?)))]` on a
+  struct derives serde, schemars and garde through lesto (no extra dependencies) and generates
+  `NoteCreate` and `NoteUpdate` with the same attributes, plus `apply_*` methods.
 - **Authentication** with self-documenting extractors: `Bearer`, `Basic`, `ApiKey<S>` land in
   `components.securitySchemes` and in the operation's `security` (the docs pages show the *Authorize* button).
 - **Databases** with the `db` feature (sqlx; pick `postgres`, `mysql` or `sqlite`): a handler argument such as
@@ -332,8 +357,7 @@ Bigger items, easiest first:
    resource, reusing the OpenAPI schemas lesto already derives. To be designed carefully before
    any code: naming, auth, which operations map to which MCP primitive.
 
-Smaller items: crates.io publication, `lesto new`, `Store::atomic` (several
-statements in one explicit transaction), `AnyOf`/`AllOf` permission requirements, per-operation
+Smaller items: crates.io publication, `lesto new`, `AnyOf`/`AllOf` permission requirements, per-operation
 permissions as OpenAPI scopes, `--watch`/`--ignore` for `lesto dev`, exporting the OpenAPI document as
 3.0 with `x-amazon-apigateway-integration` extensions to create an API Gateway from it.
 
