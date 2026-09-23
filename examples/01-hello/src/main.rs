@@ -13,7 +13,7 @@ async fn hello() -> &'static str {
     "Hello, lesto!"
 }
 
-#[tokio::main]
+#[lesto::main]
 async fn main() -> std::io::Result<()> {
     // Binds LESTO_HOST:LESTO_PORT (default 127.0.0.1:8000), or the socket `lesto dev` hands over.
     App::new()

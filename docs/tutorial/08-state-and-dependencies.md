@@ -25,7 +25,7 @@ async fn hit(State(state): State<AppState>) -> String {
     n.to_string()
 }
 
-#[tokio::main]
+#[lesto::main]
 async fn main() -> std::io::Result<()> {
     App::new()
         .routes(routes![hit])

@@ -242,13 +242,20 @@ more than any further performance work.
 in the user's manifest.
 
 **Tasks**
-- [ ] `pub use tokio;` from lesto, with the feature set decided in P0-1.
-- [ ] `#[lesto::main]` in `lesto-macros`, expanding to
+- [x] `pub use tokio;` from lesto, with the feature set decided in P0-1.
+- [x] `#[lesto::main]` in `lesto-macros`, expanding to
       `#[::lesto::tokio::main(crate = "::lesto::tokio")]` (`tokio-macros` 2.7.2 in `Cargo.lock`
       supports the `crate` option).
-- [ ] Accept the same options `tokio::main` does (`flavor`, `worker_threads`), pass them through.
-- [ ] `examples/01-hello` uses it; tutorial chapter 1 shows it; `README.md` example updated.
-- [ ] UI test: `#[lesto::main]` on a non-`async fn` produces a message that says what to do.
+- [x] Accept the same options `tokio::main` does (`flavor`, `worker_threads`), pass them through.
+- [x] `examples/01-hello` uses it; tutorial chapter 1 shows it; `README.md` example updated.
+- [x] UI test: `#[lesto::main]` on a non-`async fn` produces a message that says what to do.
+
+**Done (2026-09-23):** `#[lesto::main]` and `#[lesto::test]` (the second so tests need no tokio
+either) expand to `#[::lesto::tokio::main(crate = "::lesto::tokio", ..)]`, options passed
+through (tested with `flavor`/`worker_threads`). Every `#[tokio::main]`/`#[tokio::test]` in the
+examples, the tutorial and the README now uses them; `examples/01-hello` depends on `lesto` alone.
+Inside `lesto-macros` the unit tests spell `#[::core::prelude::v1::test]`, since `#[test]` now
+names the crate's own macro.
 
 ## P2-2. `#[lesto::model]`
 

@@ -89,7 +89,7 @@ async fn get_user(Path(id): Path<u64>) -> Result<Json<User>, HttpError> {
     Err(HttpError::not_found(format!("user {id} not found")))
 }
 
-#[tokio::main]
+#[lesto::main]
 async fn main() -> std::io::Result<()> {
     App::new()
         .title("Users API")
@@ -109,7 +109,6 @@ lesto = { path = "../lesto/crates/lesto" }   # features = ["sqlite", "lambda"] a
 serde = { version = "1", features = ["derive"] }
 garde = { version = "0.23", features = ["derive"] }   # email/url: lesto's default features
 schemars = { version = "1", features = ["derive"] }
-tokio = { version = "1", features = ["full"] }
 ```
 
 Examples: `LESTO_PORT=8765 cargo run -p hello` (smallest app), `-p notes` (CRUD on SQLite), `-p lambda`

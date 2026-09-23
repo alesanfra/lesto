@@ -12,7 +12,7 @@
 
 use routers::{AppState, build_app};
 
-#[tokio::main]
+#[lesto::main]
 async fn main() -> std::io::Result<()> {
     build_app().with_state(AppState::default()).serve().await
 }

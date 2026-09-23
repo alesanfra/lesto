@@ -8,4 +8,3 @@ description = "The smallest lesto application"
 
 [dependencies]
 lesto = { path = "../../crates/lesto" }
-tokio.workspace = true

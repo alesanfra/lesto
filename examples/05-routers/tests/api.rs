@@ -35,7 +35,7 @@ async fn call(
     )
 }
 
-#[tokio::test]
+#[lesto::test]
 async fn orders_placed_in_the_app_api_show_up_in_analytics() {
     let r = router();
 
@@ -84,7 +84,7 @@ async fn orders_placed_in_the_app_api_show_up_in_analytics() {
     );
 }
 
-#[tokio::test]
+#[lesto::test]
 async fn errors_are_problems_under_either_prefix() {
     let r = router();
 
@@ -115,7 +115,7 @@ async fn errors_are_problems_under_either_prefix() {
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
 
-#[tokio::test]
+#[lesto::test]
 async fn one_document_with_the_full_paths() {
     let (status, doc) = call(&router(), Method::GET, "/openapi.json", None).await;
     assert_eq!(status, StatusCode::OK);

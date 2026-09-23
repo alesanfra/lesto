@@ -450,7 +450,7 @@ pub fn traced_app(state: AppState) -> App<()> {
     build_app(state).trace(Trace::new().query(true).forwarded(true))
 }
 
-#[tokio::main]
+#[lesto::main]
 async fn main() -> std::io::Result<()> {
     // No telemetry code: with the `otel` feature, `serve` reads the `OTEL_*` variables and
     // exports the spans itself (chapter 15).
@@ -486,7 +486,7 @@ mod tests {
     }
 
     /// Chapter 15: the configured span does not change what the application answers.
-    #[tokio::test]
+    #[lesto::test]
     async fn a_traced_app_still_serves() {
         let app = traced_app(AppState::for_tests());
         let req = Request::get("/").body(Body::empty()).unwrap();
@@ -495,7 +495,7 @@ mod tests {
         assert_eq!(body, "Hello, lesto!");
     }
 
-    #[tokio::test]
+    #[lesto::test]
     async fn creates_a_user() {
         let app = build_app(AppState::for_tests());
         let req = post_json(
@@ -508,7 +508,7 @@ mod tests {
         assert!(body.get("password").is_none());
     }
 
-    #[tokio::test]
+    #[lesto::test]
     async fn repeated_query_parameters_collect_into_a_vec() {
         let app = build_app(AppState::for_tests());
         let req = Request::get("/tags?tag=rust&tag=web")
@@ -526,7 +526,7 @@ mod tests {
         assert_eq!(body, "");
     }
 
-    #[tokio::test]
+    #[lesto::test]
     async fn rejects_short_passwords() {
         let app = build_app(AppState::for_tests());
         let req = post_json("/users", json!({"name": "Ada", "password": "x"}));
@@ -535,7 +535,7 @@ mod tests {
         assert_eq!(body["errors"][0]["pointer"], "/password");
     }
 
-    #[tokio::test]
+    #[lesto::test]
     async fn garde_messages_match_the_tutorial() {
         let app = build_app(AppState::for_tests());
         let (_, body) = call(
@@ -574,7 +574,7 @@ mod tests {
         assert_eq!(body["errors"][0]["pointer"], "/addresses/1/street");
     }
 
-    #[tokio::test]
+    #[lesto::test]
     async fn path_examples() {
         let app = build_app(AppState::for_tests());
         let (status, body) =
@@ -592,7 +592,7 @@ mod tests {
         assert_eq!(body, "Deep Learning FTW!");
     }
 
-    #[tokio::test]
+    #[lesto::test]
     async fn current_user_and_security() {
         let app = build_app(AppState::for_tests());
         let req = Request::get("/me")
@@ -635,7 +635,7 @@ mod tests {
         );
     }
 
-    #[tokio::test]
+    #[lesto::test]
     async fn middleware_and_legacy_route() {
         let app = build_app(AppState::for_tests());
         let response = app
@@ -652,7 +652,7 @@ mod tests {
         assert_eq!(body["detail"], "JSON only");
     }
 
-    #[tokio::test]
+    #[lesto::test]
     async fn openapi_contract() {
         let spec = serde_json::to_value(build_app(AppState::for_tests()).openapi()).unwrap();
         assert!(spec["paths"]["/users"]["post"].is_object());
@@ -676,7 +676,7 @@ mod tests {
         );
     }
 
-    #[tokio::test]
+    #[lesto::test]
     async fn views_create_and_patch() {
         let app = build_app(AppState::for_tests());
         let (status, body) = call(
@@ -709,7 +709,7 @@ mod tests {
         );
     }
 
-    #[tokio::test]
+    #[lesto::test]
     async fn health_says_ok() {
         assert_eq!(health().await, "ok");
     }

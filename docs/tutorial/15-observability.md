@@ -19,7 +19,7 @@ lesto = { path = "../lesto/crates/lesto", features = ["otel"] }
 ```
 
 ```rust
-#[tokio::main]
+#[lesto::main]
 async fn main() -> std::io::Result<()> {
     build_app().serve().await          // unchanged
 }
