@@ -64,8 +64,39 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
+      # A real OpenID Connect provider for `tests/oidc_provider.rs`. JSON_CONFIG is the one of
+      # examples/06-oidc/compose.yaml: keep the two in sync. No health check (the image has no
+      # shell); the test waits for the discovery document itself.
+      oauth2:
+        image: ghcr.io/navikt/mock-oauth2-server:6.0.2
+        ports:
+          - 8089:8080
+        env:
+          JSON_CONFIG: >-
+            {
+              "interactiveLogin": false,
+              "tokenCallbacks": [
+                {
+                  "issuerId": "default",
+                  "tokenExpiry": 300,
+                  "requestMappings": [
+                    {
+                      "requestParam": "scope",
+                      "match": "admin",
+                      "claims": {"sub": "ada", "aud": ["api://notes"], "azp": "notes-cli", "scope": "notes:read admin"}
+                    },
+                    {
+                      "requestParam": "scope",
+                      "match": "*",
+                      "claims": {"sub": "bob", "aud": ["api://notes"], "azp": "notes-cli", "scope": "notes:read"}
+                    }
+                  ]
+                }
+              ]
+            }
     env:
       LESTO_TEST_POSTGRES_URL: postgres://postgres:lesto@127.0.0.1:5432/postgres
+      LESTO_TEST_OIDC_URL: http://localhost:8089/default
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable

@@ -7,8 +7,10 @@ publish = false
 description = "Compiles the code shown in docs/tutorial so the tutorial cannot drift from the API"
 
 [dependencies]
-lesto = { path = "../../crates/lesto", features = ["otel"] }
+lesto = { path = "../../crates/lesto", features = ["otel", "oidc"] }
 
 [dev-dependencies]
 tower.workspace = true
 http-body-util.workspace = true
+# Chapter 9: signs tokens for the local provider of the OpenID Connect test.
+jsonwebtoken = { workspace = true, features = ["aws_lc_rs", "use_pem"] }

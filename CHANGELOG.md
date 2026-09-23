@@ -19,6 +19,9 @@ First release, 0.1.0: `lesto`, `lesto-macros`, `lesto-cli`.
 - `#[lesto::main]` and `#[lesto::test]`: tokio's, through `lesto::tokio`.
 - Feature `db`: sqlx stores with principals, permissions and one transaction per method.
 - Feature `lambda`: AWS Lambda adapter; feature `otel`: OTLP traces and logs from the environment.
+- Feature `oidc`: bearer JWTs verified against an OpenID Connect provider (`Oidc::discover`,
+  `Oidc::from_env`, `Jwt<C>`, `StandardClaims`), `App::oidc` and `App::protect` for a group of
+  routes, with the `openIdConnect` security scheme in the OpenAPI document.
 - Features `email` and `url` (default on) for the garde rules of the same name.
 - JSON keys keep declaration order in the OpenAPI document and in response bodies.
 - `Created<T>`, `Accepted<T>`, `NoContent`: the success status in the return type.

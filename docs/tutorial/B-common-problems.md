@@ -110,3 +110,18 @@ hashes). Where the CDN is unreachable, host the files yourself and point the pag
 Every operation gets `{function}_{path}_{method}` by default, which is unique per route. If you
 set `operation_id = "..."` by hand, the values must be unique across the whole document, nested
 apps included.
+
+## A `Jwt` route answers `500`
+
+The log says ``a `Jwt` argument needs a verifier``: the app serving the route has no
+`App::oidc(..)` (or `App::protect(..)`). Call `.oidc(auth)` on the app you serve; it covers the
+nested apps too (chapter 9).
+
+## Every token answers `401` "The token is meant for another audience" (or "another issuer")
+
+The provider puts in `aud` (or `iss`) something other than what lesto expects. Decode one token
+(the middle segment is base64 JSON) and compare: `audiences([..])` must list a value of its `aud`;
+`iss` must equal the `issuer` of the discovery document, which is why the discovery URL has to be
+the provider's own (behind a proxy, the provider must announce the public URL). The reason is
+logged at `debug` by `lesto`: `RUST_LOG=lesto=debug` shows it when a subscriber is installed
+(chapter 15).

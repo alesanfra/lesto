@@ -53,6 +53,11 @@ opentelemetry-otlp = { version = "0.32", default-features = false, features = ["
 opentelemetry-appender-tracing = { version = "0.32", default-features = false }
 tracing-opentelemetry = { version = "0.33", default-features = false }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# feature `oidc` of `lesto`: the async client that fetches the discovery document and the JWKS
+# (the same reqwest major `otel` uses, so the graph holds one), and the JWT verification. Both on
+# aws-lc-rs, so a build has one crypto library; no OpenSSL.
+reqwest = { version = "0.13", default-features = false }
+jsonwebtoken = { version = "11", default-features = false }
 anyhow = "1"
 uuid = { version = "1", default-features = false }
 
@@ -60,8 +65,12 @@ uuid = { version = "1", default-features = false }
 lesto-macros = { path = "crates/lesto-macros", version = "0.1.0" }
 
 # Dependencies are compiled once, optimized; `lesto dev` rebuilds only touch workspace crates.
+# No debug info for them: a quarter of a fresh `cargo test --workspace` build (3.5 GB → 2.6 GB),
+# and a backtrace still names every frame; only stepping into a dependency's source in a
+# debugger needs it back (`debug = true` here, temporarily).
 [profile.dev.package."*"]
 opt-level = 3
+debug = false
 
 # CI builds everything once and runs it once: optimizing dependencies (above, for `lesto dev`)
 # and emitting debug info only cost build minutes there. `cargo test --profile ci`.

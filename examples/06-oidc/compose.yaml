@@ -1,0 +1,33 @@
+# A local OpenID Connect provider for this example: https://github.com/navikt/mock-oauth2-server.
+# Any client id and secret are accepted; the claims of a client-credentials token depend on the
+# `scope` requested (see JSON_CONFIG, which the `oauth2` service of .github/workflows/ci.yml
+# repeats for tests/oidc_provider.rs: keep the two in sync). Test tokens only — never point a real API at it.
+services:
+  oauth2:
+    image: ghcr.io/navikt/mock-oauth2-server:6.0.2
+    container_name: lesto-mock-oauth2
+    ports:
+      - "127.0.0.1:8089:8080"
+    environment:
+      JSON_CONFIG: >-
+        {
+          "interactiveLogin": false,
+          "tokenCallbacks": [
+            {
+              "issuerId": "default",
+              "tokenExpiry": 300,
+              "requestMappings": [
+                {
+                  "requestParam": "scope",
+                  "match": "admin",
+                  "claims": {"sub": "ada", "aud": ["api://notes"], "azp": "notes-cli", "scope": "notes:read admin"}
+                },
+                {
+                  "requestParam": "scope",
+                  "match": "*",
+                  "claims": {"sub": "bob", "aud": ["api://notes"], "azp": "notes-cli", "scope": "notes:read"}
+                }
+              ]
+            }
+          ]
+        }

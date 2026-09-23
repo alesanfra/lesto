@@ -10,7 +10,7 @@ a lesto app is an `axum::Router`, and an axum router can be mounted in a lesto a
 
 ```toml
 [dependencies]
-lesto = "0.1"   # not on crates.io yet: path = "../lesto/crates/lesto"; features: sqlite, postgres, lambda, otel
+lesto = "0.1"   # not on crates.io yet: path = "../lesto/crates/lesto"; features: sqlite, postgres, lambda, otel, oidc
 ```
 
 | | lesto | axum + utoipa / aide | poem-openapi | dropshot | loco.rs |
@@ -41,6 +41,12 @@ on axum.
   `NoteCreate` and `NoteUpdate` with the same attributes, plus `apply_*` methods.
 - **Authentication** with self-documenting extractors: `Bearer`, `Basic`, `ApiKey<S>` land in
   `components.securitySchemes` and in the operation's `security` (the docs pages show the *Authorize* button).
+  With the `oidc` feature, bearer JWTs are **verified** against an OpenID Connect provider: give
+  `Oidc::discover(url)` the discovery URL (plus the accepted audiences and clients, optionally)
+  and a `Jwt<Claims>` argument is a token whose signature (JWKS), algorithm, issuer, audience,
+  client and lifetime were checked before the handler runs. `App::protect(auth.scopes(["admin"]))`
+  guards a whole group of routes in one line; keys rotate by themselves, with refetches rate
+  limited; `Oidc::from_env()` reads `LESTO_OIDC_*`.
 - **Databases** with the `db` feature (sqlx; pick `postgres`, `mysql` or `sqlite`): a handler argument such as
   `NoteStore<ReadWrite, User>` is a store that opens one transaction per method, derives the
   principal from the token through a single `Authenticated` impl, and checks string permissions
@@ -157,6 +163,7 @@ Examples: `LESTO_PORT=8765 cargo run -p hello` (smallest app), `-p notes` (CRUD 
 | `token: str = Depends(OAuth2PasswordBearer(...))` | `auth: Bearer` / `auth: Bearer<MyOAuth2>` |
 | `key: str = Security(APIKeyHeader(name="X-API-Key"))` | `key: ApiKey<MyKey>` |
 | `creds = Depends(HTTPBasic())` | `creds: Basic` |
+| `jwt.decode(token, jwks_key, audience=..., issuer=...)` in a dependency | `token: Jwt<Claims>` + `App::oidc(..)` (feature `oidc`) |
 | `/docs`, `/redoc`, `/openapi.json` | `/docs` (Scalar), `/swagger` (Swagger UI), `/openapi.json`; disable with `docs_url(None)` etc. |
 
 ### Attribute options
@@ -244,7 +251,8 @@ overridden with `with_type` / `with_title`. `with_extension` adds extension memb
 ### Authentication and security schemes
 
 The extractors in `lesto::security` extract credentials **and** register the OpenAPI scheme. Token
-verification stays with the handler or a middleware. Missing or malformed credentials → `401` problem+json
+verification stays with the handler or a middleware, except for OpenID Connect JWTs, which
+`lesto::oidc::Jwt` (feature `oidc`) verifies. Missing or malformed credentials → `401` problem+json
 with a `WWW-Authenticate` header. See the tutorial's [Security](docs/tutorial/09-security.md) chapter.
 
 ## Layout
@@ -253,6 +261,7 @@ with a `WWW-Authenticate` header. See the tutorial's [Security](docs/tutorial/09
   `lesto::db` (feature `db`): `Store<M, P, DB>`, `Authenticated`, `Public`, `TransactionSettings`,
   `Isolation`, `lesto::db::Error`;
   `lesto::lambda` (feature `lambda`): `serve`, `Options`, `test::invoke`;
+  `lesto::oidc` (feature `oidc`): `Oidc`, `Jwt<C>`, `StandardClaims`, `Protect`;
   `lesto::trace`: the request span and `Trace`; `lesto::otel` (feature `otel`): OTLP export of
   traces and logs plus trace context propagation, configured by the `OTEL_*` variables;
   `lesto::layers`: the tower layers `into_router` installs (`ProblemLayer`, `CatchPanicLayer`,
@@ -263,6 +272,7 @@ with a `WWW-Authenticate` header. See the tutorial's [Security](docs/tutorial/09
   split into modules. `examples/03-lambda/` — the same kind of API on AWS Lambda.
   `examples/04-opentelemetry/` — traces and logs in a local Jaeger or OpenObserve, `docker compose` included.
   `examples/05-routers/` — two APIs in one service (`/api/app/v1`, `/api/analytics/v1`), mounted with `nest`.
+  `examples/06-oidc/` — bearer JWTs from a real OpenID Connect provider in Docker, `App::protect` included.
   `examples/99-tutorial/` — every tutorial snippet, compiled and tested.
 - `docs/tutorial/` — the tutorial; `docs/build.sh` builds it as an mdBook site.
 
@@ -338,8 +348,8 @@ Features of `lesto`: `email`, `url` (garde rules) and `compression` (gzip), on b
 
 CI (`.github/workflows/ci.yml`) runs fmt, clippy and rustdoc with warnings denied, each feature of
 `lesto` alone (`cargo hack`), the mdBook build and `cargo deny`; the tests on stable, including the
-PostgreSQL row level security tests against a `postgres:18` service; and `cargo check` on the MSRV
-(1.94).
+PostgreSQL row level security tests against a `postgres:18` service and the OpenID Connect tests
+against a mock-oauth2-server one; and `cargo check` on the MSRV (1.94).
 
 ## Roadmap
 
@@ -348,11 +358,7 @@ Bigger items, easiest first:
 1. **Lambda adapter tested end to end on [floci](https://floci.io/)**: deploy the `lambda`
    example to floci's local AWS emulator (Lambda + API Gateway, a LocalStack drop-in that runs
    as a native binary, MIT) in CI, and call it over HTTP instead of only replaying event fixtures.
-2. **OAuth2 / JWT validation by configuration**: give lesto a `discovery_url` plus the accepted
-   `audience` or client ids, and `Bearer` tokens are verified (signature via JWKS, issuer,
-   audience, expiry) before the handler runs. Built as the first piece of an easy middleware
-   system, so that adding a check to a group of routes is one line.
-3. **MCP from the route attribute**: `#[lesto::get("/notes/{id}", tag = "notes", mcp = "tool")]`
+2. **MCP from the route attribute**: `#[lesto::get("/notes/{id}", tag = "notes", mcp = "tool")]`
    (or `"prompt"`, `"resource"`) exposes the operation to AI agents as an MCP tool, prompt or
    resource, reusing the OpenAPI schemas lesto already derives. To be designed carefully before
    any code: naming, auth, which operations map to which MCP primitive.

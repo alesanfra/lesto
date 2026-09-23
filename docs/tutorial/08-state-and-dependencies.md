@@ -103,7 +103,8 @@ impl<S: Send + Sync> FromRequestParts<S> for CurrentUser {
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Rejection> {
         // Reuse the Bearer extractor: missing header → 401 with WWW-Authenticate.
         let auth = Bearer::<BearerAuth>::from_request_parts(parts, state).await?;
-        // This is where you would verify the token (JWT, session, ...).
+        // This is where you would verify the token (a session, a key...). For an OpenID
+        // Connect JWT, `lesto::oidc::Jwt` does it for you (chapter 9).
         match auth.token() {
             "secret" => Ok(CurrentUser(User { id: 1, name: "Ada".into() })),
             _ => Err(HttpError::unauthorized("invalid token").into()),

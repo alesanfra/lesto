@@ -51,6 +51,12 @@ pub struct App<S = ()> {
     compression: bool,
     /// [`App::request_id`].
     request_id: bool,
+    /// [`App::oidc`]: the verifier `Jwt` arguments find in the request extensions.
+    #[cfg(feature = "oidc")]
+    oidc: Option<crate::oidc::Oidc>,
+    /// [`App::protect`]: applied to this app's routes when it is nested or served.
+    #[cfg(feature = "oidc")]
+    protect: Option<crate::oidc::Protect>,
 }
 
 /// Default of [`App::shutdown_timeout`]: Kubernetes' own termination grace period.
@@ -107,6 +113,10 @@ where
             #[cfg(feature = "compression")]
             compression: false,
             request_id: false,
+            #[cfg(feature = "oidc")]
+            oidc: None,
+            #[cfg(feature = "oidc")]
+            protect: None,
         }
     }
 
@@ -284,6 +294,41 @@ where
         self
     }
 
+    /// Verify the bearer tokens of [`Jwt`](crate::oidc::Jwt) arguments with `oidc`, and register
+    /// the `openIdConnect` security scheme (Scalar and Swagger UI then offer to log in).
+    ///
+    /// Covers every route the app serves, nested apps included. Feature `oidc`.
+    #[cfg(feature = "oidc")]
+    pub fn oidc(mut self, oidc: crate::oidc::Oidc) -> Self {
+        self.security_schemes
+            .insert(crate::oidc::SCHEME_NAME.to_string(), oidc.security_scheme());
+        self.oidc = Some(oidc);
+        self
+    }
+
+    /// Require a valid token on every route of this app, whatever the handlers' arguments, and
+    /// document the `openIdConnect` requirement on each of them. Typically called on an app that
+    /// is then [`nest`](Self::nest)ed, so the routes next to it stay public:
+    ///
+    /// ```ignore
+    /// let admin = App::new().routes(routes![stats, purge]).protect(auth.clone().scopes(["admin"]));
+    /// App::new().oidc(auth).routes(routes![health]).nest("/admin", admin)
+    /// ```
+    ///
+    /// No token or an invalid one answers `401`; a token without one of the required scopes
+    /// answers `403`. A [`Jwt`](crate::oidc::Jwt) argument in a protected route reads the claims
+    /// already verified. The documentation routes of the app that is served are never
+    /// protected. Every route of the app is, including one marked `public`. Feature `oidc`.
+    #[cfg(feature = "oidc")]
+    pub fn protect(mut self, protect: impl Into<crate::oidc::Protect>) -> Self {
+        let protect = protect.into();
+        self.security_schemes
+            .entry(crate::oidc::SCHEME_NAME.to_string())
+            .or_insert_with(|| protect.oidc.security_scheme());
+        self.protect = Some(protect);
+        self
+    }
+
     // ---- routes -----------------------------------------------------------------------
 
     /// Register a set of routes, typically built with [`routes!`](crate::routes).
@@ -328,6 +373,14 @@ where
     /// fallback and app-wide security of the nested app are ignored; only the root app's apply.
     pub fn nest(mut self, prefix: &str, other: App<S>) -> Self {
         let prefix = prefix.trim_end_matches('/');
+        #[cfg(feature = "oidc")]
+        let other = {
+            let mut other = other.apply_protection();
+            if self.oidc.is_none() {
+                self.oidc = other.oidc.take();
+            }
+            other
+        };
         let App {
             router,
             spec,
@@ -417,6 +470,10 @@ where
             #[cfg(feature = "compression")]
             compression: self.compression,
             request_id: self.request_id,
+            #[cfg(feature = "oidc")]
+            oidc: self.oidc,
+            #[cfg(feature = "oidc")]
+            protect: self.protect,
         }
     }
 
@@ -428,6 +485,13 @@ where
         let mut generator = schema_generator();
         let mut security_schemes = self.security_schemes.clone();
         for (path, pending) in &self.operations {
+            #[cfg(feature = "oidc")]
+            let protected = self
+                .protect
+                .as_ref()
+                .map(|protect| protected(pending.clone(), protect));
+            #[cfg(feature = "oidc")]
+            let pending = protected.as_ref().unwrap_or(pending);
             let operation = pending.operation(path, &mut generator, &mut security_schemes);
             let item = spec.paths.entry(path.clone()).or_default();
             if let Some(slot) = item.slot_mut(&pending.meta.method) {
@@ -464,6 +528,11 @@ where
     pub fn into_router(self) -> Router<S> {
         let spec = self.openapi_url.as_ref().map(|_| self.openapi());
         let mut router = self.router;
+        // Before the documentation routes are added: those stay public.
+        #[cfg(feature = "oidc")]
+        if let Some(protect) = &self.protect {
+            router = router.layer(protect.layer());
+        }
 
         if let (Some(openapi_url), Some(spec)) = (self.openapi_url.clone(), spec) {
             let json = serde_json::to_string(&spec).expect("OpenAPI document is serializable");
@@ -504,6 +573,10 @@ where
         if let Some(body_limit) = self.body_limit {
             router = router.layer(body_limit);
         }
+        #[cfg(feature = "oidc")]
+        if let Some(oidc) = self.oidc {
+            router = router.layer(axum::Extension(oidc));
+        }
 
         // One `Router::layer` call, not three: axum re-boxes every route (and its future) on
         // each one, so the layers are stacked first and added together.
@@ -537,6 +610,39 @@ where
         }
         router
     }
+}
+
+#[cfg(feature = "oidc")]
+impl<S> App<S>
+where
+    S: Clone + Send + Sync + 'static,
+{
+    /// Enforce and document [`App::protect`] on the routes registered so far: done when the app
+    /// is nested, since its routes are then out of its hands.
+    fn apply_protection(mut self) -> Self {
+        if let Some(protect) = self.protect.take() {
+            self.router = self.router.layer(protect.layer());
+            for (_, pending) in &mut self.operations {
+                *pending = protected(pending.clone(), &protect);
+            }
+        }
+        self
+    }
+}
+
+/// `pending` as [`App::protect`] documents it: the `openIdConnect` requirement with the scopes,
+/// the `403` when there are scopes, and no `public` exemption (the layer makes none).
+#[cfg(feature = "oidc")]
+fn protected(mut pending: PendingOperation, protect: &crate::oidc::Protect) -> PendingOperation {
+    pending.meta.public = false;
+    let requirement = (crate::oidc::SCHEME_NAME.to_string(), protect.scopes.clone());
+    if !pending.meta.security.contains(&requirement) {
+        pending.meta.security.push(requirement);
+    }
+    if !protect.scopes.is_empty() && !pending.meta.error_statuses.contains(&403) {
+        pending.meta.error_statuses.push(403);
+    }
+    pending
 }
 
 impl App<()> {

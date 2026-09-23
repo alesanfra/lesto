@@ -6,8 +6,9 @@ documentation, so Scalar and Swagger UI show the *Authorize* button and a lock o
 operations.
 
 The extractors **do not verify** credentials: they read the token and hand it to you. Verification
-(JWT signature, session lookup, key comparison) is yours, usually inside a custom extractor like
-`CurrentUser` from the previous chapter.
+(session lookup, key comparison) is yours, usually inside a custom extractor like `CurrentUser`
+from the previous chapter. The exception is a JWT issued by an OpenID Connect provider: with the
+`oidc` feature lesto verifies it for you ([below](#openid-connect-verified-tokens)).
 
 ## Bearer token
 
@@ -104,7 +105,151 @@ curl -u admin:s3cret http://127.0.0.1:8000/admin
 Note: comparing passwords with `!=` is fine in a tutorial, not in production. Use a constant-time
 comparison (`subtle`, `constant_time_eq`) and hashed passwords.
 
-## OAuth2 and OpenID Connect
+## OpenID Connect: verified tokens
+
+When the tokens come from an identity provider (Keycloak, Auth0, Okta, Entra ID, Cognito,
+Google...), lesto can verify them before the handler runs. Turn on the `oidc` feature:
+
+```toml
+lesto = { version = "0.1", features = ["oidc"] }
+```
+
+and point lesto at the provider's discovery document. `discover` fetches it and the provider's
+keys (the JWKS) once, at startup:
+
+```rust
+use lesto::oidc::{Jwt, Oidc, StandardClaims};
+
+/// Who is calling, according to the token.
+#[lesto::get("/me")]
+async fn me(token: Jwt) -> Json<StandardClaims> {
+    Json(token.into_claims())
+}
+
+#[lesto::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let auth = Oidc::discover("https://login.example.com/.well-known/openid-configuration")
+        .audiences(["api://notes"])     // optional: `aud` must contain one of these
+        .clients(["web", "cli"])        // optional: the token must be issued to one of these
+        .await?;
+    App::new().oidc(auth).routes(routes![me]).serve().await?;
+    Ok(())
+}
+```
+
+A `Jwt` argument is a token that passed every check, in this order (the first failure is the one
+reported):
+
+1. the **algorithm** in the token's header: one the provider announces, and asymmetric. `none`
+   and `HS256`/`HS384`/`HS512` are always refused (an `HS*` token "signed" with the public key is
+   the classic forgery);
+2. the **key**: the one of the JWKS that the token's `kid` names, for that algorithm;
+3. the **signature**, with that key;
+4. **`exp`** and **`nbf`**, with 30 seconds of leeway for clock skew (`.leeway(Duration)`);
+5. **`iss`**: the provider's issuer, as the discovery document states it;
+6. **`aud`** contains one of the `audiences`, when you configured some;
+7. the **client**, when you configured `clients`: `azp`, then `client_id` (RFC 9068), then `appid`
+   (Entra ID v1), the first present wins.
+
+A missing token answers `401` with `WWW-Authenticate: Bearer`, like `Bearer`. A token that fails a
+check answers `401` with `Bearer error="invalid_token"` and a detail naming the class of the
+failure:
+
+```
+HTTP/1.1 401 Unauthorized
+www-authenticate: Bearer error="invalid_token", error_description="The token has expired"
+content-type: application/problem+json
+
+{"type":"about:blank","title":"Unauthorized","status":401,"detail":"The token has expired","instance":"/me"}
+```
+
+The detail (the verification library's error, the unknown `kid`, the client the token named) goes
+to the log at `debug`, never to the client, and the token is never logged.
+
+### Your own claims
+
+`Jwt` alone reads `StandardClaims` (`iss`, `sub`, `aud`, `exp`, `scope`/`scp` and the rest in
+`extra`). For the claims your provider adds, name a type that deserializes (`#[lesto::model]`,
+chapter 4, or your own `#[derive(Deserialize)]`):
+
+```rust
+#[lesto::model]
+struct Claims {
+    sub: String,
+    email: String,
+}
+
+#[lesto::get("/email")]
+async fn my_email(token: Jwt<Claims>) -> String {
+    token.claims().email.clone()
+}
+```
+
+A valid token whose claims do not fit the type answers `401`. Whatever the type, `token.subject()`,
+`token.scopes()`, `token.has_scope("notes:write")` and `token.claim("tenant")` read the raw claims.
+
+### Protecting a group of routes
+
+A `Jwt` argument protects one handler. `App::protect` protects every route of an app, whatever
+the handlers take; nest that app and the routes next to it stay public:
+
+```rust
+let admin = App::new()
+    .routes(routes![stats, purge])
+    .protect(auth.clone().scopes(["admin"]));   // or `.protect(auth.clone())`: any valid token
+
+App::new()
+    .oidc(auth)
+    .routes(routes![health, me])
+    .nest("/admin", admin)
+```
+
+No token or a bad one answers `401`; a valid token without every scope listed answers `403` with
+`WWW-Authenticate: Bearer error="insufficient_scope", scope="admin"`. Scopes are read from `scope`
+(space separated) and `scp` (Entra ID, Okta). A `Jwt` argument inside a protected app reads the
+claims the layer already verified. The documentation routes are never protected; every other route
+of the app is, including one marked `public` (see [below](#default-security-for-the-whole-api)).
+
+### The documentation
+
+`App::oidc` and `App::protect` register the `openIdConnect` security scheme pointing at the
+discovery URL, so Scalar and Swagger UI offer a login; each operation that takes a `Jwt` or sits
+in a protected app carries `security: [{"openIdConnect": [..]}]` and its `401` (and `403`).
+
+### From the environment
+
+```rust
+let auth = Oidc::from_env().await?;          // Option<Oidc>
+let app = match auth {
+    Some(auth) => app.oidc(auth),
+    None => app,
+};
+```
+
+| Variable | Meaning |
+|---|---|
+| `LESTO_OIDC_DISCOVERY_URL` | the discovery document; unset, `from_env` returns `Ok(None)` |
+| `LESTO_OIDC_AUDIENCES` | accepted audiences, comma separated |
+| `LESTO_OIDC_CLIENTS` | accepted clients, comma separated |
+| `LESTO_OIDC_LEEWAY_SECS` | leeway on `exp` and `nbf`, in seconds (default 30) |
+
+### Startup and key rotation
+
+`discover` fails, and the application does not start, if the discovery document or the keys cannot
+be fetched or parsed, if the document names an issuer other than the URL it was found under (for a
+URL ending in `/.well-known/openid-configuration`, as the specification requires), or if the
+provider announces only algorithms lesto refuses. Only `https` URLs are accepted, plus plain
+`http` on `localhost` and loopback addresses (a provider next to the application, tests).
+
+The keys stay in memory; requests never wait for the provider. When a token names a `kid` lesto
+does not know, the provider has probably rotated its keys: lesto fetches the JWKS again, **at most
+once a minute** (`.min_refresh(Duration)`), so a flood of tokens with made-up `kid`s cannot turn
+your service into a client hammering the provider. A `Cache-Control: max-age` on the JWKS
+response is honored too. A fetch that fails keeps the keys already known and logs a warning.
+
+Out of scope: opaque tokens (introspection), issuing tokens, login pages, several issuers at once.
+
+## Other OAuth2 schemes
 
 For schemes that have URLs and scopes, implement `AuthScheme` on a marker and pass it to `Bearer`:
 
@@ -186,9 +331,14 @@ and for the exceptions:
 async fn health() -> &'static str { "ok" }
 ```
 
+`public` only changes the documentation. It does not exempt a route from `App::protect`, which
+checks every request of its app: put public routes in an app that is not protected.
+
 ## Recap
 
 - `Bearer`, `ApiKey<S>`, `Basic`: they extract and document; verification is yours.
+- `Jwt<C>` (feature `oidc`): a token verified against an OpenID Connect provider;
+  `App::protect` requires one on a whole group of routes.
 - One marker type per API key or OAuth2 scheme; `Bearer<MyScheme>` to use it.
 - Missing credentials → `401` with `WWW-Authenticate`.
 - `security(..)`, `public` and `App::security` for when authentication happens elsewhere.

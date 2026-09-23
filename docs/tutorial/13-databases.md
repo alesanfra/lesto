@@ -118,6 +118,48 @@ impl Authenticated for User {
 `State` is an associated type, so a principal belongs to one application state. `Public` works
 with any state.
 
+### A verified JWT as the credential
+
+With the `oidc` feature (chapter 9), the credential can be a token lesto has already verified, and
+the permissions its scopes:
+
+```rust
+use lesto::oidc::Jwt;
+
+#[lesto::model]
+pub struct TokenClaims {
+    sub: String,
+    #[serde(default)]
+    scope: String,
+}
+
+pub struct Caller {
+    pub id: String,
+    scopes: Vec<String>,
+}
+
+impl Authenticated for Caller {
+    type State = AppState;
+    type Credential = Jwt<TokenClaims>;                // signature, issuer, audience, expiry: done
+
+    async fn authenticate(token: Jwt<TokenClaims>, _: &AppState) -> Result<Self, HttpError> {
+        let claims = token.into_claims();
+        Ok(Caller {
+            id: claims.sub,
+            scopes: claims.scope.split_whitespace().map(String::from).collect(),
+        })
+    }
+
+    fn has_permission(&self, permission: &str) -> bool {
+        self.scopes.iter().any(|s| s == permission)   // "notes:write" is a scope
+    }
+}
+```
+
+`App::oidc(auth)` must be on the app: without a verifier the request answers `500` and the log
+says why. The operation is documented with the `openIdConnect` scheme.
+How scopes (or `roles`, or groups) map to permissions is yours to decide: lesto does not guess.
+
 ## The store
 
 A store is a **newtype** around `lesto::db::Store<M, P, DB>` with `#[derive(Store)]`. The

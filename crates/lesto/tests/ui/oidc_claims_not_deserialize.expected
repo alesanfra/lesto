@@ -1,0 +1,5 @@
+# serde owns the wording of the bound (and its "consider adding #[derive(serde::Deserialize)]");
+# lesto owns the chain that says why the claims type needs it.
+error[E0277]: the trait bound `Claims: serde::Deserialize<'de>` is not satisfied
+--> oidc_claims_not_deserialize.rs:10
+required for `Claims` to implement `lesto::oidc::Claims`
