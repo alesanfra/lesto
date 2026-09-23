@@ -435,8 +435,12 @@ noise (the "trace off" rows move the same way).
 **Recommended:** off by default; measure to confirm.
 
 **Tasks**
-- [ ] Measure a clean and an incremental build of `examples/02-notes` with and without `otel`.
-- [ ] Decide (question 4) and record the numbers in `README.md` next to the performance table.
+- [x] Measure a clean and an incremental build of `examples/02-notes` with and without `otel`.
+- [x] Decide (question 4) and record the numbers in `README.md` next to the performance table.
+
+**Done (2026-09-23):** off by default. `examples/02-notes`, clean target dir, dev profile:
+177 crates / 94 s without, 210 / 118 s with (+26 %); incremental 1.0 s vs 1.1 s. Table in the
+README under Performance.
 
 ---
 
