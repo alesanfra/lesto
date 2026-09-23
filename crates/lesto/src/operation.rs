@@ -20,10 +20,13 @@ use crate::openapi::{
 
 /// Mutable view over an [`Operation`] being built, plus the shared schema generator.
 pub struct OperationBuilder<'a> {
+    /// The operation being described.
     pub operation: &'a mut Operation,
+    /// Shared generator: schemas land in `components.schemas`.
     pub generator: &'a mut SchemaGenerator,
     /// OpenAPI path template of the route, e.g. `/users/{id}`.
     pub path: &'a str,
+    /// HTTP method of the route.
     pub method: &'a http::Method,
     /// `components.securitySchemes`, shared by every operation.
     pub security_schemes: &'a mut IndexMap<String, SecurityScheme>,
@@ -88,6 +91,7 @@ impl OperationBuilder<'_> {
         schema
     }
 
+    /// Document a request body of type `T` with the given media type.
     pub fn request_body<T: JsonSchema + ?Sized>(&mut self, content_type: &str, required: bool) {
         let schema = self.schema_for::<T>();
         let body = self
@@ -103,6 +107,7 @@ impl OperationBuilder<'_> {
         );
     }
 
+    /// Document a response of type `T` under `status`.
     pub fn response<T: JsonSchema + ?Sized>(
         &mut self,
         status: impl ResponseKey,
@@ -119,6 +124,7 @@ impl OperationBuilder<'_> {
         );
     }
 
+    /// Document a response with no body under `status`.
     pub fn empty_response(&mut self, status: impl ResponseKey, description: &str) {
         self.response_entry(status, description);
     }
@@ -217,6 +223,7 @@ impl OperationBuilder<'_> {
 
 /// Key of the `responses` map: a status code or a range such as `"default"`.
 pub trait ResponseKey {
+    /// The key as it appears in the document.
     fn key(self) -> String;
 }
 
@@ -255,6 +262,7 @@ pub fn reason_phrase(status: u16) -> String {
     note = "for a custom extractor, add `impl lesto::OperationInput for {Self} {{}}` (an empty impl documents nothing) or delegate to the extractor it wraps, e.g. `Bearer::<BearerAuth>::describe(builder)`"
 )]
 pub trait OperationInput {
+    /// Add what this argument contributes (parameters, body, security) to the operation.
     fn describe(builder: &mut OperationBuilder<'_>) {
         let _ = builder;
     }
@@ -270,6 +278,7 @@ pub trait OperationInput {
     note = "for a custom response type, add `impl lesto::OperationOutput for {Self} {{}}` (an empty impl documents nothing)"
 )]
 pub trait OperationOutput {
+    /// Add the responses this type produces to the operation; `status` is the success status.
     fn describe(builder: &mut OperationBuilder<'_>, status: u16) {
         let _ = (builder, status);
     }

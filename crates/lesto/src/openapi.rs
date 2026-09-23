@@ -3,11 +3,17 @@
 //! Schemas are JSON Schema 2020-12 values produced by [`schemars`], which OpenAPI 3.1
 //! embeds natively, so we keep them as [`schemars::Schema`] instead of re-modeling them.
 
+// Types and fields are named after the OpenAPI 3.1 Specification, which documents them; a line
+// per field here would repeat it. The builders (`SecurityScheme::bearer`, `OAuthFlows`, ...) carry
+// their own docs.
+#![allow(missing_docs)]
+
 use indexmap::IndexMap;
 use schemars::Schema;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct OpenApi {
     pub openapi: String,
     pub info: Info,
@@ -38,6 +44,7 @@ impl Default for OpenApi {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct Info {
     pub title: String,
     pub version: String,
@@ -56,6 +63,7 @@ impl Default for Info {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct Server {
     pub url: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -63,6 +71,7 @@ pub struct Server {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct Tag {
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -70,6 +79,7 @@ pub struct Tag {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct PathItem {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub get: Option<Operation>,
@@ -108,6 +118,7 @@ impl PathItem {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[non_exhaustive]
 pub struct Operation {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
@@ -131,6 +142,7 @@ pub struct Operation {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[non_exhaustive]
 pub enum ParameterIn {
     Path,
     Query,
@@ -139,6 +151,7 @@ pub enum ParameterIn {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct Parameter {
     pub name: String,
     #[serde(rename = "in")]
@@ -153,6 +166,7 @@ pub struct Parameter {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct RequestBody {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
@@ -162,12 +176,14 @@ pub struct RequestBody {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct MediaType {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub schema: Option<Schema>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct Response {
     pub description: String,
     #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
@@ -176,6 +192,7 @@ pub struct Response {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[non_exhaustive]
 pub struct Components {
     #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
     pub schemas: IndexMap<String, Schema>,
@@ -188,6 +205,7 @@ pub type SecurityRequirement = IndexMap<String, Vec<String>>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[non_exhaustive]
 pub enum ApiKeyIn {
     Header,
     Query,
@@ -201,6 +219,7 @@ pub enum ApiKeyIn {
     rename_all = "camelCase",
     rename_all_fields = "camelCase"
 )]
+#[non_exhaustive]
 pub enum SecurityScheme {
     ApiKey {
         name: String,
@@ -291,6 +310,7 @@ impl SecurityScheme {
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[non_exhaustive]
 pub struct OAuthFlows {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub implicit: Option<OAuthFlow>,
@@ -358,6 +378,7 @@ impl OAuthFlows {
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[non_exhaustive]
 pub struct OAuthFlow {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub authorization_url: Option<String>,

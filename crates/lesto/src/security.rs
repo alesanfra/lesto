@@ -51,6 +51,7 @@ use crate::operation::{OperationBuilder, OperationInput};
 pub trait AuthScheme: Send + Sync + 'static {
     /// Key under `components.securitySchemes`.
     const NAME: &'static str;
+    /// The entry under `components.securitySchemes`.
     fn scheme() -> SecurityScheme;
     /// Scopes required by operations using this marker (OAuth2 / OpenID Connect only).
     fn scopes() -> &'static [&'static str] {
@@ -84,6 +85,7 @@ pub trait ApiKeyScheme: Send + Sync + 'static {
     const NAME: &'static str;
     /// Header, query parameter or cookie name.
     const KEY: &'static str;
+    /// Where the key is sent: header (default), query parameter or cookie.
     const LOCATION: ApiKeyIn = ApiKeyIn::Header;
 }
 
@@ -123,10 +125,12 @@ impl<S: AuthScheme> std::fmt::Debug for Bearer<S> {
 }
 
 impl<S: AuthScheme> Bearer<S> {
+    /// The token, without the `Bearer ` prefix.
     pub fn token(&self) -> &str {
         &self.token
     }
 
+    /// The token, owned.
     pub fn into_token(self) -> String {
         self.token
     }
@@ -166,7 +170,9 @@ impl<S: AuthScheme> OperationInput for Bearer<S> {
 /// `Debug` prints the username and redacts the password.
 #[derive(Clone, PartialEq, Eq)]
 pub struct Basic<S: AuthScheme = BasicAuth> {
+    /// User name, decoded.
     pub username: String,
+    /// Password, decoded.
     pub password: String,
     _scheme: PhantomData<fn() -> S>,
 }
@@ -230,10 +236,12 @@ impl<S: ApiKeyScheme> std::fmt::Debug for ApiKey<S> {
 }
 
 impl<S: ApiKeyScheme> ApiKey<S> {
+    /// The key.
     pub fn key(&self) -> &str {
         &self.key
     }
 
+    /// The key, owned.
     pub fn into_key(self) -> String {
         self.key
     }

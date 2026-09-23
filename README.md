@@ -259,6 +259,23 @@ inside a layer that is installed anyway. Use it when you do not want a request s
 you want speed. `scripts/bench-http.sh` runs the same application behind `oha` over a real
 socket, where the numbers above are lost in the noise of the network.
 
+## Versioning
+
+lesto follows semver. Public types that are expected to grow (`lesto::db::Error`, `Isolation`,
+`lambda::Options`, `otel::Config`, the OpenAPI model) are `#[non_exhaustive]`, so a new variant
+or field is not a breaking change; match them with a `_` arm and build them through their
+constructors.
+
+The crates lesto re-exports are part of its public API: `axum` (and `lesto::http`), `garde`,
+`schemars`, `serde_json`, and with the `db` feature `sqlx` and `uuid` (`lesto::db::sqlx`,
+`lesto::db::uuid`). lesto 0.1 tracks axum 0.8; a new major (or 0.x minor) of any of them is a new
+major (0.x minor) of lesto. Use the re-exports rather than a second direct dependency and the two
+can never disagree.
+
+MSRV: Rust 1.94, set by `sqlx` 0.9. Raising it is a minor release.
+
+Changes are listed in [CHANGELOG.md](CHANGELOG.md).
+
 ## Development
 
 Rust 1.94 or newer (edition 2024; `sqlx` 0.9 sets the floor).
@@ -271,7 +288,7 @@ cargo deny check                                     # licenses, advisories (car
 cargo run -p lesto-cli -- dev -p notes --port 8765   # the CLI from this checkout
 ```
 
-Features of `lesto`: `db` + `postgres`/`mysql`/`sqlite`, `lambda`, `otel`, `anyhow`. Tests always run with all of them.
+Features of `lesto`: `email` and `url` (garde rules, on by default), `db` + `postgres`/`mysql`/`sqlite`, `lambda`, `otel`, `anyhow`. Tests always run with all of them.
 
 CI (`.github/workflows/ci.yml`) runs fmt, clippy and rustdoc with warnings denied, each feature of
 `lesto` alone (`cargo hack`), the mdBook build and `cargo deny`; the tests on stable, including the

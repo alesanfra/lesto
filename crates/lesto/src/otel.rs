@@ -59,6 +59,7 @@ use tracing_subscriber::util::SubscriberInitExt;
 /// Everything else (headers, timeouts, the per-signal endpoints) is read by the OTLP exporters
 /// from the same environment, so there is nothing for lesto to pass on.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Config {
     /// `service.name` of the exported resource.
     pub service_name: String,

@@ -32,10 +32,19 @@ pub use lambda_http::Error;
 
 /// How [`serve_with`] behaves inside Lambda.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Options {
     /// Keep the API Gateway stage in the request path (`/prod/notes`). Off by default: the
     /// stage is stripped and routes match as they do locally.
     pub keep_stage: bool,
+}
+
+impl Options {
+    /// Keep (`true`) or strip (`false`, the default) the API Gateway stage.
+    pub fn keep_stage(mut self, keep: bool) -> Self {
+        self.keep_stage = keep;
+        self
+    }
 }
 
 /// Is this process running inside AWS Lambda?

@@ -48,6 +48,7 @@
 //!         .await
 //! }
 //! ```
+#![warn(missing_docs)]
 
 pub mod app;
 #[cfg(feature = "db")]

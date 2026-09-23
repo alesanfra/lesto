@@ -23,17 +23,24 @@ use crate::operation::{
 /// Everything about a route that is not derivable from the handler's types.
 #[derive(Debug, Clone)]
 pub struct RouteMeta {
+    /// HTTP method.
     pub method: Method,
+    /// Path template, axum syntax (`/users/{id}`).
     pub path: String,
     /// Name of the handler function, set by the route attribute; the default `operationId`
     /// starts with it.
     pub name: Option<String>,
+    /// `summary`, from the first line of the doc comment.
     pub summary: Option<String>,
+    /// `description`, from the rest of the doc comment.
     pub description: Option<String>,
+    /// Explicit `operationId`; computed from the name and the final path when `None`.
     pub operation_id: Option<String>,
+    /// OpenAPI tags.
     pub tags: Vec<String>,
     /// Success status, 200 by default. Applied to the live response as well as the docs.
     pub status: u16,
+    /// Mark the operation deprecated.
     pub deprecated: bool,
     /// Extra error statuses to document with the `HttpError` body.
     pub error_statuses: Vec<u16>,
@@ -44,6 +51,7 @@ pub struct RouteMeta {
 }
 
 impl RouteMeta {
+    /// Metadata for `method` on `path`, everything else default.
     pub fn new(method: Method, path: impl Into<String>) -> Self {
         Self {
             method,
@@ -67,31 +75,37 @@ impl RouteMeta {
         self
     }
 
+    /// Set the summary.
     pub fn summary(mut self, summary: impl Into<String>) -> Self {
         self.summary = Some(summary.into());
         self
     }
 
+    /// Set the description.
     pub fn description(mut self, description: impl Into<String>) -> Self {
         self.description = Some(description.into());
         self
     }
 
+    /// Set the `operationId`.
     pub fn operation_id(mut self, id: impl Into<String>) -> Self {
         self.operation_id = Some(id.into());
         self
     }
 
+    /// Add a tag.
     pub fn tag(mut self, tag: impl Into<String>) -> Self {
         self.tags.push(tag.into());
         self
     }
 
+    /// Set the success status (see [`RouteMeta::status`](Self#structfield.status)).
     pub fn status(mut self, status: impl IntoStatus) -> Self {
         self.status = status.into_status().as_u16();
         self
     }
 
+    /// Mark the operation deprecated (or not).
     pub fn deprecated(mut self, deprecated: bool) -> Self {
         self.deprecated = deprecated;
         self
@@ -175,6 +189,7 @@ method_ctor! {
     note = "if the handler lives in another module it must be `pub`, and `routes!` needs its path: `routes![users::list]`"
 )]
 pub trait RouteInfo {
+    /// The metadata the route attribute collected.
     fn meta() -> RouteMeta;
 }
 
@@ -184,7 +199,9 @@ pub type DescribeFn = Arc<dyn Fn(&mut OperationBuilder<'_>) + Send + Sync>;
 /// A route's metadata plus the function that documents its handler.
 #[derive(Clone)]
 pub struct PendingOperation {
+    /// The route metadata.
     pub meta: RouteMeta,
+    /// Documents the handler's arguments and return type.
     pub describe: DescribeFn,
 }
 
@@ -263,6 +280,7 @@ impl<S> RouteSet<S>
 where
     S: Clone + Send + Sync + 'static,
 {
+    /// An empty set.
     pub fn new() -> Self {
         Self::default()
     }

@@ -13,6 +13,7 @@ pub struct Db<DB: Database> {
 }
 
 impl<DB: Database> Db<DB> {
+    /// A handle on `primary`, with no read replica and the default conflict retry budget.
     pub fn new(primary: Pool<DB>) -> Self {
         Self {
             primary,

@@ -224,8 +224,12 @@ where
 pin_project! {
     /// The future of [`CatchPanic`].
     #[project = CaughtFutureProj]
+    // Variant fields are private in spirit; pin-project-lite takes no docs on them.
+    #[allow(missing_docs)]
     pub enum CaughtFuture<F> {
+        /// The inner future, not finished yet.
         Running { #[pin] future: F },
+        /// The inner service panicked: the `500` problem, taken on the next poll.
         Panicked { response: Option<Response> },
     }
 }
@@ -339,9 +343,12 @@ where
 pin_project! {
     /// The future of [`RequestSpan`].
     #[project = RequestSpanFutureProj]
+    // Variant fields are private in spirit; pin-project-lite takes no docs on them.
+    #[allow(missing_docs)]
     pub enum RequestSpanFuture<F> {
-        // Nobody is listening: the inner future, polled as if the layer were not there.
+        /// Nobody is listening: the inner future, polled as if the layer were not there.
         Disabled { #[pin] future: F },
+        /// The inner future, polled inside the request span.
         Recording { #[pin] future: F, span: tracing::Span },
     }
 }

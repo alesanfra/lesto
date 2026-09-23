@@ -19,6 +19,7 @@ const SWAGGER_UI_JS_INTEGRITY: &str =
 
 /// Where the documentation pages load their assets from. `None` means the pinned CDN default.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct DocsAssets {
     /// URL of the Scalar script.
     pub scalar_script: Option<String>,
@@ -101,6 +102,7 @@ fn escape(text: &str) -> String {
         .replace('"', "&quot;")
 }
 
+/// The Swagger UI page, loading the document from `openapi_url`.
 pub fn swagger_ui_html(openapi_url: &str, title: &str, assets: &DocsAssets) -> String {
     let (css, css_integrity, js, js_integrity) = swagger_ui_files(assets);
     let title = escape(title);
@@ -130,6 +132,7 @@ pub fn swagger_ui_html(openapi_url: &str, title: &str, assets: &DocsAssets) -> S
     )
 }
 
+/// The Scalar page, loading the document from `openapi_url`.
 pub fn scalar_html(openapi_url: &str, title: &str, assets: &DocsAssets) -> String {
     let (js, js_integrity) = scalar_script(assets);
     let title = escape(title);
