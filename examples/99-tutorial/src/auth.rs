@@ -1,4 +1,4 @@
-// Capitoli 8 e 9: extractor personalizzato e schemi di sicurezza
+// Chapters 8 and 9: a custom extractor and the security schemes
 use lesto::axum::extract::FromRequestParts;
 use lesto::http::request::Parts;
 use lesto::prelude::*;
@@ -11,7 +11,7 @@ pub struct User {
     pub name: String,
 }
 
-/// L'utente autenticato.
+/// The authenticated user.
 pub struct CurrentUser(pub User);
 
 impl<S: Send + Sync> FromRequestParts<S> for CurrentUser {
