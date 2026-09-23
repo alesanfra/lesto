@@ -53,6 +53,11 @@ opentelemetry-otlp = { version = "0.32", default-features = false, features = ["
 opentelemetry-appender-tracing = { version = "0.32", default-features = false }
 tracing-opentelemetry = { version = "0.33", default-features = false }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# feature `oidc` of `lesto`: the async client that fetches the discovery document and the JWKS
+# (the same reqwest major `otel` uses, so the graph holds one), and the JWT verification. Both on
+# aws-lc-rs, so a build has one crypto library; no OpenSSL.
+reqwest = { version = "0.13", default-features = false }
+jsonwebtoken = { version = "11", default-features = false }
 anyhow = "1"
 uuid = { version = "1", default-features = false }
 

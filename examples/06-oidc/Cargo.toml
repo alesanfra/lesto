@@ -1,0 +1,10 @@
+[package]
+name = "oidc-example"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Chapter 9: bearer JWTs from a real OpenID Connect provider (mock-oauth2-server in Docker), verified by lesto"
+
+[dependencies]
+lesto = { path = "../../crates/lesto", features = ["oidc"] }

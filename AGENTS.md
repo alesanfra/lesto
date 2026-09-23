@@ -9,7 +9,8 @@ lesto is a FastAPI-style web framework for Rust on top of axum 0.8: `#[lesto::ge
 on an `async fn`, `Json<T>`/`Query<T>`/`Path<T>` extractors that validate with garde, OpenAPI
 3.1 derived from handler argument and return types, RFC 9457 errors, Scalar at `/docs` and
 Swagger UI at `/swagger`. The `db` feature adds sqlx stores with principals and permissions,
-the `lambda` feature runs the app on AWS Lambda; `lesto-cli` adds `lesto dev`. One library crate
+the `lambda` feature runs the app on AWS Lambda, the `oidc` feature verifies bearer JWTs against an
+OpenID Connect provider; `lesto-cli` adds `lesto dev`. One library crate
 with features, like FastAPI's extras: `lesto-macros` is separate only because proc macros must
 be, `lesto-cli` because it is a binary. The project was called *presto* until 2026-09-12 (the
 crates.io name was taken).
@@ -47,6 +48,14 @@ crates/lesto/             library
     trace.rs              the transaction's client span (database semconv)
   src/lambda.rs           feature `lambda`: AWS Lambda adapter over lambda_http: serve (Lambda or
                           local), Options (keep_stage, a per-router request mapper), test::invoke
+  src/oidc/               feature `oidc`: bearer JWTs verified against an OpenID Connect provider
+    mod.rs                Oidc (discover → Discover builder, IntoFuture), from_env, verify
+    keys.rs               discovery document, URL/issuer checks, JWKS parsing, KeyCache (refresh)
+    verify.rs             the checks in order, TokenError → 401 problem + WWW-Authenticate
+    extract.rs            Jwt<C>: verified claims cached in the request extensions (Verified)
+    protect.rs            Protect / ProtectLayer: App::protect, 403 insufficient_scope
+    claims.rs             Claims (blanket over DeserializeOwned), StandardClaims, scopes
+    config.rs             LESTO_OIDC_* read through a getter
   tests/integration.rs    end-to-end tests via tower::ServiceExt::oneshot
   benches/overhead.rs     per-request overhead against plain axum (harness = false, no dev-dep)
   tests/db.rs             SQLite in-memory end-to-end for lesto::db
@@ -57,6 +66,10 @@ crates/lesto/             library
   tests/trace.rs          the span fields, through a hand-rolled capturing tracing::Subscriber
   tests/metrics.rs        the duration histogram through the SDK's in-memory exporter
   tests/lambda.rs         API Gateway v1/v2, Function URL and ALB event fixtures
+  tests/oidc.rs           a provider on 127.0.0.1:0, tokens signed with tests/fixtures/oidc/*.pem
+                          (test-only keys): every check, key rotation, protect, lesto::db
+  tests/oidc_provider.rs  the same against a real provider (mock-oauth2-server); skipped unless
+                          LESTO_TEST_OIDC_URL is set. CI runs it with an `oauth2` service
   tests/listener.rs       LISTEN_FDS socket inheritance
   tests/shutdown.rs       graceful shutdown (serve_until) finishes in-flight requests
   tests/ui/*.rs           compile-fail cases; *.expected lists the diagnostic fragments lesto owns
@@ -81,6 +94,8 @@ examples/04-opentelemetry/ package `opentelemetry-example` (not `opentelemetry`:
                           crate): chapter 15 end to end — compose.yaml with Jaeger (traces) and
                           OpenObserve (traces + logs), an unauthenticated SQLite API, verify.sh
                           (requests + a trace and a log search). Not run in CI: needs Docker
+examples/06-oidc/         package `oidc-example`: chapter 9's OpenID Connect against a real provider
+                          (mock-oauth2-server in compose.yaml), verify.sh. Not run in CI: needs Docker
 examples/05-routers/      package `routers`: chapter 10 as a running app, two APIs (`/api/app/v1`,
                           `/api/analytics/v1`) as FastAPI-style routers mounted with `nest`, tests/api.rs
 examples/99-tutorial/     package `tutorial`: every tutorial snippet, compiled and tested (keep in sync;
@@ -98,6 +113,7 @@ RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features   # in
 cargo deny check                              # licenses and advisories (deny.toml)
 cargo check -p lesto --no-default-features --features db   # each feature alone must compile too
 cargo check -p lesto --no-default-features --features otel
+cargo check -p lesto --no-default-features --features oidc
 cargo test -p lesto --test ui                 # after changing a diagnostic message, update tests/ui/*.expected
 sh docs/build.sh                              # needs `cargo install mdbook`
 cargo bench -p lesto                          # overhead vs axum; LESTO_BENCH_ITERS/_ROUNDS shrink it
@@ -106,13 +122,15 @@ LESTO_PORT=8765 cargo run -p notes            # port 8000 may be taken on dev ma
 docker run --rm -e POSTGRES_PASSWORD=lesto -p 5432:5432 postgres:18   # for tests/db_postgres.rs
 (cd examples/04-opentelemetry && docker compose up -d openobserve && sh verify.sh)  # OTLP end to end
 (cd examples/04-opentelemetry && docker compose up -d jaeger)        # traces only: OTEL_LOGS_EXPORTER=none OTEL_METRICS_EXPORTER=none
+(cd examples/06-oidc && docker compose up -d)   # then the variables of its README, cargo run -p oidc-example, sh verify.sh
 LESTO_TEST_POSTGRES_URL=postgres://postgres:lesto@127.0.0.1:5432/postgres cargo test -p lesto --test db_postgres
+LESTO_TEST_OIDC_URL=http://localhost:8089/default cargo test -p lesto --test oidc_provider   # after the 06-oidc compose
 cargo run -p lesto-cli -- dev -p notes --port 8765      # lesto dev from this checkout
 ```
 
 Test, clippy, fmt, rustdoc and (if docs changed) the mdBook build must pass before a change is
 done; `.github/workflows/ci.yml` runs the same on every push and pull request, in three jobs
-(lint, test with a Postgres service for `db_postgres`, `cargo check` on the MSRV 1.94, which
+(lint, test with a Postgres service for `db_postgres` and a mock-oauth2-server one for `oidc_provider`, `cargo check` on the MSRV 1.94, which
 `sqlx` 0.9 dictates) built with `--profile ci` (unoptimized dependencies, no debug info). When
 raising `rust-version`, change the MSRV job too. Do not claim success without running them. Gate commits on the test result, never on "it
 should pass". Run `git grep -i presto` before committing: the old name must not come back.
@@ -284,6 +302,25 @@ Recorded here because they are not derivable from the code. Do not undo them cas
   `with_threads(false)`, `with_tracked_inactivity(false)`. Source file, line, module, thread id,
   thread name and busy/idle timings are seven attributes per span repeating what the span name
   already says, on every span of every request.
+- **`lesto::oidc`: jsonwebtoken + reqwest, both on aws-lc-rs** (decided 2026-09-23). reqwest
+  is the major `otel` already pulls (one in the graph); its `rustls` feature brings aws-lc-rs,
+  so jsonwebtoken takes `aws_lc_rs` too and a build has one crypto library, no OpenSSL.
+  jsonwebtoken's other backend, `rust_crypto`, pulls `rsa`, whose RUSTSEC-2023-0071 has no fix
+  and fails `cargo deny`. The platform verifier brings `webpki-root-certs` (Mozilla's CA list,
+  `CDLA-Permissive-2.0`, allowed in `deny.toml`). The verifier reaches `Jwt` through a request
+  extension that `App::oidc` installs (an opt-in `Router::layer`, like the timeout), not
+  through `FromRef<S>`: a `FromRef` bound would make every application put the verifier in its
+  state and would not work with `Authenticated::Credential`, whose `State` is the user's. The
+  first extractor (or the protect layer) stores the verified claims (`Verified`), so two
+  `Jwt`s, or a `Jwt` in a protected app, verify once; `Jwt<C>` deserializes `C` from them.
+  Only asymmetric algorithms the provider announces are accepted (`HS*` with a public key as
+  secret is the classic forgery). An unknown `kid` refetches the JWKS, at most once per
+  `min_refresh` (a mutex serializes refetches, a waiter re-reads instead of fetching again);
+  a set past its `Cache-Control: max-age` refreshes with `try_lock`, so a stale set never
+  queues requests. `App::protect` is applied when the app is nested or served (not when
+  called), so builder order does not matter, and before the docs routes are added. `Claims`
+  has no `on_unimplemented`: with a blanket impl rustc reports serde's own bound, which already
+  says to derive `Deserialize` (`tests/ui/oidc_claims_not_deserialize.rs`).
 - **`lesto::lambda` wraps `lambda_http`, it does not reimplement it.** The official runtime already
   turns API Gateway v1/v2, Function URL and ALB events into `http::Request`s and accepts any
   tower service, so the crate adds only what lesto users need: the Lambda-or-local switch on
@@ -313,12 +350,12 @@ Recorded here because they are not derivable from the code. Do not undo them cas
 - A nested `/` route is documented at the prefix itself (that is where axum serves it).
 - `App::merge` / `nest_router` / `From<Router<S>>` take a finished `axum::Router`: served, not
   documented (the handler types are gone by then), but inside every lesto layer.
-- **Problems are rendered once.** `ProblemLayer` publishes the request URI and the
-  the request URI in a `tokio::task_local!` (`error::RENDER`); `Problem::into_response` reads
-  it, fills `instance`, serializes once and marks the response with the `ProblemRendered`
-  extension. A `problem+json` response *without* that marker — built by hand, or built where
-  the task-local is not visible, as in a spawned task — still takes the layer's slow path
-  (buffer, parse, rewrite), which is also what keeps `instance` working there.
+- **Problems are rendered once.** `ProblemLayer` publishes the request URI in a
+  `tokio::task_local!` (`error::RENDER`); `Problem::into_response` reads it, fills `instance`,
+  serializes once and marks the response with the `ProblemRendered` extension. A
+  `problem+json` response *without* that marker — built by hand, or built where the task-local
+  is not visible, as in a spawned task — still takes the layer's slow path (buffer, parse,
+  rewrite), which is also what keeps `instance` working there.
 - `into_router` installs a `404` fallback (unless `App::fallback` was called), a `405`
   `method_not_allowed_fallback`, and then **one** `Router::layer` call with
   `tower_layer::Stack`: `RequestSpanLayer` outside `ProblemLayer` outside `CatchPanicLayer`.
@@ -452,11 +489,7 @@ Bigger items, easiest first (mirrored in `README.md`, keep the two lists in sync
 1. Lambda adapter tested end to end on floci (<https://floci.io/>: local AWS emulator, Lambda +
    API Gateway, LocalStack drop-in on port 4566, native binary or Docker, MIT) in CI, on top of
    the event-fixture tests in `tests/lambda.rs`.
-2. OAuth2 / JWT validation by configuration: `discovery_url` + accepted `audience` / client ids
-   → `Bearer` tokens verified (JWKS signature, issuer, audience, expiry) before the handler
-   runs. Design it as the first piece of an easy middleware system (one line to protect a group
-   of routes); the OpenAPI security scheme should come out of the same configuration.
-3. MCP from the route attribute: `mcp = "tool" | "prompt" | "resource"` on `#[lesto::get]` and
+2. MCP from the route attribute: `mcp = "tool" | "prompt" | "resource"` on `#[lesto::get]` and
    friends exposes the operation to agents, reusing the derived JSON schemas. Needs a written
    design first (naming, auth, which operations map to which MCP primitive, transport).
 

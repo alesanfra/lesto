@@ -43,6 +43,9 @@ opentelemetry-otlp = { workspace = true, optional = true }
 opentelemetry-appender-tracing = { workspace = true, optional = true }
 tracing-opentelemetry = { workspace = true, optional = true }
 tracing-subscriber = { workspace = true, optional = true }
+# feature `oidc`
+reqwest = { workspace = true, optional = true, features = ["rustls"] }
+jsonwebtoken = { workspace = true, optional = true, features = ["aws_lc_rs"] }
 # feature `lambda`
 lambda_http = { version = "1.3", default-features = false, features = ["apigw_rest", "apigw_http", "alb"], optional = true }
 tower = { workspace = true, optional = true }
@@ -70,6 +73,8 @@ mysql = ["db", "sqlx/mysql"]
 sqlite = ["db", "sqlx/sqlite"]
 # `lesto::lambda`: run the app on AWS Lambda behind API Gateway, a Function URL or an ALB.
 lambda = ["dep:lambda_http", "dep:tower", "dep:http-body-util"]
+# `lesto::oidc`: bearer JWTs verified against an OpenID Connect provider (discovery + JWKS).
+oidc = ["dep:reqwest", "dep:jsonwebtoken"]
 # `lesto::otel`: OTLP export of spans *and* log events, configured by the standard `OTEL_*`
 # variables (`App::serve` sets it up by itself), plus trace context propagation so an incoming
 # `traceparent` continues here. The spans themselves need no feature.
@@ -87,7 +92,7 @@ all-features = true
 
 [dev-dependencies]
 # Tests exercise every feature.
-lesto = { path = ".", features = ["anyhow", "email", "url", "compression", "sqlite", "postgres", "lambda", "otel"] }
+lesto = { path = ".", features = ["anyhow", "email", "url", "compression", "sqlite", "postgres", "lambda", "otel", "oidc"] }
 # `postgres` and `uuid` for `tests/db_postgres.rs`, which binds a `Uuid`; lesto itself never
 # binds one, so the `db` feature does not ask sqlx for it.
 sqlx = { workspace = true, features = ["sqlite", "postgres", "uuid", "derive"] }
@@ -97,6 +102,11 @@ http-body-util.workspace = true
 # `tests/metrics.rs`: the in-memory metric exporter.
 opentelemetry_sdk = { workspace = true, features = ["testing"] }
 opentelemetry.workspace = true
+# `tests/oidc.rs`: signs tokens with the PEM keys in `tests/fixtures/oidc`.
+jsonwebtoken = { workspace = true, features = ["aws_lc_rs", "use_pem"] }
+base64.workspace = true
+# `tests/oidc_provider.rs`: asks a real provider for tokens (the same reqwest the feature uses).
+reqwest = { workspace = true, features = ["rustls", "form", "json"] }
 
 [target.'cfg(unix)'.dev-dependencies]
 libc = "0.2"

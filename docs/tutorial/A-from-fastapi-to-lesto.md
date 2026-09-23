@@ -27,6 +27,7 @@
 | `Depends(OAuth2PasswordBearer(...))` | `Bearer` / `Bearer<MyOAuth2>` |
 | `Security(APIKeyHeader(name="X-Key"))` | `ApiKey<MyKey>` |
 | `Depends(HTTPBasic())` | `Basic` |
+| `jwt.decode(token, jwks_key, audience=..., issuer=...)` in a dependency | `Jwt<Claims>` with `App::oidc(Oidc::discover(url).audiences([..]).await?)` (feature `oidc`, chapter 9) |
 | `Security(dep, scopes=["read"])` | `AuthScheme::scopes()` on the marker |
 | `APIRouter(prefix="/users")` + `include_router` | `App::new().routes(...)` + `nest("/users", app)` |
 | `app.add_middleware(CORSMiddleware, ...)` | `.layer(CorsLayer::...)` |

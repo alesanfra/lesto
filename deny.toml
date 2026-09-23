@@ -17,6 +17,9 @@ allow = [
     "Unicode-3.0",
     "Zlib",
     "CC0-1.0",
+    # webpki-root-certs (feature `oidc`, through reqwest's platform verifier): Mozilla's CA list,
+    # a data license with no copyleft.
+    "CDLA-Permissive-2.0",
 ]
 confidence-threshold = 0.9
 

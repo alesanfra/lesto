@@ -10,8 +10,9 @@
 //! * authentication extractors ([`Bearer`], [`Basic`], [`ApiKey`]) register their security
 //!   scheme and requirement in the document;
 //! * optional features: `db` (+ `postgres`/`mysql`/`sqlite`) adds sqlx stores with principals
-//!   and permissions ([`db`]); `lambda` runs the app on AWS Lambda ([`lambda`]); `anyhow`
-//!   converts `anyhow::Error` into a `500`.
+//!   and permissions ([`db`]); `lambda` runs the app on AWS Lambda ([`lambda`]); `oidc`
+//!   verifies bearer JWTs against an OpenID Connect provider ([`oidc`]); `anyhow` converts
+//!   `anyhow::Error` into a `500`.
 //!
 //! ```no_run
 //! use lesto::prelude::*;
@@ -61,6 +62,8 @@ pub mod lambda;
 pub mod layers;
 #[cfg(feature = "otel")]
 mod metrics;
+#[cfg(feature = "oidc")]
+pub mod oidc;
 pub mod openapi;
 pub mod operation;
 #[cfg(feature = "otel")]
