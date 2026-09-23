@@ -465,14 +465,20 @@ stays. Chapter 6, README, `examples/99-tutorial` (with a test).
 
 **Tasks**
 - [x] `RowNotFound`: implement the P0-5 decision (**before** P5-5). Done in P0-5.
-- [ ] Tutorial: implementing `Requirement<P>` for a user-defined enum, so permissions are not
+- [x] Tutorial: implementing `Requirement<P>` for a user-defined enum, so permissions are not
       only strings.
-- [ ] Tutorial FAQ: "how do I call two store methods atomically?" → the `..._in(conn, ..)`
+- [x] Tutorial FAQ: "how do I call two store methods atomically?" → the `..._in(conn, ..)`
       convention, and why two public store methods sharing a transaction stays impossible.
-- [ ] Tutorial: migrations (`sqlx::migrate!`), pool sizing, acquisition timeouts, and the read
+- [x] Tutorial: migrations (`sqlx::migrate!`), pool sizing, acquisition timeouts, and the read
       replica — the production knobs chapter 13 never mentions.
-- [ ] Document that `Authenticated::State` is an associated type, so a principal belongs to one
+- [x] Document that `Authenticated::State` is an associated type, so a principal belongs to one
       state type.
+
+**Done (2026-09-23):** chapter 13 gains "Permissions as a type" (compiled and tested as
+`a_user_defined_requirement` in `tests/db.rs`; `Requirement` joined the db prelude) and "In
+production: migrations, the pool, a replica" (`examples/02-notes` now runs `sqlx::migrate!` from
+`migrations/` and sets `acquire_timeout`). The FAQ on two methods in one transaction and the
+`State` note were already in the chapter ("Several methods, one transaction", "The principal").
 
 ## P5-3. `HttpError` field style
 
