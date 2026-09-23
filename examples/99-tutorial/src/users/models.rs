@@ -1,6 +1,4 @@
-use lesto::prelude::*;
-
-#[derive(Deserialize, JsonSchema, Validate)]
+#[lesto::model]
 pub struct UserIn {
     #[garde(length(min = 1))]
     pub name: String,
@@ -8,7 +6,8 @@ pub struct UserIn {
     pub password: String,
 }
 
-#[derive(Clone, Serialize, JsonSchema)]
+#[lesto::model]
+#[derive(Clone)]
 pub struct UserOut {
     pub id: u64,
     pub name: String,

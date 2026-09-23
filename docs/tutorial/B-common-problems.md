@@ -2,14 +2,11 @@
 
 ## `cannot find `garde` in the crate root` / `use of unresolved module or unlinked crate `schemars``
 
-The `Validate` and `JsonSchema` derives generate code that refers to `::garde` and `::schemars`.
-Your crate must declare them as direct dependencies:
-
-```toml
-garde = { version = "0.23", features = ["derive"] }
-schemars = { version = "1", features = ["derive"] }
-serde = { version = "1", features = ["derive"] }
-```
+The plain derives (`#[derive(Validate)]`, `#[derive(JsonSchema)]`, `#[derive(Serialize)]`)
+generate code that refers to `::garde`, `::schemars` and `::serde`, which only exist when your
+crate depends on them. Use `#[lesto::model]` instead: it derives the same traits through lesto's
+re-exports. If you do want the plain derives, add the three crates to your manifest, at the
+versions lesto uses (`garde` 0.23, `schemars` 1, `serde` 1).
 
 ## `field `x` has no validation rule`
 

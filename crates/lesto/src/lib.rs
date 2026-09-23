@@ -101,6 +101,9 @@ pub use schemars;
 /// serde, re-exported for `#[lesto::model]` (`#[serde(crate = "::lesto::serde")]`).
 pub use serde;
 pub use serde_json;
+/// tracing, re-exported so an application can log (`lesto::tracing::info!`) into the spans lesto
+/// opens without a dependency of its own.
+pub use tracing;
 
 /// Everything a typical handler module needs.
 pub mod prelude {

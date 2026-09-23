@@ -5,7 +5,7 @@ use lesto::prelude::*;
 use crate::AppState;
 use crate::state::Order;
 
-#[derive(Deserialize, JsonSchema, Validate)]
+#[lesto::model]
 pub struct OrderCreate {
     #[garde(skip)]
     pub product_id: u64,

@@ -408,7 +408,7 @@ Recorded here because they are not derivable from the code. Do not undo them cas
 | `X cannot be a handler argument in this position` | body extractor must be the last argument |
 | `X is not an extractor` | payload type lacks `Deserialize`/`JsonSchema`/`Validate`, or the extractor expects a state other than the `App<S>` it is registered on (`state = AppState` pins it) |
 | `expected type, found function f` in `routes![f]` | the handler is missing `#[lesto::get(...)]` |
-| `cannot find garde/schemars in the crate root` | add them as direct dependencies of the user crate |
+| `cannot find garde/schemars in the crate root` | use `#[lesto::model]` instead of the plain derives, or add the crates as direct dependencies |
 | `type annotations needed for App<_>` | write `App::<()>::new()` / `App::<AppState>::new()` |
 | `this store is read-only: ReadOnly does not allow write` | declare `YourStore<ReadWrite, _>` or bound the impl with `M: Writable` |
 | `Public cannot hold permissions` | pass `Anyone`, or use an `Authenticated` principal in the handler |

@@ -5,7 +5,7 @@ The handler's return type decides what goes on the wire and what appears in the 
 ## JSON
 
 ```rust
-#[derive(Serialize, JsonSchema)]
+#[lesto::model]
 struct User {
     id: u64,
     name: String,
@@ -87,13 +87,13 @@ Like `response_model` in FastAPI, use two structs: one for the incoming body (no
 fields, with the password) and one for the output (with `id`, without password).
 
 ```rust
-#[derive(Deserialize, JsonSchema, Validate)]
+#[lesto::model]
 struct UserIn {
     #[garde(length(min = 1))] name: String,
     #[garde(length(min = 8))] password: String,
 }
 
-#[derive(Serialize, JsonSchema)]
+#[lesto::model]
 struct UserOut {
     id: u64,
     name: String,

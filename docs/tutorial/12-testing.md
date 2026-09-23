@@ -9,8 +9,10 @@ standard way of testing axum, and therefore lesto.
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
-serde_json = "1"
 ```
+
+`serde_json` comes through lesto (`lesto::serde_json`), and `#[lesto::test]` replaces
+`#[tokio::test]`.
 
 ## A test
 
@@ -19,7 +21,7 @@ use http_body_util::BodyExt;
 use lesto::axum::body::Body;
 use lesto::http::{header, Request, StatusCode};
 use lesto::prelude::*;
-use serde_json::{json, Value};
+use lesto::serde_json::{self, json, Value};
 use tower::ServiceExt;
 
 use crate::{build_app, AppState};

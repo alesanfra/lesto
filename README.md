@@ -62,7 +62,7 @@ The crates are not on crates.io yet: depend on them by `path` as the tutorial sh
 ```rust
 use lesto::prelude::*;
 
-#[derive(Deserialize, JsonSchema, Validate)]
+#[lesto::model]
 struct CreateUser {
     /// Display name.
     #[garde(length(min = 1, max = 64))]
@@ -71,7 +71,7 @@ struct CreateUser {
     email: String,
 }
 
-#[derive(Serialize, JsonSchema)]
+#[lesto::model]
 struct User { id: u64, name: String, email: String }
 
 /// Create a user.
@@ -101,14 +101,12 @@ async fn main() -> std::io::Result<()> {
 }
 ```
 
-Your project's `Cargo.toml` (the derives need the crates as direct dependencies, like `serde`):
+Your project's `Cargo.toml`, all of it (serde, schemars, garde, tokio and tracing come through
+lesto; add sqlx only to derive `sqlx::FromRow`):
 
 ```toml
 [dependencies]
 lesto = { path = "../lesto/crates/lesto" }   # features = ["sqlite", "lambda"] as needed
-serde = { version = "1", features = ["derive"] }
-garde = { version = "0.23", features = ["derive"] }   # email/url: lesto's default features
-schemars = { version = "1", features = ["derive"] }
 ```
 
 Examples: `LESTO_PORT=8765 cargo run -p hello` (smallest app), `-p notes` (CRUD on SQLite), `-p lambda`
@@ -267,7 +265,7 @@ or field is not a breaking change; match them with a `_` arm and build them thro
 constructors.
 
 The crates lesto re-exports are part of its public API: `axum` (and `lesto::http`), `garde`,
-`schemars`, `serde_json`, and with the `db` feature `sqlx` and `uuid` (`lesto::db::sqlx`,
+`schemars`, `serde`, `serde_json`, `tokio`, `tracing`, and with the `db` feature `sqlx` and `uuid` (`lesto::db::sqlx`,
 `lesto::db::uuid`). lesto 0.1 tracks axum 0.8; a new major (or 0.x minor) of any of them is a new
 major (0.x minor) of lesto. Use the re-exports rather than a second direct dependency and the two
 can never disagree.

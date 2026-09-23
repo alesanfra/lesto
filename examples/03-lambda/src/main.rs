@@ -14,8 +14,8 @@ use lesto::prelude::*;
 #[derive(Clone, Default)]
 struct Notes(Arc<Mutex<Vec<Note>>>);
 
-#[lesto::views(Create(text))]
-#[derive(Clone, Serialize, Deserialize, JsonSchema, Validate)]
+#[lesto::model(views(Create(text)))]
+#[derive(Clone)]
 struct Note {
     #[garde(skip)]
     id: u64,

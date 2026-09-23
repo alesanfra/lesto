@@ -65,7 +65,7 @@ async fn read_user_item(Path((user_id, item_id)): Path<(u64, u64)>) -> String {
 or a struct, more readable when there are many. Field names must match the names in the path:
 
 ```rust
-#[derive(Deserialize, JsonSchema)]
+#[lesto::model]
 struct UserItemPath {
     user_id: u64,
     item_id: u64,
@@ -85,7 +85,7 @@ document them. You will see them on almost every type that goes through the API.
 A doc comment on the field becomes the parameter's description:
 
 ```rust
-#[derive(Deserialize, JsonSchema)]
+#[lesto::model]
 struct UserItemPath {
     /// Id of the owning user.
     user_id: u64,
@@ -100,7 +100,7 @@ If a parameter may only take a few values, use an `enum`: conversion fails for o
 the documentation shows the list.
 
 ```rust
-#[derive(Deserialize, JsonSchema)]
+#[lesto::model]
 #[serde(rename_all = "lowercase")]
 enum ModelName {
     Alexnet,

@@ -2,8 +2,6 @@
 
 use std::sync::{Arc, Mutex};
 
-use lesto::prelude::*;
-
 #[derive(Clone, Default)]
 pub struct AppState {
     pub db: Arc<Mutex<Data>>,
@@ -16,7 +14,8 @@ pub struct Data {
     pub orders: Vec<Order>,
 }
 
-#[derive(Clone, Serialize, JsonSchema)]
+#[lesto::model]
+#[derive(Clone)]
 pub struct Product {
     pub id: u64,
     pub name: String,
@@ -24,7 +23,8 @@ pub struct Product {
     pub price_cents: u64,
 }
 
-#[derive(Clone, Serialize, JsonSchema)]
+#[lesto::model]
+#[derive(Clone)]
 pub struct Order {
     pub id: u64,
     pub product_id: u64,

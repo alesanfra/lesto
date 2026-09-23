@@ -8,13 +8,6 @@ description = "Compiles the code shown in docs/tutorial so the tutorial cannot d
 
 [dependencies]
 lesto = { path = "../../crates/lesto", features = ["otel"] }
-serde.workspace = true
-serde_json.workspace = true
-garde.workspace = true
-schemars.workspace = true
-tokio.workspace = true
-# Chapter 15: `lesto::otel` sets up the export from the environment.
-tracing.workspace = true
 
 [dev-dependencies]
 tower.workspace = true
