@@ -57,7 +57,7 @@ use opentelemetry_sdk::logs::SdkLoggerProvider;
 use opentelemetry_sdk::metrics::{PeriodicReader, SdkMeterProvider};
 use opentelemetry_sdk::propagation::TraceContextPropagator;
 use opentelemetry_sdk::trace::SdkTracerProvider;
-use tracing_subscriber::filter::{LevelFilter, Targets};
+use tracing_subscriber::filter::FilterFn;
 use tracing_subscriber::layer::{Layer, SubscriberExt};
 use tracing_subscriber::util::SubscriberInitExt;
 
@@ -335,18 +335,31 @@ fn install(config: Config) -> Telemetry {
 /// Without this an export failure is logged, the log is exported, the export fails again: the
 /// exporters and the HTTP client they use report through `tracing` like everything else. Their
 /// records still reach the console, where they are harmless.
-fn no_feedback() -> Targets {
-    Targets::new()
-        .with_default(LevelFilter::TRACE)
-        .with_target("opentelemetry", LevelFilter::OFF)
-        .with_target("opentelemetry_sdk", LevelFilter::OFF)
-        .with_target("opentelemetry_otlp", LevelFilter::OFF)
-        .with_target("opentelemetry-otlp", LevelFilter::OFF)
-        .with_target("hyper", LevelFilter::OFF)
-        .with_target("hyper_util", LevelFilter::OFF)
-        .with_target("reqwest", LevelFilter::OFF)
-        .with_target("h2", LevelFilter::OFF)
-        .with_target("tower", LevelFilter::OFF)
+///
+/// Matched per crate, not with `Targets`: its directives are string prefixes, so `opentelemetry`
+/// also silenced `opentelemetry_example`, and `tower` a crate called `towerctl` — every log of an
+/// application whose name happens to start like one of these.
+fn no_feedback() -> FilterFn<fn(&tracing::Metadata<'_>) -> bool> {
+    FilterFn::new(|metadata| !is_telemetry_target(metadata.target()))
+}
+
+/// The crates of the export path, as `tracing` targets (`crate` or `crate::module`).
+const TELEMETRY_CRATES: &[&str] = &[
+    "opentelemetry",
+    "opentelemetry_sdk",
+    "opentelemetry_otlp",
+    "opentelemetry-otlp",
+    "opentelemetry_http",
+    "hyper",
+    "hyper_util",
+    "reqwest",
+    "h2",
+    "tower",
+];
+
+fn is_telemetry_target(target: &str) -> bool {
+    let krate = target.split("::").next().unwrap_or(target);
+    TELEMETRY_CRATES.contains(&krate)
 }
 
 fn unwrap_provider<P>(
@@ -411,6 +424,27 @@ fn meter_provider(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn feedback_filter_matches_whole_crate_names() {
+        for silenced in [
+            "opentelemetry",
+            "opentelemetry_sdk::metrics",
+            "hyper_util::client",
+            "tower",
+        ] {
+            assert!(is_telemetry_target(silenced), "{silenced}");
+        }
+        for kept in [
+            "opentelemetry_example",
+            "towerctl::jobs",
+            "h2o_api",
+            "lesto::db::error",
+            "app",
+        ] {
+            assert!(!is_telemetry_target(kept), "{kept}");
+        }
+    }
 
     fn config(vars: &[(&str, &str)]) -> Config {
         Config::read("fallback", |name| {
