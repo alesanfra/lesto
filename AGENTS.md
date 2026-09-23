@@ -28,7 +28,8 @@ crates/lesto/             library
   src/docs.rs             Scalar / Swagger UI HTML (relative openapi.json link)
   src/layers.rs           the tower layers into_router installs, public: ProblemLayer (renders
                           RFC 9457 through a task-local request context), CatchPanicLayer,
-                          RequestSpanLayer. Hand-written services, pin-projected futures
+                          RequestSpanLayer, TimeoutLayer (opt-in, `App::timeout`). Hand-written
+                          services, pin-projected futures
   src/trace.rs            request span (HTTP semconv), Trace config, feature `otel`: propagation
   src/otel.rs             feature `otel`: Config from the OTEL_* variables, init/init_named,
                           Telemetry guard (tracer + logger providers), auto_init called by
@@ -230,6 +231,12 @@ Recorded here because they are not derivable from the code. Do not undo them cas
   lesto installs no propagator: the API's default is a no-op and W3C, B3 and the rest live in
   different crates, so choosing one for the user would be wrong. `Trace` has no level knob —
   a `tracing` level must be a constant, and filtering is the subscriber's job.
+- **Timeout and body limit are opt-in `Router::layer` calls of their own**, made before the
+  shared stack: an application that does not set them pays nothing per request, and one that
+  does pays one re-boxing. The timeout is hand-written like the other layers (no tower-http:
+  its `TimeoutLayer` answers an empty body, and a problem is the whole point) and answers `503`
+  — `408` means the *client* was slow, `504` means an upstream gateway was. The body limit is
+  axum's own `DefaultBodyLimit`; lesto's `Json` turns its rejection into a `413` problem.
 - **The trace layer is outermost but inside routing.** `Router::layer` runs after axum
   matched the request, which is what makes `MatchedPath` (`http.route`) available; being the
   outermost of the stack it still wraps the panic catcher and the problem rendering, so the span

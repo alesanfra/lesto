@@ -40,6 +40,10 @@ pub struct App<S = ()> {
     custom_fallback: bool,
     /// How long in-flight requests may run after the shutdown signal.
     shutdown_timeout: Option<Duration>,
+    /// Per-request time limit ([`App::timeout`]).
+    timeout: Option<Duration>,
+    /// Request body limit ([`App::body_limit`]); `None` keeps axum's 2 MB default.
+    body_limit: Option<axum::extract::DefaultBodyLimit>,
 }
 
 /// Default of [`App::shutdown_timeout`]: Kubernetes' own termination grace period.
@@ -90,6 +94,8 @@ where
             trace: Trace::default(),
             custom_fallback: false,
             shutdown_timeout: Some(DEFAULT_SHUTDOWN_TIMEOUT),
+            timeout: None,
+            body_limit: None,
         }
     }
 
@@ -214,6 +220,28 @@ where
         self
     }
 
+    /// Answer `503 Service Unavailable` (a problem) to any request that runs longer than
+    /// `limit`, and drop its handler. Off by default.
+    ///
+    /// Covers the whole request below routing, body extraction included, so a client that
+    /// trickles its body in is cut off too. Costs nothing when not set; see
+    /// [`layers::TimeoutLayer`](crate::layers::TimeoutLayer) to use it on a plain router.
+    pub fn timeout(mut self, limit: Duration) -> Self {
+        self.timeout = Some(limit);
+        self
+    }
+
+    /// Largest request body the extractors accept, in bytes; `None` for no limit. Without a
+    /// call, axum's default applies: **2 MB**. A larger body answers `413 Payload Too Large`
+    /// as a problem.
+    pub fn body_limit(mut self, bytes: impl Into<Option<usize>>) -> Self {
+        self.body_limit = Some(match bytes.into() {
+            Some(bytes) => axum::extract::DefaultBodyLimit::max(bytes),
+            None => axum::extract::DefaultBodyLimit::disable(),
+        });
+        self
+    }
+
     // ---- routes -----------------------------------------------------------------------
 
     /// Register a set of routes, typically built with [`routes!`](crate::routes).
@@ -322,6 +350,8 @@ where
             trace: self.trace,
             custom_fallback: self.custom_fallback,
             shutdown_timeout: self.shutdown_timeout,
+            timeout: self.timeout,
+            body_limit: self.body_limit,
         }
     }
 
@@ -399,6 +429,16 @@ where
         router = router.method_not_allowed_fallback(|| async {
             HttpError::new(StatusCode::METHOD_NOT_ALLOWED, "Method Not Allowed")
         });
+
+        // Opt-in layers get a `Router::layer` call of their own, so an application that does not
+        // ask for them pays nothing. Added first, they sit inside the stack below: a timeout
+        // answer still goes through the problem layer.
+        if let Some(limit) = self.timeout {
+            router = router.layer(crate::layers::TimeoutLayer::new(limit));
+        }
+        if let Some(body_limit) = self.body_limit {
+            router = router.layer(body_limit);
+        }
 
         // One `Router::layer` call, not three: axum re-boxes every route (and its future) on
         // each one, so the layers are stacked first and added together.

@@ -205,13 +205,22 @@ counting would add work to every request. Two tests: a hung handler with a 200 m
 is axum's implicit 2 MB, undocumented.
 
 **Tasks**
-- [ ] Add `tower-http` (already in `Cargo.lock` transitively) with the `timeout` and `limit`
+- [x] Add `tower-http` (already in `Cargo.lock` transitively) with the `timeout` and `limit`
       features. Update `AGENTS.md`, which currently avoids tower-http.
-- [ ] `App::timeout(..)`: answers a `504` (or `503`) **problem**, not an empty body, through
+- [x] `App::timeout(..)`: answers a `504` (or `503`) **problem**, not an empty body, through
       `HttpError`.
-- [ ] `App::body_limit(..)` sets `DefaultBodyLimit`; the 2 MB default is documented, and a
+- [x] `App::body_limit(..)` sets `DefaultBodyLimit`; the 2 MB default is documented, and a
       `413` is a problem.
-- [ ] Tutorial chapter 11 and `README.md`. `cargo bench -p lesto`: no cost when unused.
+- [x] Tutorial chapter 11 and `README.md`. `cargo bench -p lesto`: no cost when unused.
+
+**Done (2026-09-23), with one change of plan:** no tower-http. Its `TimeoutLayer` answers an
+empty body, and wrapping it to produce a problem is more code than the layer itself, so
+`lesto::layers::TimeoutLayer` is hand-written like the others (pin-projected, no boxing) and
+answers **503**. `App::body_limit(impl Into<Option<usize>>)` installs axum's `DefaultBodyLimit`
+(no new dependency either); the `413` was already a problem through `lesto::Json`. Both are a
+`Router::layer` call only when set, so the request path of an application that sets neither is
+unchanged (no bench needed: `into_router` differs by two `if`s at build time). tower-http comes
+in with P3-2 for CORS and compression.
 
 ---
 
@@ -298,9 +307,10 @@ absolute paths, which is why `serde`, `schemars` and `garde` must be direct depe
 
 ## P3-2. The rest of the tower-http batteries
 
-**Depends on:** P1-2 (tower-http is already in).
+**Depends on:** nothing; P1-2 did not add tower-http after all, this task does.
 
 **Tasks**
+- [ ] Add `tower-http` with the features used; update `AGENTS.md`, which currently avoids it.
 - [ ] `App::cors(..)`, `App::compression()`, `App::request_id()`. Each installs the tower-http
       layer and stays usable directly through `App::layer` or on a plain `axum::Router`.
 - [ ] Tutorial chapter 11 documents the new builder methods; `README.md` "What the framework

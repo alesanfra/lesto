@@ -25,6 +25,7 @@ use std::convert::Infallible;
 use std::marker::PhantomData;
 use std::pin::Pin;
 use std::task::{Context, Poll};
+use std::time::Duration;
 
 use axum::body::Body;
 use axum::response::{IntoResponse, Response};
@@ -263,6 +264,101 @@ fn panic_response(payload: Box<dyn Any + Send>) -> Response {
         .unwrap_or_else(|| "non-string panic payload".to_string());
     tracing::error!(panic = %message, "handler panicked");
     HttpError::internal("Internal Server Error").into_response()
+}
+
+// ---- timeout ------------------------------------------------------------------------------
+
+/// Answers `503 Service Unavailable` as a problem when the inner service takes longer than
+/// `limit`; the handler's future is dropped at that point, which cancels it.
+///
+/// [`App::timeout`](crate::App::timeout) installs it. On a plain router, put it below
+/// [`ProblemLayer`] so the problem gets its `instance`.
+#[derive(Debug, Clone, Copy)]
+pub struct TimeoutLayer {
+    limit: Duration,
+}
+
+impl TimeoutLayer {
+    /// Requests running longer than `limit` answer `503`.
+    pub fn new(limit: Duration) -> Self {
+        Self { limit }
+    }
+}
+
+impl<S> Layer<S> for TimeoutLayer {
+    type Service = Timeout<S>;
+
+    fn layer(&self, inner: S) -> Self::Service {
+        Timeout {
+            inner,
+            limit: self.limit,
+        }
+    }
+}
+
+/// The service [`TimeoutLayer`] produces.
+#[derive(Debug, Clone, Copy)]
+pub struct Timeout<S> {
+    inner: S,
+    limit: Duration,
+}
+
+impl<S, B> Service<Request<B>> for Timeout<S>
+where
+    S: Service<Request<B>, Response = Response>,
+{
+    type Response = Response;
+    type Error = S::Error;
+    type Future = TimeoutFuture<S::Future>;
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx)
+    }
+
+    fn call(&mut self, req: Request<B>) -> Self::Future {
+        TimeoutFuture {
+            future: self.inner.call(req),
+            sleep: tokio::time::sleep(self.limit),
+            limit: self.limit,
+        }
+    }
+}
+
+pin_project! {
+    /// The future of [`Timeout`].
+    pub struct TimeoutFuture<F> {
+        #[pin]
+        future: F,
+        #[pin]
+        sleep: tokio::time::Sleep,
+        limit: Duration,
+    }
+}
+
+impl<F, E> Future for TimeoutFuture<F>
+where
+    F: Future<Output = Result<Response, E>>,
+{
+    type Output = Result<Response, E>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.project();
+        if let Poll::Ready(result) = this.future.poll(cx) {
+            return Poll::Ready(result);
+        }
+        match this.sleep.poll(cx) {
+            Poll::Ready(()) => {
+                let limit_ms = this.limit.as_millis() as u64;
+                tracing::warn!(limit_ms, "request timed out, answering 503");
+                Poll::Ready(Ok(HttpError::new(
+                    http::StatusCode::SERVICE_UNAVAILABLE,
+                    format!("The request took longer than {limit_ms} ms"),
+                )
+                .into_response()))
+            }
+            Poll::Pending => Poll::Pending,
+        }
+    }
 }
 
 // ---- request span -------------------------------------------------------------------------

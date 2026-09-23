@@ -6,7 +6,7 @@ particular the middleware of the **tower** ecosystem, works here too.
 ## Adding a layer
 
 ```toml
-tower-http = { version = "0.6", features = ["cors", "trace", "timeout", "compression-gzip"] }
+tower-http = { version = "0.6", features = ["cors", "trace", "compression-gzip"] }
 tracing-subscriber = "0.3"
 ```
 
@@ -14,7 +14,6 @@ tracing-subscriber = "0.3"
 use std::time::Duration;
 use lesto::prelude::*;
 use tower_http::cors::CorsLayer;
-use tower_http::timeout::TimeoutLayer;
 use tower_http::trace::TraceLayer;
 
 #[tokio::main]
@@ -24,7 +23,7 @@ async fn main() -> std::io::Result<()> {
     App::new()
         .routes(routes![root])
         .layer(TraceLayer::new_for_http())               // log every request
-        .layer(TimeoutLayer::new(Duration::from_secs(10)))
+        .timeout(Duration::from_secs(10))                // built in: a 503 problem
         .layer(CorsLayer::permissive())                  // in production: explicit allow_origin
         .serve()
         .await
@@ -33,6 +32,21 @@ async fn main() -> std::io::Result<()> {
 
 `layer` applies to the routes registered **before** the call, as in axum. Put it after your
 `routes` / `nest` calls.
+
+## Timeouts and body size
+
+Two limits every service needs are built in, so their errors are problems like the rest:
+
+- `.timeout(Duration::from_secs(10))`: a request still running after ten seconds answers
+  `503 Service Unavailable` (problem+json, with `instance`), and its handler is dropped. Off by
+  default. The clock includes reading the body, so a client that trickles bytes in is cut off
+  as well. `lesto::layers::TimeoutLayer` is the same thing for a plain axum router.
+- `.body_limit(64 * 1024)`: a larger body answers `413 Payload Too Large`. Without the call the
+  limit is axum's, **2 MB**; `.body_limit(None)` removes it (for uploads behind a proxy that
+  limits them already).
+
+Neither costs anything when it is not set. Unlike `layer`, their position in the builder chain
+does not matter.
 
 ## Middleware written by you
 
