@@ -81,7 +81,8 @@ examples/04-opentelemetry/ package `opentelemetry-example` (not `opentelemetry`:
                           (requests + a trace and a log search). Not run in CI: needs Docker
 examples/05-routers/      package `routers`: chapter 10 as a running app, two APIs (`/api/app/v1`,
                           `/api/analytics/v1`) as FastAPI-style routers mounted with `nest`, tests/api.rs
-examples/99-tutorial/     package `tutorial`: every tutorial snippet, compiled and tested (keep in sync)
+examples/99-tutorial/     package `tutorial`: every tutorial snippet, compiled and tested (keep in sync;
+                          appendix D's plain axum router too)
 docs/tutorial/            the tutorial, mdBook (docs/book.toml, docs/build.sh → docs/book, gitignored)
 ```
 

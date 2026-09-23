@@ -46,6 +46,8 @@ A Rust web micro-framework with **FastAPI**'s ergonomics, built on [axum](https:
   `App::request_id` are one call each; credentials
   are redacted from `Debug` output, internal errors never leak their cause to the client.
 - axum stays underneath: `State`, `Extension`, tower layers and `into_router()` work as always.
+  Nobody is locked in: [appendix D](docs/tutorial/D-leaving-lesto.md) shows the way out, step by
+  step, and `App::merge` the way in from an existing axum router.
 
 **Getting started**: install the CLI (`cargo install lesto-cli`, or `cargo install --path
 crates/lesto-cli` from a checkout until it is published), then `lesto dev` in your project. It

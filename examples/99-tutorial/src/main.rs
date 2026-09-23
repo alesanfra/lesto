@@ -450,6 +450,32 @@ pub fn traced_app(state: AppState) -> App<()> {
     build_app(state).trace(Trace::new().query(true).forwarded(true))
 }
 
+// ---- Appendix D: leaving lesto ---------------------------------------------------------------
+
+/// A plain axum handler: no route attribute, still lesto's validating `Json` and `HttpError`.
+async fn plain_create_item(Json(item): Json<Item>) -> Result<Json<ItemOut>, HttpError> {
+    if item.name == "forbidden" {
+        return Err(HttpError::forbidden("that name is taken"));
+    }
+    Ok(Json(ItemOut {
+        name: item.name,
+        price_with_tax: item.price + item.tax.unwrap_or(0.0),
+    }))
+}
+
+/// A router with no `App` at all, keeping lesto's behavior through its public layers.
+pub fn plain_router() -> lesto::axum::Router {
+    use lesto::layers::{CatchPanicLayer, ProblemLayer, RequestSpanLayer, TimeoutLayer};
+    use std::time::Duration;
+
+    lesto::axum::Router::new()
+        .route("/items", lesto::axum::routing::post(plain_create_item))
+        .layer(TimeoutLayer::new(Duration::from_secs(10)))
+        .layer(CatchPanicLayer)
+        .layer(ProblemLayer)
+        .layer(RequestSpanLayer::new())
+}
+
 #[lesto::main]
 async fn main() -> std::io::Result<()> {
     // No telemetry code: with the `otel` feature, `serve` reads the `OTEL_*` variables and
@@ -707,6 +733,34 @@ mod tests {
             spec["components"]["schemas"]["NoteCreate"]["properties"]["text"]["minLength"],
             1
         );
+    }
+
+    /// Appendix D: a plain axum router keeps validation and problems.
+    #[lesto::test]
+    async fn a_plain_router_keeps_validation_and_problems() {
+        let send = |body: Value| {
+            plain_router().oneshot(
+                Request::post("/items")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(body.to_string()))
+                    .unwrap(),
+            )
+        };
+        let response = send(json!({"name": "Keyboard", "price": 45.0}))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let response = send(json!({"name": "", "price": 45.0})).await.unwrap();
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        let body: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(body["instance"], "/items");
+
+        let response = send(json!({"name": "forbidden", "price": 1.0}))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
     }
 
     #[lesto::test]

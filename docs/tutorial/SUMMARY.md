@@ -25,3 +25,4 @@
 - [From FastAPI to lesto](A-from-fastapi-to-lesto.md)
 - [Common problems](B-common-problems.md)
 - [Why axum and not actix-web](C-why-axum.md)
+- [Leaving lesto](D-leaving-lesto.md)
