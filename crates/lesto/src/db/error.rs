@@ -15,9 +15,12 @@ type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 /// | Variant | Response |
 /// |---|---|
 /// | `Forbidden` | 403, extension `required_permission` |
-/// | `Sqlx(RowNotFound)` | 404 |
 /// | `Sqlx(Database)` unique / foreign key violation | 409 |
-/// | other `Sqlx`, `Internal` | 500, cause logged with `tracing`, detail hidden |
+/// | other `Sqlx` (including `RowNotFound`), `Internal` | 500, cause logged with `tracing`, detail hidden |
+///
+/// A `RowNotFound` is a 500 on purpose: a `fetch_one` that finds nothing on a secondary lookup is
+/// a bug, and a 404 would hide it. Say which lookups mean "not found" with
+/// [`NotFoundExt::or_not_found`].
 /// | `Http(e)` | `e`'s own response |
 #[non_exhaustive]
 pub enum Error {
@@ -50,7 +53,7 @@ impl Error {
         Error::Http(HttpError::bad_request(detail))
     }
 
-    /// 404 with `detail` (a `RowNotFound` from sqlx already answers 404 on its own).
+    /// 404 with `detail`. See also [`NotFoundExt::or_not_found`].
     pub fn not_found(detail: impl Into<String>) -> Self {
         Error::Http(HttpError::not_found(detail))
     }
@@ -78,7 +81,6 @@ impl Error {
     pub fn status(&self) -> StatusCode {
         match self {
             Error::Forbidden { .. } => StatusCode::FORBIDDEN,
-            Error::Sqlx(sqlx::Error::RowNotFound) => StatusCode::NOT_FOUND,
             Error::Sqlx(sqlx::Error::Database(db)) if is_transient_conflict(&**db) => {
                 StatusCode::CONFLICT
             }
@@ -87,7 +89,7 @@ impl Error {
                 _ => StatusCode::INTERNAL_SERVER_ERROR,
             },
             Error::Sqlx(_) | Error::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            Error::Http(e) => e.status,
+            Error::Http(e) => e.status(),
         }
     }
 
@@ -98,7 +100,6 @@ impl Error {
                 HttpError::forbidden(format!("Missing permission `{permission}`"))
                     .with_extension("required_permission", permission)
             }
-            Error::Sqlx(sqlx::Error::RowNotFound) => HttpError::not_found("Not found"),
             Error::Sqlx(sqlx::Error::Database(db)) if is_transient_conflict(&*db) => {
                 // Not logged as an error: under `Isolation::Serializable` this is the database
                 // doing its job, and the answer tells the client what to do about it.
@@ -175,7 +176,7 @@ impl fmt::Display for Error {
         match self {
             Error::Forbidden { permission } => write!(f, "missing permission `{permission}`"),
             Error::Sqlx(e) => write!(f, "database error: {e}"),
-            Error::Http(e) => write!(f, "{} {}", e.status, e.detail),
+            Error::Http(e) => write!(f, "{} {}", e.status(), e.detail()),
             Error::Internal(e) => write!(f, "internal error: {e}"),
         }
     }
@@ -240,5 +241,39 @@ pub trait ResultExt<T> {
 impl<T, E: std::error::Error + Send + Sync + 'static> ResultExt<T> for Result<T, E> {
     fn internal(self) -> Result<T, Error> {
         self.map_err(Error::internal)
+    }
+}
+
+/// `.or_not_found("no such note")`: the lookups where "no row" means `404`.
+///
+/// lesto does not turn a bare `sqlx::Error::RowNotFound` into a 404 (see [`Error`]). Call this on
+/// the one query whose absence is the answer:
+///
+/// ```ignore
+/// sqlx::query_as("SELECT id, text FROM notes WHERE id = ?")
+///     .bind(id)
+///     .fetch_one(conn)
+///     .await
+///     .or_not_found("no such note")
+/// ```
+///
+/// On an `Option` (`fetch_optional`), `None` becomes the 404.
+pub trait NotFoundExt<T> {
+    /// `404` with `detail` when there is no row; any other error is kept.
+    fn or_not_found(self, detail: impl Into<String>) -> Result<T, Error>;
+}
+
+impl<T> NotFoundExt<T> for Result<T, sqlx::Error> {
+    fn or_not_found(self, detail: impl Into<String>) -> Result<T, Error> {
+        self.map_err(|e| match e {
+            sqlx::Error::RowNotFound => Error::not_found(detail),
+            e => Error::Sqlx(e),
+        })
+    }
+}
+
+impl<T> NotFoundExt<T> for Option<T> {
+    fn or_not_found(self, detail: impl Into<String>) -> Result<T, Error> {
+        self.ok_or_else(|| Error::not_found(detail))
     }
 }

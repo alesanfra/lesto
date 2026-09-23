@@ -181,10 +181,8 @@ pub(crate) fn render(mut problem: Problem) -> Response {
 /// [`with_extension`](Self::with_extension) to add extension members.
 #[derive(Debug, Clone, PartialEq)]
 pub struct HttpError {
-    /// Status code of the response.
-    pub status: StatusCode,
-    /// The `detail` member: what went wrong in this occurrence.
-    pub detail: String,
+    status: StatusCode,
+    detail: String,
     /// Rarely used members, boxed to keep `Result<T, HttpError>` small.
     extras: Option<Box<HttpErrorExtras>>,
 }
@@ -271,6 +269,16 @@ impl HttpError {
             self.extras().extensions.insert(key.into(), value);
         }
         self
+    }
+
+    /// Status code of the response.
+    pub fn status(&self) -> StatusCode {
+        self.status
+    }
+
+    /// The `detail` member: what went wrong in this occurrence.
+    pub fn detail(&self) -> &str {
+        &self.detail
     }
 
     /// The `type` member, if set.
@@ -644,7 +652,7 @@ mod tests {
         tracing::subscriber::with_default(errors.clone(), || {
             for code in [0u16, 99, 600, 999, 1000, u16::MAX] {
                 let error = HttpError::new(code, "upstream said so");
-                assert_eq!(error.status, StatusCode::INTERNAL_SERVER_ERROR, "{code}");
+                assert_eq!(error.status(), StatusCode::INTERNAL_SERVER_ERROR, "{code}");
                 let response = error.into_response();
                 assert_eq!(
                     response.status(),

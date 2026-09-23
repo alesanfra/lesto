@@ -133,7 +133,7 @@ fn error_type(error: &Error) -> Cow<'_, str> {
             database_code(error).unwrap_or(Cow::Borrowed("DatabaseError"))
         }
         Error::Sqlx(_) => Cow::Borrowed("Sqlx"),
-        Error::Http(e) => Cow::Owned(e.status.as_u16().to_string()),
+        Error::Http(e) => Cow::Owned(e.status().as_u16().to_string()),
         Error::Internal(_) => Cow::Borrowed("Internal"),
     }
 }

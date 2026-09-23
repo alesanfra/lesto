@@ -52,7 +52,7 @@ pub mod store;
 pub mod trace;
 
 pub use dialect::Dialect;
-pub use error::{Error, ResultExt};
+pub use error::{Error, NotFoundExt, ResultExt};
 pub use handle::Db;
 pub use isolation::Isolation;
 pub use mode::{Mode, ReadOnly, ReadWrite, Writable};
@@ -97,7 +97,7 @@ pub use uuid;
 /// Everything a store module needs.
 pub mod prelude {
     pub use crate::db::{
-        Anyone, Authenticated, Db, Error, Isolation, Mode, Principal, Public, ReadOnly, ReadWrite,
-        ResultExt, Store, TransactionSettings, Writable,
+        Anyone, Authenticated, Db, Error, Isolation, Mode, NotFoundExt, Principal, Public,
+        ReadOnly, ReadWrite, ResultExt, Store, TransactionSettings, Writable,
     };
 }

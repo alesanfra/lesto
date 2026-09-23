@@ -155,13 +155,22 @@ policies (P5-4's first two items), `CHANGELOG.md` added.
 change signatures; decide them now, implement the ones that break.
 
 **Tasks**
-- [ ] `sqlx::Error::RowNotFound` → implicit `404` or explicit `.or_not_found()` (question 8).
+- [x] `sqlx::Error::RowNotFound` → implicit `404` or explicit `.or_not_found()` (question 8).
       Recommended: explicit. Implementation lives in P5-2 but lands before publishing.
-- [ ] `HttpError` field style (P5-3): pick accessors or public fields + builder, apply it.
-- [ ] `status = N` vs `Created<T>` (question 5, P5-1). Recommended: add the types, keep the
+- [x] `HttpError` field style (P5-3): pick accessors or public fields + builder, apply it.
+- [x] `status = N` vs `Created<T>` (question 5, P5-1). Recommended: add the types, keep the
       attribute as a shortcut — not breaking, so only the decision is needed here.
-- [ ] Undocumented extractors (question 6, P3-4). Recommended: silent by default,
+- [x] Undocumented extractors (question 6, P3-4). Recommended: silent by default,
       `strict_docs()` for errors — not breaking, decision only.
+
+**Done (2026-09-23), decisions by the maintainer:** all recommendations accepted.
+`RowNotFound` is a 500 now; `lesto::db::NotFoundExt::or_not_found(detail)` (in the prelude) on
+`Result<T, sqlx::Error>` and `Option<T>` marks the lookups that mean 404. `HttpError` uses
+accessors everywhere: `status()` and `detail()` next to `type_uri()`, `title()`, `headers()`,
+`extensions()`; the fields are private. `status = N` stays, `Created<T>` & co. come in P5-1;
+undocumented extractors will be silent with `strict_docs()` (P3-4). Also decided at the same
+time: garde's derive is **vendored** (P2-2), OpenTelemetry **metrics are implemented** (P4-1),
+the shutdown deadline defaults to **30 s** (P1-1).
 
 ---
 
@@ -369,7 +378,7 @@ never answer `200` on purpose, and the status does not come from the type (revie
 ## P5-2. `lesto::db` ergonomics and documentation
 
 **Tasks**
-- [ ] `RowNotFound`: implement the P0-5 decision (**before** P5-5).
+- [x] `RowNotFound`: implement the P0-5 decision (**before** P5-5). Done in P0-5.
 - [ ] Tutorial: implementing `Requirement<P>` for a user-defined enum, so permissions are not
       only strings.
 - [ ] Tutorial FAQ: "how do I call two store methods atomically?" → the `..._in(conn, ..)`
@@ -381,8 +390,8 @@ never answer `200` on purpose, and the status does not come from the type (revie
 
 ## P5-3. `HttpError` field style
 
-- [ ] Implement the P0-5 decision (**before** P5-5): public `status`/`detail` next to private
-      boxed extras is two styles in one type.
+- [x] Implement the P0-5 decision (**before** P5-5): public `status`/`detail` next to private
+      boxed extras is two styles in one type. Done in P0-5: accessors everywhere.
 
 ## P5-4. README positioning and policies
 
@@ -406,22 +415,22 @@ never answer `200` on purpose, and the status does not come from the type (revie
 
 ---
 
-# Open questions that still need the maintainer
+# Open questions
 
-From review §9; the others were answered by workstream B or by the maintainer.
+All answered by the maintainer on 2026-09-23.
 
-1. **garde crate path**: upstream PR, documented extra dependency, or vendored derive? (P2-2)
-2. **sqlx derive path** and whether to re-export sqlx as `lesto::db::sqlx`. (P2-3)
-3. **`#[lesto::model]` and `#[lesto::views]`**: recommended one attribute with `views(..)`. (P2-2)
-4. **`otel` in default features**: recommended off, pending build-time numbers. (P4-2)
-5. **Status**: recommended `Created<T>` alongside `status = N`. (P0-5, P5-1)
-6. **Undocumented extractors**: recommended silent, error behind `strict_docs()`. (P0-5, P3-4)
-7. **`db` reads without a transaction**: measured in plan B (B10); the recommendation there is to
-   keep the transaction and add an explicit opt-in if the number ever matters.
-8. **Implicit `RowNotFound` → 404**: recommended explicit `.or_not_found()`. (P0-5, P5-2)
-9. **Name of the span layer**: answered — `RequestSpanLayer`.
-10. **JSON key order**: answered 2026-09-23 — always declaration order, `preserve_order` kept.
-    (P0-1)
+1. **garde crate path**: vendor a patched derive. (P2-2)
+2. **sqlx derive path**: investigate in P2-3; sqlx is already re-exported as `lesto::db::sqlx`.
+3. **`#[lesto::model]` and `#[lesto::views]`**: one attribute with `views(..)`. (P2-2)
+4. **`otel` in default features**: off, numbers recorded in P4-2.
+5. **Status**: `Created<T>` alongside `status = N`. (P5-1)
+6. **Undocumented extractors**: silent, error behind `strict_docs()`. (P3-4)
+7. **`db` reads without a transaction**: keep the transaction (plan B, B10).
+8. **Implicit `RowNotFound` → 404**: removed, explicit `.or_not_found()`. (P0-5)
+9. **Name of the span layer**: `RequestSpanLayer`.
+10. **JSON key order**: always declaration order, `preserve_order` kept. (P0-1)
+11. **Metrics**: implemented. (P4-1)
+12. **Shutdown deadline**: 30 s by default. (P1-1)
 
 # Deliberately not on this list
 

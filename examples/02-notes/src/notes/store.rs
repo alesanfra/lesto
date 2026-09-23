@@ -25,8 +25,9 @@ impl<M: Mode, P> NoteStore<M, P> {
         self.read(Anyone, async |conn| {
             sqlx::query_as("SELECT id, author, text FROM notes WHERE id = ?")
                 .bind(id)
-                .fetch_one(conn) // RowNotFound → 404
+                .fetch_one(conn)
                 .await
+                .or_not_found("no such note")
         })
         .await
     }
@@ -55,7 +56,8 @@ impl<M: Writable> NoteStore<M, User> {
             let mut note: Note = sqlx::query_as("SELECT id, author, text FROM notes WHERE id = ?")
                 .bind(id)
                 .fetch_one(&mut *conn)
-                .await?;
+                .await
+                .or_not_found("no such note")?;
             if note.author != me {
                 return Err(Error::http(lesto::HttpError::forbidden(
                     "Only the author can edit a note",

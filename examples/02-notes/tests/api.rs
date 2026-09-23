@@ -91,6 +91,16 @@ async fn full_crud() {
     let (status, body) = call(&r, Method::GET, &format!("/notes/{id}"), None, None).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
     assert_eq!(body["title"], "Not Found");
+
+    let (status, body) = call(
+        &r,
+        Method::PATCH,
+        &format!("/notes/{id}"),
+        Some("bob-token"),
+        Some(json!({"text": "too late"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
 }
 
 #[tokio::test]
