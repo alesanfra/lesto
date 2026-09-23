@@ -213,9 +213,11 @@ Recorded here because they are not derivable from the code. Do not undo them cas
 - **Logs go out with the traces.** `opentelemetry-appender-tracing` turns every `tracing` event
   into an OTLP log record with the `trace_id`/`span_id` of the span it happened in, which is what
   makes a backend line up the logs of a request with its trace; the console layer keeps printing
-  them. The bridge layer carries a `Targets` filter turning `opentelemetry*`, `reqwest`, `hyper`,
+  them. The bridge layer carries a filter turning the OpenTelemetry crates, `reqwest`, `hyper`,
   `h2` and `tower` off (`no_feedback`): those crates report through `tracing`, so without it an
-  export failure is logged, exported, and fails again. Signals are switched off one at a time
+  export failure is logged, exported, and fails again. It compares whole crate names (the first
+  `::` segment of the target), not `Targets` prefixes: `Targets` turned `opentelemetry` into
+  "anything starting with opentelemetry" and dropped every log of `opentelemetry_example`. Signals are switched off one at a time
   with the spec's own `OTEL_TRACES_EXPORTER=none` / `OTEL_LOGS_EXPORTER=none` /
   `OTEL_METRICS_EXPORTER=none`.
 - **One metric, recorded by the request span layer** (decided 2026-09-23): `http.server.request.duration`,
