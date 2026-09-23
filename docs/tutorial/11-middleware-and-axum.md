@@ -120,8 +120,16 @@ re-box every route.
 
 `App::serve` (and `serve_at`, `serve_on`) already stops gracefully on `SIGTERM` or `Ctrl-C`:
 the listener closes, in-flight requests finish, then the future returns. Kubernetes, systemd and
-`lesto dev` all send `SIGTERM` first, so no extra code is needed. To stop on something else, use
-`serve_until` with your own future:
+`lesto dev` all send `SIGTERM` first, so no extra code is needed.
+
+Waiting has a limit: 30 seconds by default. A handler still running then (a stuck upstream call,
+a request that never ends) no longer keeps the process alive until the orchestrator sends
+`SIGKILL`; the serve future returns, a `warn` log says so, and `main` exits. Change the limit
+with `.shutdown_timeout(Duration::from_secs(10))`, keeping it below your platform's grace period
+(Kubernetes' `terminationGracePeriodSeconds` is 30 s), or wait forever with
+`.shutdown_timeout(None)`.
+
+To stop on something else, use `serve_until` with your own future:
 
 ```rust
 let listener = lesto::listener(("0.0.0.0", 8000)).await?;
