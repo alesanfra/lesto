@@ -1401,3 +1401,79 @@ async fn openapi_bytes_keep_declaration_order() {
     let properties = &schema[schema.find("\"properties\":").unwrap() + 13..];
     assert_eq!(raw_keys(properties.as_bytes()), ["zeta", "alpha", "mid"]);
 }
+
+// ---- timeout and body limit -------------------------------------------------------------------
+
+#[lesto::get("/sleepy")]
+async fn sleepy() -> &'static str {
+    tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+    "late"
+}
+
+#[lesto::get("/quick")]
+async fn quick() -> &'static str {
+    "quick"
+}
+
+#[tokio::test]
+async fn timeout_answers_a_503_problem() {
+    let app = || {
+        App::new()
+            .routes(routes![sleepy, quick])
+            .timeout(std::time::Duration::from_millis(50))
+    };
+    let (status, content_type, body) = send_full(app(), get("/sleepy")).await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(content_type, "application/problem+json");
+    assert_eq!(body["instance"], "/sleepy");
+    assert_eq!(body["detail"], "The request took longer than 50 ms");
+
+    let (status, body) = send(app(), get("/quick")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body, "quick");
+}
+
+#[lesto::post("/echo")]
+async fn echo(Json(body): Json<Echo>) -> Json<Echo> {
+    Json(body)
+}
+
+#[derive(Serialize, Deserialize, JsonSchema, Validate)]
+struct Echo {
+    #[garde(skip)]
+    text: String,
+}
+
+fn post_json(uri: &str, body: String) -> Request<Body> {
+    Request::builder()
+        .method("POST")
+        .uri(uri)
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(body))
+        .unwrap()
+}
+
+#[tokio::test]
+async fn body_limit_answers_a_413_problem() {
+    let app = || App::new().routes(routes![echo]).body_limit(64);
+    let small = json!({"text": "hi"}).to_string();
+    let (status, _) = send(app(), post_json("/echo", small)).await;
+    assert_eq!(status, StatusCode::OK);
+
+    let large = json!({"text": "x".repeat(100)}).to_string();
+    let (status, content_type, body) = send_full(app(), post_json("/echo", large)).await;
+    assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE);
+    assert_eq!(content_type, "application/problem+json");
+    assert_eq!(body["instance"], "/echo");
+}
+
+#[tokio::test]
+async fn the_default_body_limit_is_axums_2_mb() {
+    let app = || App::new().routes(routes![echo]);
+    let over = json!({"text": "x".repeat(2 * 1024 * 1024)}).to_string();
+    let (status, _) = send(app(), post_json("/echo", over.clone())).await;
+    assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE);
+    let unlimited = App::new().routes(routes![echo]).body_limit(None);
+    let (status, _) = send(unlimited, post_json("/echo", over)).await;
+    assert_eq!(status, StatusCode::OK);
+}

@@ -41,7 +41,8 @@ A Rust web micro-framework with **FastAPI**'s ergonomics, built on [axum](https:
   subscriber. `App::trace(Trace::new()...)` opts `url.query` in, trusts forwarding headers, or
   turns the span off.
 - **Production defaults**: `App::serve` shuts down gracefully on `SIGTERM`/`Ctrl-C` (in-flight
-  requests get 30 s, `App::shutdown_timeout`), credentials
+  requests get 30 s, `App::shutdown_timeout`); `App::timeout` and `App::body_limit` (2 MB unless
+  changed) answer `503` and `413` problems; credentials
   are redacted from `Debug` output, internal errors never leak their cause to the client.
 - axum stays underneath: `State`, `Extension`, tower layers and `into_router()` work as always.
 
