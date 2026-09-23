@@ -101,11 +101,14 @@ panics; the catch-panic layer turns it into an opaque `500`. `AGENTS.md` says "n
 input" — this is the one place that breaks the rule.
 
 **Tasks**
-- [ ] Map an out-of-range code to `500` and `tracing::error!` the offending value, or change the
+- [x] Map an out-of-range code to `500` and `tracing::error!` the offending value, or change the
       trait so only `StatusCode` and a fallible conversion are accepted. Prefer the first: it
       keeps `HttpError::new(404, ..)` ergonomic.
-- [ ] Unit test: `999`, `0` and `600` produce a `500` problem and a log record, not a panic.
-- [ ] Note the behavior in the `IntoStatus` rustdoc and in tutorial chapter 7.
+- [x] Unit test: `999`, `0` and `600` produce a `500` problem and a log record, not a panic.
+- [x] Note the behavior in the `IntoStatus` rustdoc and in tutorial chapter 7.
+
+**Done (2026-09-23):** outside `100..=599` (not only what `http` rejects: it accepts up to
+999) → logged `500`; test covers 0, 99, 600, 999, 1000, `u16::MAX`.
 
 **Done when:** no `expect`/`unwrap` is reachable from a status code value supplied at runtime.
 
