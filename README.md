@@ -263,6 +263,19 @@ inside a layer that is installed anyway. Use it when you do not want a request s
 you want speed. `scripts/bench-http.sh` runs the same application behind `oha` over a real
 socket, where the numbers above are lost in the noise of the network.
 
+Build time is the other cost, and the reason `otel` is not a default feature. `examples/02-notes`
+(`sqlite`), measured 2026-09-23 on an Apple Silicon laptop with the workspace's dev profile
+(dependencies at `opt-level = 3`):
+
+| | crates | clean build | rebuild after editing the app |
+|---|---|---|---|
+| without `otel` | 177 | 94 s | 1.0 s |
+| with `otel` | 210 | 118 s | 1.1 s |
+
+The OpenTelemetry SDK, the OTLP exporter and its HTTP client add 33 crates and about a quarter
+to a clean build; a rebuild of your own code does not notice. Turn it on where telemetry is
+exported, typically in the deployed build.
+
 ## Versioning
 
 lesto follows semver. Public types that are expected to grow (`lesto::db::Error`, `Isolation`,
