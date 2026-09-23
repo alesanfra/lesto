@@ -27,6 +27,7 @@
 /// `Retry-After: 0` (see [`Error`](crate::db::Error)); the request is safe to send again. Under
 /// [`Default`](Self::Default) that cannot happen, which is why it stays the default.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum Isolation {
     /// Whatever the database does on its own. No conflict errors to handle.
     #[default]

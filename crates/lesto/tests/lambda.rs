@@ -210,7 +210,7 @@ async fn keep_stage_is_a_per_router_option() {
     let staged = App::<()>::new()
         .routes(routes![staged_health])
         .into_router();
-    let keep = Options { keep_stage: true };
+    let keep = Options::default().keep_stage(true);
     let res = invoke_with(&staged, &v1_event("GET", "/health", None), keep)
         .await
         .unwrap();

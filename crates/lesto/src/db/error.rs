@@ -19,9 +19,13 @@ type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 /// | `Sqlx(Database)` unique / foreign key violation | 409 |
 /// | other `Sqlx`, `Internal` | 500, cause logged with `tracing`, detail hidden |
 /// | `Http(e)` | `e`'s own response |
+#[non_exhaustive]
 pub enum Error {
     /// The principal lacks `permission`.
-    Forbidden { permission: &'static str },
+    Forbidden {
+        /// The permission that was required.
+        permission: &'static str,
+    },
     /// The database said no.
     Sqlx(sqlx::Error),
     /// An HTTP error decided inside the closure (`HttpError::not_found(..)?`).
@@ -229,6 +233,7 @@ impl OperationOutput for Error {
 
 /// `result.internal()?` inside a store closure: any error becomes `Error::Internal` (500).
 pub trait ResultExt<T> {
+    /// Map the error to [`Error::Internal`].
     fn internal(self) -> Result<T, Error>;
 }
 

@@ -132,14 +132,22 @@ return without binding. The app's stdout goes to stderr, 60 s timeout if `main` 
 `#[non_exhaustive]`.
 
 **Tasks**
-- [ ] Walk the public surface (`cargo doc` index). Mark `#[non_exhaustive]` on enums and
+- [x] Walk the public surface (`cargo doc` index). Mark `#[non_exhaustive]` on enums and
       config-like structs that will grow: `lesto::db::Error`, `lambda::Options`, `Trace`,
       `otel::Config`, `openapi` model types if they have public fields.
-- [ ] `#![warn(missing_docs)]` on `lesto`, `lesto-macros` exports; fix what it reports.
-- [ ] Re-export policy, written in `README.md` next to the axum policy (P5-4): every re-exported
+- [x] `#![warn(missing_docs)]` on `lesto`, `lesto-macros` exports; fix what it reports.
+- [x] Re-export policy, written in `README.md` next to the axum policy (P5-4): every re-exported
       crate (`axum` types, and after P2 `tokio`, `serde`, `schemars`, `garde`, `sqlx`) is public
       API; a major release of any of them forces a lesto major.
-- [ ] `CHANGELOG.md` (Keep a Changelog format), starting at 0.1.0.
+- [x] `CHANGELOG.md` (Keep a Changelog format), starting at 0.1.0.
+
+**Done (2026-09-23):** `#[non_exhaustive]` on `db::Error`, `Isolation`, `Rejection`,
+`lambda::Options` (gained `Options::keep_stage(bool)`, since a struct literal no longer
+compiles outside the crate), `otel::Config`, `DocsAssets` and every OpenAPI model type.
+`Problem`, `ProblemError`, `ValidationErrorItem` stay exhaustive: their shape is the RFC 9457
+wire format. `missing_docs` is on for both crates; `openapi.rs` allows it with a reason (the
+fields are the specification's). README "Versioning" states the axum, re-export and MSRV
+policies (P5-4's first two items), `CHANGELOG.md` added.
 
 ## P0-5. Freeze the breaking decisions before 0.1.0
 

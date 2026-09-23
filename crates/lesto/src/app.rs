@@ -70,6 +70,7 @@ impl<S> App<S>
 where
     S: Clone + Send + Sync + 'static,
 {
+    /// An empty application: no routes, title "API", version "0.1.0", docs at `/docs`.
     pub fn new() -> Self {
         Self {
             router: Router::new(),
@@ -87,16 +88,19 @@ where
 
     // ---- metadata ---------------------------------------------------------------------
 
+    /// `info.title` of the OpenAPI document; also the title of the docs pages.
     pub fn title(mut self, title: impl Into<String>) -> Self {
         self.spec.info.title = title.into();
         self
     }
 
+    /// `info.version` of the OpenAPI document (the version of your API, not of OpenAPI).
     pub fn version(mut self, version: impl Into<String>) -> Self {
         self.spec.info.version = version.into();
         self
     }
 
+    /// `info.description` of the OpenAPI document (CommonMark).
     pub fn description(mut self, description: impl Into<String>) -> Self {
         self.spec.info.description = Some(description.into());
         self
@@ -111,6 +115,7 @@ where
         self
     }
 
+    /// Add an entry to `servers`: a base URL clients should call.
     pub fn server(mut self, url: impl Into<String>) -> Self {
         self.spec.servers.push(openapi::Server {
             url: url.into(),

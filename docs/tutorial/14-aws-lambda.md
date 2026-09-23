@@ -36,7 +36,7 @@ extractors, validation, RFC 9457 errors and the documentation pages behave as th
 of the public URL: `https://abc.execute-api.eu-west-1.amazonaws.com/prod/notes`. By default
 `lesto::lambda` removes the stage from the path before routing, so your routes stay `/notes` and
 `instance` in error responses is `/notes/99`, not `/prod/notes/99`. If you want the stage to be
-part of your routes, use `serve_with` and `Options { keep_stage: true }`. HTTP APIs with the
+part of your routes, use `serve_with` and `Options::default().keep_stage(true)`. HTTP APIs with the
 `$default` stage and Function URLs have no prefix.
 
 **Documentation pages.** `/docs` and `/swagger` link `openapi.json` with a relative URL, so
@@ -97,7 +97,7 @@ assert_eq!(res.headers()["content-type"], "application/problem+json");
 ```
 
 The response body is already collected (`Bytes`), ready for `serde_json::from_slice`.
-`invoke_with(&router, event, Options { keep_stage: true })` tests the other stage setting; the
+`invoke_with(&router, event, Options::default().keep_stage(true))` tests the other stage setting; the
 option belongs to the router you pass, so both settings can share a test file.
 
 ## Recap

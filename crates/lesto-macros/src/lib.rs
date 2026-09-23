@@ -11,6 +11,7 @@
 //! The function is left untouched. Next to it the macro emits a braced struct with the same
 //! name (`struct create_user {}`); a braced struct lives only in the type namespace, so it
 //! does not collide with the function, and `routes![create_user]` can reach both.
+#![warn(missing_docs)]
 
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;

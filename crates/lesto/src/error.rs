@@ -92,6 +92,7 @@ pub struct ProblemError {
 }
 
 impl Problem {
+    /// A problem with `title` set to the reason phrase of `status` and `type` to `about:blank`.
     pub fn new(status: StatusCode) -> Self {
         Self {
             type_uri: about_blank(),
@@ -180,7 +181,9 @@ pub(crate) fn render(mut problem: Problem) -> Response {
 /// [`with_extension`](Self::with_extension) to add extension members.
 #[derive(Debug, Clone, PartialEq)]
 pub struct HttpError {
+    /// Status code of the response.
     pub status: StatusCode,
+    /// The `detail` member: what went wrong in this occurrence.
     pub detail: String,
     /// Rarely used members, boxed to keep `Result<T, HttpError>` small.
     extras: Option<Box<HttpErrorExtras>>,
@@ -195,6 +198,7 @@ struct HttpErrorExtras {
 }
 
 impl HttpError {
+    /// A problem with any status. A `u16` outside `100..=599` becomes a `500` (see [`IntoStatus`]).
     pub fn new(status: impl IntoStatus, detail: impl Into<String>) -> Self {
         Self {
             status: status.into_status(),
@@ -207,26 +211,32 @@ impl HttpError {
         self.extras.get_or_insert_with(Default::default)
     }
 
+    /// `400 Bad Request`.
     pub fn bad_request(detail: impl Into<String>) -> Self {
         Self::new(StatusCode::BAD_REQUEST, detail)
     }
 
+    /// `401 Unauthorized`.
     pub fn unauthorized(detail: impl Into<String>) -> Self {
         Self::new(StatusCode::UNAUTHORIZED, detail)
     }
 
+    /// `403 Forbidden`.
     pub fn forbidden(detail: impl Into<String>) -> Self {
         Self::new(StatusCode::FORBIDDEN, detail)
     }
 
+    /// `404 Not Found`.
     pub fn not_found(detail: impl Into<String>) -> Self {
         Self::new(StatusCode::NOT_FOUND, detail)
     }
 
+    /// `409 Conflict`.
     pub fn conflict(detail: impl Into<String>) -> Self {
         Self::new(StatusCode::CONFLICT, detail)
     }
 
+    /// `500 Internal Server Error`. The detail is sent to the client: keep causes in the log.
     pub fn internal(detail: impl Into<String>) -> Self {
         Self::new(StatusCode::INTERNAL_SERVER_ERROR, detail)
     }
@@ -237,6 +247,7 @@ impl HttpError {
         self
     }
 
+    /// Set the `title` member (default: the reason phrase of the status).
     pub fn with_title(mut self, title: impl Into<String>) -> Self {
         self.extras().title = Some(title.into());
         self
@@ -262,18 +273,22 @@ impl HttpError {
         self
     }
 
+    /// The `type` member, if set.
     pub fn type_uri(&self) -> Option<&str> {
         self.extras.as_ref().and_then(|e| e.type_uri.as_deref())
     }
 
+    /// The `title` member, if set.
     pub fn title(&self) -> Option<&str> {
         self.extras.as_ref().and_then(|e| e.title.as_deref())
     }
 
+    /// Extra response headers, if any were added.
     pub fn headers(&self) -> Option<&HeaderMap> {
         self.extras.as_ref().map(|e| &e.headers)
     }
 
+    /// Extension members, if any were added.
     pub fn extensions(&self) -> Option<&Map<String, Value>> {
         self.extras.as_ref().map(|e| &e.extensions)
     }
@@ -297,6 +312,7 @@ impl HttpError {
         (problem, headers)
     }
 
+    /// The problem document this error renders as (`instance` is filled in by the problem layer).
     pub fn into_problem(self) -> Problem {
         self.into_parts().0
     }
@@ -357,6 +373,7 @@ impl ValidationErrorItem {
         (location, pointer)
     }
 
+    /// This failure as an entry of the problem's `errors` member.
     pub fn to_problem_error(&self) -> ProblemError {
         let (location, pointer) = self.location_and_pointer();
         ProblemError {
@@ -388,10 +405,12 @@ impl ValidationErrorItem {
 /// A failed deserialization or [`garde`] validation. Always a 422.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ValidationError {
+    /// Every failed check.
     pub errors: Vec<ValidationErrorItem>,
 }
 
 impl ValidationError {
+    /// A `422` carrying `errors`.
     pub fn new(errors: Vec<ValidationErrorItem>) -> Self {
         Self { errors }
     }
@@ -448,6 +467,7 @@ impl ValidationError {
         Self::single(loc, msg, kind)
     }
 
+    /// The `422` problem document, with one `errors` entry per failed check.
     pub fn into_problem(self) -> Problem {
         let mut problem = Problem::new(StatusCode::UNPROCESSABLE_ENTITY);
         problem.detail = Some(match self.errors.len() {
@@ -502,8 +522,11 @@ impl IntoResponse for ValidationError {
 
 /// Rejection produced by lesto's extractors.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum Rejection {
+    /// Deserialization or validation failed: `422`.
     Validation(ValidationError),
+    /// Any other failure (missing content type, bad credentials): its own status.
     Http(HttpError),
 }
 
