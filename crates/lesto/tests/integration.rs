@@ -1816,3 +1816,69 @@ mod undocumented_extractor {
         assert_eq!(operation["parameters"].as_array().unwrap().len(), 1);
     }
 }
+
+// ---- status from the type -------------------------------------------------------------------------
+
+#[lesto::put("/typed/{id}")]
+async fn typed_upsert(Path(id): Path<u64>) -> Result<Created<Json<User>>, HttpError> {
+    if id == 0 {
+        return Err(HttpError::bad_request("id 0"));
+    }
+    Ok(Created(Json(User {
+        id,
+        name: "n".into(),
+        email: "e".into(),
+    })))
+}
+
+#[lesto::post("/typed/jobs")]
+async fn typed_job() -> Accepted<Json<u64>> {
+    Accepted(Json(42))
+}
+
+#[lesto::delete("/typed/{id}")]
+async fn typed_delete(Path(_id): Path<u64>) -> NoContent {
+    NoContent
+}
+
+#[tokio::test]
+async fn status_types_answer_and_document_their_status() {
+    let app = || App::new().routes(routes![typed_upsert, typed_job, typed_delete]);
+    let put = |uri: &str| Request::put(uri).body(Body::empty()).unwrap();
+    let (status, body) = send(app(), put("/typed/3")).await;
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(body["id"], 3);
+    let (status, _) = send(app(), put("/typed/0")).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let (status, body) = send(
+        app(),
+        Request::post("/typed/jobs").body(Body::empty()).unwrap(),
+    )
+    .await;
+    assert_eq!((status, body), (StatusCode::ACCEPTED, json!(42)));
+    let response = app()
+        .into_router()
+        .oneshot(Request::delete("/typed/1").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+
+    let spec = serde_json::to_value(app().openapi()).unwrap();
+    let responses = |path: &str, method: &str| -> Vec<String> {
+        spec["paths"][path][method]["responses"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect()
+    };
+    assert_eq!(responses("/typed/{id}", "put")[0], "201");
+    assert!(!responses("/typed/{id}", "put").contains(&"200".to_string()));
+    assert_eq!(responses("/typed/jobs", "post"), ["202"]);
+    assert_eq!(responses("/typed/{id}", "delete"), ["204", "422"]);
+    assert_eq!(
+        spec["paths"]["/typed/{id}"]["put"]["responses"]["201"]["content"]["application/json"]["schema"]
+            ["$ref"],
+        "#/components/schemas/User"
+    );
+}

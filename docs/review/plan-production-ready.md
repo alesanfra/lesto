@@ -452,9 +452,14 @@ README under Performance.
 never answer `200` on purpose, and the status does not come from the type (review §4.2).
 
 **Tasks**
-- [ ] `Created<T>`, `Accepted<T>`, `NoContent` implementing `IntoResponse + OperationOutput`.
-- [ ] `status = N` stays as a shortcut (per P0-5).
-- [ ] Tutorial chapter 6 and the attribute table in `README.md`.
+- [x] `Created<T>`, `Accepted<T>`, `NoContent` implementing `IntoResponse + OperationOutput`.
+- [x] `status = N` stays as a shortcut (per P0-5).
+- [x] Tutorial chapter 6 and the attribute table in `README.md`.
+
+**Done (2026-09-23):** `lesto::response::{Created, Accepted, NoContent}` (in the prelude).
+`Created<T>`/`Accepted<T>` wrap any response (`Created(Json(note))`) and turn only a `200` into
+their status, so an inner `500` survives; documented as `T` under `201`/`202`. `status = N`
+stays. Chapter 6, README, `examples/99-tutorial` (with a test).
 
 ## P5-2. `lesto::db` ergonomics and documentation
 

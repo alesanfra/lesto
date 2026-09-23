@@ -21,6 +21,7 @@ First release, 0.1.0: `lesto`, `lesto-macros`, `lesto-cli`.
 - Feature `lambda`: AWS Lambda adapter; feature `otel`: OTLP traces and logs from the environment.
 - Features `email` and `url` (default on) for the garde rules of the same name.
 - JSON keys keep declaration order in the OpenAPI document and in response bodies.
+- `Created<T>`, `Accepted<T>`, `NoContent`: the success status in the return type.
 - `lesto dev`, `lesto run`, `lesto openapi`.
 - `lesto::db::NotFoundExt::or_not_found`: a bare `sqlx::Error::RowNotFound` answers 500, the
   lookups that mean 404 say so.

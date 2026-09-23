@@ -140,6 +140,9 @@ Examples: `LESTO_PORT=8765 cargo run -p hello` (smallest app), `-p notes` (CRUD 
 
 Available: `get`, `post`, `put`, `patch`, `delete`, `head`, `options`.
 
+`status = N` rewrites every `200` of the handler; to put the status in the type instead, return
+`Created<T>` (201), `Accepted<T>` (202) or `NoContent` (204), documented under that status.
+
 `state = T` only affects the compile-time checks the macro emits (otherwise the state comes from a `State<T>` argument or from the `App<S>` the `routes![]` set is added to); see `docs/tutorial/B-common-problems.md`.
 The default `operation_id` is `{function}_{path}_{method}` (`get_user_users__id__get`), unique per route as in FastAPI.
 
