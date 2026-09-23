@@ -398,6 +398,10 @@ impl App<()> {
     /// completion, then the future resolves. Pair it with your platform's termination grace
     /// period (Kubernetes gives 30 s by default).
     ///
+    /// With `LESTO_OPENAPI_PATH` set, nothing is served: the OpenAPI document is written to that
+    /// file and this returns `Ok(())`. That is how `lesto openapi` reads the document of an
+    /// application without a flag in its `main`.
+    ///
     /// With the `otel` feature, this is also where telemetry is set up: if
     /// `OTEL_EXPORTER_OTLP_ENDPOINT` is set and no `tracing` subscriber has been installed,
     /// spans go to the console and to the collector, and are flushed before this returns. See
@@ -410,6 +414,9 @@ impl App<()> {
     /// [`serve`](Self::serve) on an explicit address, ignoring `LESTO_HOST`/`LESTO_PORT`. An
     /// inherited socket still wins.
     pub async fn serve_at(self, addr: impl tokio::net::ToSocketAddrs) -> std::io::Result<()> {
+        if self.write_openapi_if_asked()? {
+            return Ok(());
+        }
         let listener = listener(addr).await?;
         self.serve_on(listener).await
     }
@@ -431,6 +438,9 @@ impl App<()> {
         // Held until the server is done, so the last spans are flushed after the in-flight
         // requests finish. Does nothing unless the `otel` feature is on, the environment names
         // a collector, and the application installed no subscriber of its own.
+        if self.write_openapi_if_asked()? {
+            return Ok(());
+        }
         #[cfg(feature = "otel")]
         let _telemetry = crate::otel::auto_init(&self.spec.info.title);
         axum::serve(listener, self.into_router())
@@ -438,6 +448,25 @@ impl App<()> {
             .await
     }
 }
+
+impl App<()> {
+    /// `LESTO_OPENAPI_PATH` set: write the document there instead of serving.
+    fn write_openapi_if_asked(&self) -> std::io::Result<bool> {
+        self.write_openapi_to(std::env::var_os(OPENAPI_PATH_VAR))
+    }
+
+    fn write_openapi_to(&self, path: Option<std::ffi::OsString>) -> std::io::Result<bool> {
+        let Some(path) = path else {
+            return Ok(false);
+        };
+        std::fs::write(&path, self.openapi_json())?;
+        Ok(true)
+    }
+}
+
+/// Set by `lesto openapi`: [`App::serve`] writes the OpenAPI document to this file and returns
+/// instead of serving.
+const OPENAPI_PATH_VAR: &str = "LESTO_OPENAPI_PATH";
 
 /// Resolves on `Ctrl-C` (`SIGINT`) or, on Unix, `SIGTERM`: what an orchestrator sends first.
 pub async fn shutdown_signal() {
@@ -584,7 +613,18 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::bind_address;
+    use super::{App, bind_address};
+
+    #[test]
+    fn openapi_is_written_only_when_asked() {
+        let app = App::new().title("Written");
+        assert!(!app.write_openapi_to(None).unwrap());
+        let path = std::env::temp_dir().join(format!("lesto-openapi-test-{}", std::process::id()));
+        assert!(app.write_openapi_to(Some(path.clone().into())).unwrap());
+        let written = std::fs::read_to_string(&path).unwrap();
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!(written, app.openapi_json());
+    }
 
     #[test]
     fn bind_address_from_env() {
