@@ -375,10 +375,18 @@ of an app that uses none of them is unchanged.
 `impl OperationInput for X {}`. That empty impl is a tax on the adoption path.
 
 **Tasks**
-- [ ] Autoref specialization in the route macro: call `describe` when an `OperationInput` impl
+- [x] Autoref specialization in the route macro: call `describe` when an `OperationInput` impl
       exists, do nothing otherwise.
-- [ ] Default per P0-5 (recommended: silent, `strict_docs()` for teams that care).
-- [ ] Update the UI tests and the table in `AGENTS.md` / `docs/tutorial/B-common-problems.md`.
+- [x] Default per P0-5 (recommended: silent, `strict_docs()` for teams that care).
+- [x] Update the UI tests and the table in `AGENTS.md` / `docs/tutorial/B-common-problems.md`.
+
+**Done (2026-09-23):** the route attribute now generates `RouteInfo::describe`, probing each
+argument with autoref specialization; `routes![]` registers through
+`RouteSet::add_described`. Silent by default; `strict-docs` is a **Cargo feature** rather than an
+`App::strict_docs()` method, because a feature keeps the error at compile time (the check is
+`check_strict_input::<T>()`, whose bound depends on the feature). The UI suite runs with
+`strict-docs` on (`strict_docs_undocumented_extractor`); an integration test proves the default.
+Return types still require `OperationOutput`.
 
 ## P3-5. Tutorial chapter: leaving lesto
 

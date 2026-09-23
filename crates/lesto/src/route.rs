@@ -191,6 +191,9 @@ method_ctor! {
 pub trait RouteInfo {
     /// The metadata the route attribute collected.
     fn meta() -> RouteMeta;
+
+    /// Document the handler's arguments and return type; `status` is the success status.
+    fn describe(builder: &mut OperationBuilder<'_>, status: u16);
 }
 
 /// Describes a handler's inputs and outputs. Re-runnable so the document can be rebuilt.
@@ -294,20 +297,8 @@ where
         O: OperationOutput + 'static,
         T: 'static,
     {
-        let filter = MethodFilter::try_from(meta.method.clone())
-            .unwrap_or_else(|_| panic!("unsupported HTTP method {}", meta.method));
         let status = meta.status;
-        let method_router = if status == 200 {
-            axum::routing::on(filter, handler)
-        } else {
-            axum::routing::on(
-                filter,
-                WithStatus {
-                    inner: handler,
-                    status: StatusCode::from_u16(status).expect("valid status"),
-                },
-            )
-        };
+        let method_router = method_router(&meta, handler);
         let describe: DescribeFn = Arc::new(move |b| {
             I::describe(b);
             O::describe(b, status);
@@ -319,10 +310,55 @@ where
         self
     }
 
+    /// Register a handler whose documentation comes from `describe` rather than from its
+    /// types: what `routes![]` uses, with the function the route attribute generated
+    /// ([`RouteInfo::describe`]), so an extractor with no `OperationInput` impl is accepted.
+    pub fn add_described<H, T>(
+        mut self,
+        meta: RouteMeta,
+        handler: H,
+        describe: fn(&mut OperationBuilder<'_>, u16),
+    ) -> Self
+    where
+        H: Handler<T, S>,
+        T: 'static,
+    {
+        let status = meta.status;
+        let method_router = method_router(&meta, handler);
+        let describe: DescribeFn = Arc::new(move |b| describe(b, status));
+        self.entries.push(RouteEntry {
+            pending: PendingOperation { meta, describe },
+            method_router,
+        });
+        self
+    }
+
     /// Merge another set into this one.
     pub fn extend(mut self, other: RouteSet<S>) -> Self {
         self.entries.extend(other.entries);
         self
+    }
+}
+
+/// The axum method router for `handler` at `meta`, with the success status applied.
+fn method_router<H, T, S>(meta: &RouteMeta, handler: H) -> axum::routing::MethodRouter<S>
+where
+    H: Handler<T, S>,
+    T: 'static,
+    S: Clone + Send + Sync + 'static,
+{
+    let filter = MethodFilter::try_from(meta.method.clone())
+        .unwrap_or_else(|_| panic!("unsupported HTTP method {}", meta.method));
+    if meta.status == 200 {
+        axum::routing::on(filter, handler)
+    } else {
+        axum::routing::on(
+            filter,
+            WithStatus {
+                inner: handler,
+                status: StatusCode::from_u16(meta.status).expect("valid status"),
+            },
+        )
     }
 }
 

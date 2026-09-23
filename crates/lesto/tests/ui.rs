@@ -127,7 +127,7 @@ fn manifest(workspace: &Path, crate_dir: &Path, case_dir: &Path, cases: &[String
          edition = \"{edition}\"\n\
          publish = false\n\n\
          [dependencies]\n\
-         lesto = {{ path = \"{lesto}\", features = [\"anyhow\", \"sqlite\", \"lambda\"] }}\n\
+         lesto = {{ path = \"{lesto}\", features = [\"anyhow\", \"sqlite\", \"lambda\", \"strict-docs\"] }}\n\
          garde = {{ version = \"{garde}\", features = [\"derive\"] }}\n\
          schemars = {{ version = \"{schemars}\", features = [\"derive\"] }}\n\
          serde = {{ version = \"{serde}\", features = [\"derive\"] }}\n\

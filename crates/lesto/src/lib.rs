@@ -130,7 +130,11 @@ macro_rules! routes {
         let set = $crate::RouteSet::new();
         $(
             <$handler>::__lesto_check(&set);
-            let set = set.add(<$handler as $crate::RouteInfo>::meta(), $handler);
+            let set = set.add_described(
+                <$handler as $crate::RouteInfo>::meta(),
+                $handler,
+                <$handler as $crate::RouteInfo>::describe,
+            );
         )*
         set
     }};
@@ -210,6 +214,40 @@ pub mod __private {
     pub fn check_parts<T: PartsExtractor<S>, S: Send + Sync>() {}
     pub fn check_last<T: LastExtractor<S, M>, S: Send + Sync, M>() {}
     pub fn check_response<T: HandlerResponse>() {}
-    pub fn check_documented_input<T: crate::OperationInput>() {}
+    /// Carries a handler argument type to [`DocumentedInput`] / [`UndocumentedInput`].
+    pub struct DescribeProbe<T>(std::marker::PhantomData<fn() -> T>);
+
+    impl<T> DescribeProbe<T> {
+        /// A probe for `T`.
+        #[allow(clippy::new_without_default)]
+        pub fn new() -> Self {
+            Self(std::marker::PhantomData)
+        }
+    }
+
+    /// Picked by autoref specialization when the argument documents itself.
+    pub trait DocumentedInput {
+        fn __lesto_describe(&self, builder: &mut OperationBuilder<'_>);
+    }
+    impl<T: crate::OperationInput> DocumentedInput for DescribeProbe<T> {
+        fn __lesto_describe(&self, builder: &mut OperationBuilder<'_>) {
+            T::describe(builder);
+        }
+    }
+
+    /// Any other extractor: served, not documented.
+    pub trait UndocumentedInput {
+        fn __lesto_describe(&self, builder: &mut OperationBuilder<'_>) {
+            let _ = builder;
+        }
+    }
+    impl<T> UndocumentedInput for &DescribeProbe<T> {}
+
+    /// With the `strict-docs` feature, every argument must implement `OperationInput`.
+    #[cfg(feature = "strict-docs")]
+    pub fn check_strict_input<T: crate::OperationInput>() {}
+    /// Without the `strict-docs` feature, an undocumented extractor is accepted.
+    #[cfg(not(feature = "strict-docs"))]
+    pub fn check_strict_input<T>() {}
     pub fn check_documented_output<T: crate::OperationOutput>() {}
 }

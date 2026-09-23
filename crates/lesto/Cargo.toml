@@ -55,6 +55,9 @@ compression = ["tower-http/compression-gzip"]
 # `#[garde(email)]` and `#[garde(url)]`; off drops garde's regex and idna dependencies.
 email = ["garde/email", "lesto-macros/email"]
 url = ["garde/url", "lesto-macros/url"]
+# Every handler argument must document itself (`OperationInput`): a custom extractor without an
+# impl is a compile error instead of an argument missing from the OpenAPI document.
+strict-docs = []
 # `#[garde(pattern(..))]`; `email` includes it.
 pattern = ["garde/regex", "lesto-macros/regex"]
 # `From<anyhow::Error> for HttpError` (and `lesto::db::Error`): a 500 with the detail hidden
