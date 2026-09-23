@@ -1611,3 +1611,39 @@ fn model_update_view_is_optional() {
     };
     assert!(update.validate().is_err());
 }
+
+// ---- plain axum routers --------------------------------------------------------------------------
+
+#[tokio::test]
+async fn merged_axum_routes_are_served_but_not_documented() {
+    use lesto::axum::routing::get as axum_get;
+    let legacy = lesto::axum::Router::new()
+        .route("/legacy", axum_get(|| async { "legacy" }))
+        .route(
+            "/legacy/boom",
+            axum_get(|| async { HttpError::conflict("taken") }),
+        );
+    let admin = lesto::axum::Router::new().route("/stats", axum_get(|| async { "stats" }));
+    let app = || {
+        App::new()
+            .routes(routes![quick])
+            .merge(legacy.clone())
+            .nest_router("/admin", admin.clone())
+    };
+
+    let (status, body) = send(app(), get("/legacy")).await;
+    assert_eq!((status, body), (StatusCode::OK, json!("legacy")));
+    let (status, body) = send(app(), get("/admin/stats")).await;
+    assert_eq!((status, body), (StatusCode::OK, json!("stats")));
+    // The problem layer covers merged routes too: `instance` is filled in.
+    let (status, body) = send(app(), get("/legacy/boom")).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(body["instance"], "/legacy/boom");
+
+    let spec = serde_json::to_value(app().openapi()).unwrap();
+    let paths: Vec<_> = spec["paths"].as_object().unwrap().keys().cloned().collect();
+    assert_eq!(paths, ["/quick"]);
+
+    let (status, body) = send(App::from(legacy), get("/legacy")).await;
+    assert_eq!((status, body), (StatusCode::OK, json!("legacy")));
+}

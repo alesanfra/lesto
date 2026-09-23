@@ -283,8 +283,7 @@ where
     /// Mount another `App` under `prefix`, merging its documentation.
     ///
     /// Equivalent to FastAPI's `include_router(router, prefix=...)`. Documentation pages, the
-    /// error format, the fallback and app-wide security of the nested app are ignored; only the
-    /// root app's apply.
+    /// fallback and app-wide security of the nested app are ignored; only the root app's apply.
     pub fn nest(mut self, prefix: &str, other: App<S>) -> Self {
         let prefix = prefix.trim_end_matches('/');
         let App {
@@ -311,6 +310,26 @@ where
                 self.spec.tags.push(tag);
             }
         }
+        self.router = self.router.nest(prefix, router);
+        self
+    }
+
+    /// Serve the routes of a plain `axum::Router` next to this app's: the way in for an existing
+    /// axum application. They are **not documented** in OpenAPI (lesto never saw their handler
+    /// types), but they get everything else: the problem rendering, the panic catcher, the
+    /// request span, the timeout.
+    ///
+    /// Panics like `axum::Router::merge` when a path is registered on both sides.
+    pub fn merge(mut self, router: Router<S>) -> Self {
+        self.router = self.router.merge(router);
+        self
+    }
+
+    /// [`merge`](Self::merge) under `prefix`, like `axum::Router::nest`: `/users` in `router`
+    /// is served at `{prefix}/users`. Not documented in OpenAPI either.
+    ///
+    /// Panics like `axum::Router::nest` on an invalid prefix.
+    pub fn nest_router(mut self, prefix: &str, router: Router<S>) -> Self {
         self.router = self.router.nest(prefix, router);
         self
     }
@@ -691,6 +710,17 @@ where
                 .into_response()
         }
     })
+}
+
+/// An existing `axum::Router` as the starting point of an [`App`]: `App::from(router)` is
+/// `App::new().merge(router)`.
+impl<S> From<Router<S>> for App<S>
+where
+    S: Clone + Send + Sync + 'static,
+{
+    fn from(router: Router<S>) -> Self {
+        App::new().merge(router)
+    }
 }
 
 impl<S> From<App<S>> for Router<S>
