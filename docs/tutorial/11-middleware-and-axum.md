@@ -5,15 +5,16 @@ particular the middleware of the **tower** ecosystem, works here too.
 
 ## Adding a layer
 
+The most common layers are built in (next section). Anything else from the tower ecosystem goes
+through `layer`, here tower-http's `TraceLayer`:
+
 ```toml
-tower-http = { version = "0.6", features = ["cors", "trace", "compression-gzip"] }
+tower-http = { version = "0.6", features = ["trace"] }
 tracing-subscriber = "0.3"
 ```
 
 ```rust
-use std::time::Duration;
 use lesto::prelude::*;
-use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 
 #[lesto::main]
@@ -23,8 +24,6 @@ async fn main() -> std::io::Result<()> {
     App::new()
         .routes(routes![root])
         .layer(TraceLayer::new_for_http())               // log every request
-        .timeout(Duration::from_secs(10))                // built in: a 503 problem
-        .layer(CorsLayer::permissive())                  // in production: explicit allow_origin
         .serve()
         .await
 }
@@ -33,9 +32,23 @@ async fn main() -> std::io::Result<()> {
 `layer` applies to the routes registered **before** the call, as in axum. Put it after your
 `routes` / `nest` calls.
 
-## Timeouts and body size
+## Built-in layers
 
-Two limits every service needs are built in, so their errors are problems like the rest:
+What almost every service needs is one builder call, with errors answered as problems like the
+rest:
+
+```rust
+use std::time::Duration;
+use lesto::cors::{Any, CorsLayer};
+
+App::new()
+    .routes(routes![root])
+    .timeout(Duration::from_secs(10))
+    .body_limit(64 * 1024)
+    .cors(CorsLayer::new().allow_origin(["https://app.example".parse()?]).allow_headers(Any))
+    .compression()
+    .request_id()
+```
 
 - `.timeout(Duration::from_secs(10))`: a request still running after ten seconds answers
   `503 Service Unavailable` (problem+json, with `instance`), and its handler is dropped. Off by
@@ -45,8 +58,16 @@ Two limits every service needs are built in, so their errors are problems like t
   limit is axum's, **2 MB**; `.body_limit(None)` removes it (for uploads behind a proxy that
   limits them already).
 
-Neither costs anything when it is not set. Unlike `layer`, their position in the builder chain
-does not matter.
+- `.cors(layer)`: tower-http's `CorsLayer` (re-exported as `lesto::cors`), installed outside
+  everything else, so a `404` or `500` problem carries the CORS headers too and the browser can
+  show it. `CorsLayer::permissive()` is fine in development; in production name the origins.
+- `.compression()`: gzip for clients that send `Accept-Encoding: gzip` (feature `compression`,
+  on by default).
+- `.request_id()`: every request gets an `x-request-id` (a UUID v4, or the one the client or a
+  proxy sent), echoed on the response.
+
+None of them costs anything when it is not set. Unlike `layer`, their position in the builder
+chain does not matter.
 
 ## Middleware written by you
 
@@ -185,9 +206,8 @@ the client.
 
 lesto emits `tracing` events for what it handles itself (`500`s, panics, failed
 serializations) and nothing per request: pick the access log you want. `TraceLayer` above logs
-every request; `tower_http::request_id::{SetRequestIdLayer, PropagateRequestIdLayer}` add and
-echo an `x-request-id`, and `tracing_subscriber` with the `json` feature writes one JSON line
-per event for your log collector.
+every request; `.request_id()` adds and echoes an `x-request-id`, and `tracing_subscriber` with
+the `json` feature writes one JSON line per event for your log collector.
 
 ## Using axum's extractors
 

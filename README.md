@@ -42,7 +42,8 @@ A Rust web micro-framework with **FastAPI**'s ergonomics, built on [axum](https:
   turns the span off.
 - **Production defaults**: `App::serve` shuts down gracefully on `SIGTERM`/`Ctrl-C` (in-flight
   requests get 30 s, `App::shutdown_timeout`); `App::timeout` and `App::body_limit` (2 MB unless
-  changed) answer `503` and `413` problems; credentials
+  changed) answer `503` and `413` problems; `App::cors`, `App::compression` and
+  `App::request_id` are one call each; credentials
   are redacted from `Debug` output, internal errors never leak their cause to the client.
 - axum stays underneath: `State`, `Extension`, tower layers and `into_router()` work as always.
 
@@ -265,7 +266,8 @@ or field is not a breaking change; match them with a `_` arm and build them thro
 constructors.
 
 The crates lesto re-exports are part of its public API: `axum` (and `lesto::http`), `garde`,
-`schemars`, `serde`, `serde_json`, `tokio`, `tracing`, and with the `db` feature `sqlx` and `uuid` (`lesto::db::sqlx`,
+`schemars`, `serde`, `serde_json`, `tokio`, `tracing`, tower-http's CORS types (`lesto::cors`), and
+with the `db` feature `sqlx` and `uuid` (`lesto::db::sqlx`,
 `lesto::db::uuid`). lesto 0.1 tracks axum 0.8; a new major (or 0.x minor) of any of them is a new
 major (0.x minor) of lesto. Use the re-exports rather than a second direct dependency and the two
 can never disagree.
@@ -286,7 +288,7 @@ cargo deny check                                     # licenses, advisories (car
 cargo run -p lesto-cli -- dev -p notes --port 8765   # the CLI from this checkout
 ```
 
-Features of `lesto`: `email` and `url` (garde rules, on by default), `db` + `postgres`/`mysql`/`sqlite`, `lambda`, `otel`, `anyhow`. Tests always run with all of them.
+Features of `lesto`: `email`, `url` (garde rules) and `compression` (gzip), on by default; `pattern`; `db` + `postgres`/`mysql`/`sqlite`, `lambda`, `otel`, `anyhow`. Tests always run with all of them.
 
 CI (`.github/workflows/ci.yml`) runs fmt, clippy and rustdoc with warnings denied, each feature of
 `lesto` alone (`cargo hack`), the mdBook build and `cargo deny`; the tests on stable, including the

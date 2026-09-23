@@ -25,6 +25,7 @@ base64.workspace = true
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "net", "signal", "time"] }
 http.workspace = true
 indexmap.workspace = true
+tower-http = { workspace = true, features = ["cors", "request-id"] }
 tower-layer = "0.3"
 tower-service = "0.3"
 pin-project-lite.workspace = true
@@ -48,7 +49,9 @@ tower = { workspace = true, optional = true }
 http-body-util = { workspace = true, optional = true }
 
 [features]
-default = ["email", "url"]
+default = ["email", "url", "compression"]
+# `App::compression`: gzip response bodies (tower-http + flate2).
+compression = ["tower-http/compression-gzip"]
 # `#[garde(email)]` and `#[garde(url)]`; off drops garde's regex and idna dependencies.
 email = ["garde/email", "lesto-macros/email"]
 url = ["garde/url", "lesto-macros/url"]
@@ -81,7 +84,7 @@ all-features = true
 
 [dev-dependencies]
 # Tests exercise every feature.
-lesto = { path = ".", features = ["anyhow", "email", "url", "sqlite", "postgres", "lambda", "otel"] }
+lesto = { path = ".", features = ["anyhow", "email", "url", "compression", "sqlite", "postgres", "lambda", "otel"] }
 # `postgres` and `uuid` for `tests/db_postgres.rs`, which binds a `Uuid`; lesto itself never
 # binds one, so the `db` feature does not ask sqlx for it.
 sqlx = { workspace = true, features = ["sqlite", "postgres", "uuid", "derive"] }

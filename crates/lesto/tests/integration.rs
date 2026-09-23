@@ -1647,3 +1647,89 @@ async fn merged_axum_routes_are_served_but_not_documented() {
     let (status, body) = send(App::from(legacy), get("/legacy")).await;
     assert_eq!((status, body), (StatusCode::OK, json!("legacy")));
 }
+
+// ---- CORS, compression, request id ---------------------------------------------------------------
+
+#[lesto::get("/big")]
+async fn big() -> String {
+    "lesto ".repeat(1000)
+}
+
+#[tokio::test]
+async fn cors_answers_preflights_and_marks_problems() {
+    use lesto::cors::CorsLayer;
+    let app = || {
+        App::new().routes(routes![quick]).cors(
+            CorsLayer::new()
+                .allow_origin([lesto::http::HeaderValue::from_static("https://app.example")]),
+        )
+    };
+    let preflight = Request::builder()
+        .method("OPTIONS")
+        .uri("/quick")
+        .header(header::ORIGIN, "https://app.example")
+        .header(header::ACCESS_CONTROL_REQUEST_METHOD, "GET")
+        .body(Body::empty())
+        .unwrap();
+    let response = app().into_router().oneshot(preflight).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers()[header::ACCESS_CONTROL_ALLOW_ORIGIN],
+        "https://app.example"
+    );
+
+    let missing = Request::builder()
+        .uri("/nowhere")
+        .header(header::ORIGIN, "https://app.example")
+        .body(Body::empty())
+        .unwrap();
+    let response = app().into_router().oneshot(missing).await.unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    assert_eq!(
+        response.headers()[header::ACCESS_CONTROL_ALLOW_ORIGIN],
+        "https://app.example",
+        "a problem is readable by the browser too"
+    );
+}
+
+#[tokio::test]
+async fn compression_gzips_when_asked() {
+    let request = |encoding: Option<&str>| {
+        let mut builder = Request::builder().uri("/big");
+        if let Some(encoding) = encoding {
+            builder = builder.header(header::ACCEPT_ENCODING, encoding);
+        }
+        builder.body(Body::empty()).unwrap()
+    };
+    let app = || App::new().routes(routes![big]).compression();
+    let response = app()
+        .into_router()
+        .oneshot(request(Some("gzip")))
+        .await
+        .unwrap();
+    assert_eq!(response.headers()[header::CONTENT_ENCODING], "gzip");
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    assert!(bytes.len() < 6000, "{} bytes", bytes.len());
+
+    let response = app().into_router().oneshot(request(None)).await.unwrap();
+    assert!(response.headers().get(header::CONTENT_ENCODING).is_none());
+}
+
+#[tokio::test]
+async fn request_id_is_generated_or_kept() {
+    let app = || App::new().routes(routes![quick]).request_id();
+    let response = app().into_router().oneshot(get("/quick")).await.unwrap();
+    let id = response.headers()["x-request-id"]
+        .to_str()
+        .unwrap()
+        .to_owned();
+    assert_eq!(id.len(), 36, "a UUID: {id}");
+
+    let with_id = Request::builder()
+        .uri("/quick")
+        .header("x-request-id", "abc-123")
+        .body(Body::empty())
+        .unwrap();
+    let response = app().into_router().oneshot(with_id).await.unwrap();
+    assert_eq!(response.headers()["x-request-id"], "abc-123");
+}
