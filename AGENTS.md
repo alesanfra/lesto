@@ -63,7 +63,8 @@ crates/lesto-macros/      proc macros: #[lesto::get] and friends (RouteInfo mark
                           optional #[store(read = .., write = ..)] permission pair with the
                           optional #[store(read = .., write = ..)] permission pair
 crates/lesto-cli/         the `lesto` binary: dev (watch + rebuild + restart, socket kept open),
-                          run, new/openapi (reserved, exit 2)
+                          run, openapi (runs the app with LESTO_OPENAPI_PATH: App::serve writes
+                          the document there and returns)
   src/cargo.rs            cargo metadata; cargo build --message-format=json → executable path
   src/process.rs          spawn with the socket on fd 3 (LISTEN_FDS), stop (SIGTERM, grace, SIGKILL)
   src/watch.rs            notify watcher, ignore filters, debounce
@@ -417,7 +418,7 @@ Bigger items, easiest first (mirrored in `README.md`, keep the two lists in sync
 
 Smaller items, in rough priority order: crates.io publication (publish order: `lesto-macros`,
 `lesto`, `lesto-cli`; the manifests are ready); `lesto new`
-(scaffold) and `lesto openapi` (print the document without serving); `Store::atomic` for several
+(scaffold); `Store::atomic` for several
 statements in one explicit transaction; `AnyOf`/`AllOf` requirements; documenting per-operation
 permissions as OpenAPI scopes; `--watch`/`--ignore` for `lesto dev`; a `strict_docs()` mode
 that fails on undocumented types; exporting the OpenAPI document as 3.0 with

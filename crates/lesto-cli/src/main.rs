@@ -4,14 +4,15 @@
 //!   listening socket and hands it to the application (`LISTEN_FDS`), so requests arriving
 //!   during a rebuild wait instead of being refused.
 //! - `lesto run`: build and run once, same socket handling.
-//! - `lesto new`, `lesto openapi`: reserved, not implemented yet.
+//! - `lesto openapi`: build the application and print its OpenAPI document, without serving.
 
 mod cargo;
 mod process;
 mod watch;
 
 use std::net::TcpListener;
-use std::process::{Child, ExitCode};
+use std::path::PathBuf;
+use std::process::{Child, ExitCode, Stdio};
 use std::sync::mpsc::RecvTimeoutError;
 use std::time::Duration;
 
@@ -32,16 +33,21 @@ enum Command {
     Dev(RunArgs),
     /// Build and run once.
     Run(RunArgs),
-    /// Create a new lesto project (not implemented yet).
-    New {
-        /// Project name.
-        name: String,
-    },
-    /// Print the OpenAPI document of an application (not implemented yet).
+    /// Print the OpenAPI document of an application, without serving it.
+    ///
+    /// Builds and starts the application with `LESTO_OPENAPI_PATH` set: `App::serve` writes the
+    /// document there and returns instead of listening. Whatever `main` does before calling
+    /// `App::serve` (a database connection, migrations) still runs.
     Openapi {
         /// Package to build, as for `cargo build -p`.
         #[arg(short, long)]
         package: Option<String>,
+        /// Write the document to this file instead of standard output.
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+        /// Arguments passed to the application after `--`.
+        #[arg(last = true)]
+        args: Vec<String>,
     },
 }
 
@@ -72,8 +78,11 @@ fn main() -> ExitCode {
     let result = match cli.command {
         Command::Dev(args) => dev(args),
         Command::Run(args) => run(args),
-        Command::New { name } => not_implemented(&format!("lesto new {name}")),
-        Command::Openapi { .. } => not_implemented("lesto openapi"),
+        Command::Openapi {
+            package,
+            output,
+            args,
+        } => openapi(package, output, &args),
     };
     match result {
         Ok(code) => code,
@@ -84,9 +93,81 @@ fn main() -> ExitCode {
     }
 }
 
-fn not_implemented(what: &str) -> std::io::Result<ExitCode> {
-    eprintln!("{what}: not implemented yet");
-    Ok(ExitCode::from(2))
+/// Read by `App::serve` in the application (`lesto::app`): write the document here, do not
+/// serve.
+const OPENAPI_PATH_VAR: &str = "LESTO_OPENAPI_PATH";
+/// How long `lesto openapi` waits for the application to reach `App::serve`.
+const OPENAPI_TIMEOUT: Duration = Duration::from_secs(60);
+
+fn openapi(
+    package: Option<String>,
+    output: Option<PathBuf>,
+    args: &[String],
+) -> std::io::Result<ExitCode> {
+    let workspace = cargo::metadata()?;
+    let options = BuildOptions {
+        package,
+        release: false,
+    };
+    let exe = match cargo::build(&options)? {
+        Built::Executable(exe) => exe,
+        Built::Failed => return Ok(ExitCode::FAILURE),
+    };
+    let path = workspace
+        .target_dir
+        .join(format!("lesto-openapi-{}.json", std::process::id()));
+    let _ = std::fs::remove_file(&path);
+    // The application's own output goes to stderr: stdout carries only the document.
+    let mut child = std::process::Command::new(&exe)
+        .args(args)
+        .env(OPENAPI_PATH_VAR, &path)
+        .env_remove("LISTEN_FDS")
+        .env_remove("LISTEN_PID")
+        .stdin(Stdio::null())
+        .stdout(Stdio::from(std::io::stderr()))
+        .spawn()?;
+    let deadline = std::time::Instant::now() + OPENAPI_TIMEOUT;
+    let status = loop {
+        if let Some(status) = child.try_wait()? {
+            break status;
+        }
+        if std::time::Instant::now() >= deadline {
+            process::stop(&mut child, GRACE)?;
+            let _ = std::fs::remove_file(&path);
+            return Err(std::io::Error::other(format!(
+                "the application did not reach `App::serve` within {} s; \
+                 `lesto openapi` needs `main` to call `App::serve` (or `lambda::serve`)",
+                OPENAPI_TIMEOUT.as_secs()
+            )));
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    let document = std::fs::read(&path);
+    let _ = std::fs::remove_file(&path);
+    let document = match document {
+        Ok(document) if status.success() => document,
+        Ok(_) => {
+            return Err(std::io::Error::other(format!(
+                "the application exited with {status}"
+            )));
+        }
+        Err(_) => {
+            return Err(std::io::Error::other(format!(
+                "the application exited ({status}) without writing its OpenAPI document; \
+                 `lesto openapi` needs `main` to call `App::serve` (or `lambda::serve`)"
+            )));
+        }
+    };
+    match output {
+        Some(output) => std::fs::write(output, document)?,
+        None => {
+            use std::io::Write;
+            let mut stdout = std::io::stdout().lock();
+            stdout.write_all(&document)?;
+            stdout.write_all(b"\n")?;
+        }
+    }
+    Ok(ExitCode::SUCCESS)
 }
 
 /// The socket the application will serve on. `None` where descriptors cannot be inherited.
@@ -210,14 +291,16 @@ mod tests {
     }
 
     #[test]
-    fn parses_reserved_commands() {
+    fn parses_openapi_arguments() {
         assert!(matches!(
-            Cli::parse_from(["lesto", "new", "shop"]).command,
-            Command::New { name } if name == "shop"
+            Cli::parse_from(["lesto", "openapi", "-p", "x", "-o", "api.json"]).command,
+            Command::Openapi { package: Some(p), output: Some(o), .. }
+                if p == "x" && o == std::path::Path::new("api.json")
         ));
-        assert!(matches!(
-            Cli::parse_from(["lesto", "openapi", "-p", "x"]).command,
-            Command::Openapi { package: Some(p) } if p == "x"
-        ));
+    }
+
+    #[test]
+    fn new_is_not_a_command_yet() {
+        assert!(Cli::try_parse_from(["lesto", "new", "shop"]).is_err());
     }
 }

@@ -47,7 +47,8 @@ A Rust web micro-framework with **FastAPI**'s ergonomics, built on [axum](https:
 **Getting started**: install the CLI (`cargo install lesto-cli`, or `cargo install --path
 crates/lesto-cli` from a checkout until it is published), then `lesto dev` in your project. It
 builds, runs, and rebuilds + restarts on every save, keeping the port open while the code compiles
-(like `fastapi dev`). `lesto run` does it once; `lesto new` and `lesto openapi` are reserved.
+(like `fastapi dev`). `lesto run` does it once; `lesto openapi` prints the OpenAPI document without serving
+(`-o api.json` writes it to a file).
 
 **New here?** Start with the [tutorial](docs/tutorial/README.md): fifteen short chapters, from
 "Hello" to security, testing, databases, AWS Lambda and OpenTelemetry, with full code and `curl`
@@ -293,7 +294,7 @@ Bigger items, easiest first:
    resource, reusing the OpenAPI schemas lesto already derives. To be designed carefully before
    any code: naming, auth, which operations map to which MCP primitive.
 
-Smaller items: crates.io publication, `lesto new`, `lesto openapi`, `Store::atomic` (several
+Smaller items: crates.io publication, `lesto new`, `Store::atomic` (several
 statements in one explicit transaction), `AnyOf`/`AllOf` permission requirements, per-operation
 permissions as OpenAPI scopes, `--watch`/`--ignore` for `lesto dev`, exporting the OpenAPI document as
 3.0 with `x-amazon-apigateway-integration` extensions to create an API Gateway from it.

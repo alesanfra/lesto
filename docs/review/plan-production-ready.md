@@ -117,9 +117,14 @@ input" — this is the one place that breaks the rule.
 **Why:** both exit 2 as "reserved". A stranger runs `lesto --help` before anything else.
 
 **Tasks**
-- [ ] Implement `lesto openapi` (build the `App`, print `openapi_json()`; needs a way to reach the
+- [x] Implement `lesto openapi` (build the `App`, print `openapi_json()`; needs a way to reach the
       user's `App` — a `--bin` that prints on an env var or flag is enough), or remove it.
-- [ ] Remove `lesto new` from the CLI until it exists; keep it on the roadmap.
+- [x] Remove `lesto new` from the CLI until it exists; keep it on the roadmap.
+
+**Done (2026-09-23):** `lesto openapi [-p pkg] [-o file] [-- args]` builds the app and runs it
+with `LESTO_OPENAPI_PATH`; `App::serve`/`serve_at`/`serve_until` write the document there and
+return without binding. The app's stdout goes to stderr, 60 s timeout if `main` never reaches
+`serve`. `lesto new` removed from the CLI, still on the roadmap.
 
 ## P0-4. Public API audit
 
