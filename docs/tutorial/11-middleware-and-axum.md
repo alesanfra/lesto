@@ -215,7 +215,10 @@ All axum extractors can be used in handlers. Those that have nothing to do with 
 (`HeaderMap`, `Method`, `Uri`, `Request`, `Bytes`, `String`, `State`, `Extension`) do not appear
 in the documentation. `axum::Json<T>`, `axum::extract::Query<T>` and `axum::extract::Path<T>` are
 documented like lesto's but **without garde validation**: useful when `T` is an external type you
-cannot derive `Validate` on.
+cannot derive `Validate` on. When `T` *does* implement `Validate`, the rules would be silently
+skipped, so lesto warns on the argument ("`axum::Json<T>` ... does not run `T`'s garde rules");
+the warning is a deprecation, so `#[allow(deprecated)]` on the handler keeps an intentional one
+quiet.
 
 For an axum or third-party extractor lesto does not know, implement `OperationInput` on a newtype
 (chapter 8).

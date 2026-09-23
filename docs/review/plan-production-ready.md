@@ -359,9 +359,15 @@ of an app that uses none of them is unchanged.
 (review §4.3).
 
 **Tasks**
-- [ ] Emit a deprecation-style warning from the route macro when the argument is
+- [x] Emit a deprecation-style warning from the route macro when the argument is
       `axum::Json<T>` / `axum::extract::Query<T>` and `T: Validate`, naming `lesto::Json`.
-- [ ] Keep the impls: removing them would break goal 4.
+- [x] Keep the impls: removing them would break goal 4.
+
+**Done (2026-09-23):** autoref specialization in `handler_checks`; the warning is a
+`#[deprecated]` trait method (the only warning a proc macro can raise on stable), silenced with
+`#[allow(deprecated)]`. UI case `axum_json_skips_validation` pins the message; a
+`#[deny(deprecated)]` module in the integration tests proves plain `axum::Json<T>` and
+`lesto::Json<T: Validate>` stay quiet.
 
 ## P3-4. Accept undocumented custom extractors
 

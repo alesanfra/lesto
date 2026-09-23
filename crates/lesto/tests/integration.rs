@@ -1733,3 +1733,36 @@ async fn request_id_is_generated_or_kept() {
     let response = app().into_router().oneshot(with_id).await.unwrap();
     assert_eq!(response.headers()["x-request-id"], "abc-123");
 }
+
+/// The axum-extractor warning (a deprecation, see `tests/ui/axum_json_skips_validation.rs`)
+/// fires only for `axum::Json<T>` with `T: Validate`: none of these may trigger it.
+#[deny(deprecated)]
+mod no_validation_warning_without_cause {
+    use lesto::prelude::*;
+
+    #[derive(Deserialize, JsonSchema)]
+    pub struct Plain {
+        pub name: String,
+    }
+
+    #[lesto::model]
+    pub struct Checked {
+        #[garde(length(min = 1))]
+        pub name: String,
+    }
+
+    #[lesto::post("/plain")]
+    pub async fn plain(lesto::axum::Json(body): lesto::axum::Json<Plain>) -> String {
+        body.name
+    }
+
+    #[lesto::post("/checked")]
+    pub async fn checked(Json(body): Json<Checked>) -> String {
+        body.name
+    }
+
+    #[test]
+    fn registers() {
+        let _ = App::<()>::new().routes(routes![plain, checked]);
+    }
+}

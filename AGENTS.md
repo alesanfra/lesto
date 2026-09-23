@@ -286,6 +286,11 @@ Recorded here because they are not derivable from the code. Do not undo them cas
   the state `S` is inferred from the `App<S>` the set is added to (no `state = ..` needed). With
   a `State<T>` argument or `state = T` the checks run immediately, on the argument's span. A
   missing attribute yields `expected type, found function`.
+- The route macro warns about `axum::Json<T>`/`axum::extract::Query<T>` with `T: Validate`
+  through autoref specialization: `(&ValidationProbe::<Arg>::new()).__lesto_validation()` picks
+  the `#[deprecated]` trait method when the impl for `ValidationProbe<axum::Json<T: Validate>>`
+  applies, the silent one on `&ValidationProbe<T>` otherwise. A deprecation is the only warning
+  a proc macro can raise on stable.
 - A nested `/` route is documented at the prefix itself (that is where axum serves it).
 - `App::merge` / `nest_router` / `From<Router<S>>` take a finished `axum::Router`: served, not
   documented (the handler types are gone by then), but inside every lesto layer.
@@ -418,6 +423,7 @@ Recorded here because they are not derivable from the code. Do not undo them cas
 | `Public cannot hold permissions` | pass `Anyone`, or use an `Authenticated` principal in the handler |
 | `X is not a principal for state S` | `impl Authenticated for X` with `type State = S`, or use `Public` |
 | `#[derive(Store)] expects a tuple struct` | `struct S<M, P>(lesto::db::Store<M, P, Db>);` |
+| warning: `axum::Json<T>` ... does not run `T`'s garde rules | use `lesto::Json`/`lesto::Query`, or `#[allow(deprecated)]` on the handler |
 | `type annotations needed` on `.into()` in a store closure | use `Error::not_found(..)`/`Error::conflict(..)`/`Error::http(e)` |
 
 ## Roadmap and non-goals
