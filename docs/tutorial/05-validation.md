@@ -36,7 +36,7 @@ them (and garde's regex and idna dependencies) when you do not use those rules. 
 ```rust
 use lesto::prelude::*;
 
-#[derive(Deserialize, JsonSchema, Validate)]
+#[lesto::model]
 struct Address {
     #[garde(length(min = 1))]
     street: String,
@@ -44,7 +44,7 @@ struct Address {
     country: String,
 }
 
-#[derive(Deserialize, JsonSchema, Validate)]
+#[lesto::model]
 struct SignUp {
     #[garde(length(min = 3, max = 32), alphanumeric)]
     username: String,
@@ -112,7 +112,7 @@ A `custom` rule has no translation: if you want it documented, say so in the fie
 If a struct has nothing to validate but still has to go through `Json<T>` or `Query<T>`:
 
 ```rust
-#[derive(Deserialize, JsonSchema, Validate)]
+#[lesto::model]
 #[garde(allow_unvalidated)]
 struct Filters {
     tag: Option<String>,

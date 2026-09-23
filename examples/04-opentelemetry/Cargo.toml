@@ -9,8 +9,3 @@ description = "Chapter 15: an API whose traces and logs go to a local OpenObserv
 [dependencies]
 lesto = { path = "../../crates/lesto", features = ["otel", "sqlite"] }
 sqlx = { workspace = true, features = ["sqlite", "derive"] }
-serde.workspace = true
-garde.workspace = true
-schemars.workspace = true
-tokio.workspace = true
-tracing.workspace = true

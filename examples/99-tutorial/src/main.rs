@@ -32,7 +32,7 @@ async fn read_item(Path(item_id): Path<u64>) -> String {
     format!("item {item_id}")
 }
 
-#[derive(Deserialize, JsonSchema)]
+#[lesto::model]
 struct UserItemPath {
     /// Id of the owning user.
     user_id: u64,
@@ -50,7 +50,7 @@ async fn read_pair(Path((a, b)): Path<(u64, u64)>) -> String {
     format!("{a}/{b}")
 }
 
-#[derive(Deserialize, JsonSchema)]
+#[lesto::model]
 #[serde(rename_all = "lowercase")]
 enum ModelName {
     Alexnet,
@@ -69,7 +69,7 @@ async fn get_model(Path(name): Path<ModelName>) -> String {
 
 // ---- Chapter 3 ------------------------------------------------------------------------------
 
-#[derive(Deserialize, JsonSchema, Validate)]
+#[lesto::model]
 struct Pagination {
     /// How many items to skip.
     #[garde(skip)]
@@ -91,7 +91,7 @@ async fn list_items(Query(q): Query<Pagination>) -> String {
     format!("skip={} limit={}", q.skip, q.limit)
 }
 
-#[derive(Deserialize, JsonSchema, Validate)]
+#[lesto::model]
 #[garde(allow_unvalidated)]
 struct Search {
     q: Option<String>,
@@ -104,7 +104,7 @@ async fn search(Query(s): Query<Search>) -> String {
     format!("{:?} exact={}", s.q, s.exact)
 }
 
-#[derive(Deserialize, JsonSchema, Validate)]
+#[lesto::model]
 struct Tags {
     #[garde(inner(length(min = 1)))]
     #[serde(default)]
@@ -166,7 +166,7 @@ async fn update_item(
 
 // ---- Chapter 5 ------------------------------------------------------------------------------
 
-#[derive(Deserialize, JsonSchema, Validate)]
+#[lesto::model]
 struct Address {
     #[garde(length(min = 1))]
     street: String,
@@ -174,7 +174,7 @@ struct Address {
     country: String,
 }
 
-#[derive(Deserialize, JsonSchema, Validate)]
+#[lesto::model]
 struct SignUp {
     #[garde(length(min = 3, max = 32), alphanumeric)]
     username: String,
@@ -194,9 +194,9 @@ struct SignUp {
     display_name: String,
 }
 
-fn no_spaces(value: &str, _ctx: &()) -> garde::Result {
+fn no_spaces(value: &str, _ctx: &()) -> lesto::garde::Result {
     if value.contains(' ') {
-        return Err(garde::Error::new("must not contain spaces"));
+        return Err(lesto::garde::Error::new("must not contain spaces"));
     }
     Ok(())
 }
@@ -464,7 +464,7 @@ mod tests {
     use http_body_util::BodyExt;
     use lesto::axum::body::Body;
     use lesto::http::{Request, StatusCode, header};
-    use serde_json::{Value, json};
+    use lesto::serde_json::{self, Value, json};
     use tower::ServiceExt;
 
     use super::*;

@@ -4,7 +4,8 @@ use lesto::http::request::Parts;
 use lesto::prelude::*;
 use lesto::{BearerAuth, OperationBuilder, OperationInput, Rejection};
 
-#[derive(Clone, Serialize, JsonSchema)]
+#[lesto::model]
+#[derive(Clone)]
 pub struct User {
     pub id: u64,
     pub name: String,

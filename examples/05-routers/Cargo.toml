@@ -8,10 +8,6 @@ description = "Two APIs in one service, FastAPI-router style: /api/app/v1 and /a
 
 [dependencies]
 lesto = { path = "../../crates/lesto" }
-serde.workspace = true
-garde.workspace = true
-schemars.workspace = true
-tokio.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true

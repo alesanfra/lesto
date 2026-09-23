@@ -8,10 +8,6 @@ description = "lesto on AWS Lambda: the same binary serves locally under `lesto 
 
 [dependencies]
 lesto = { path = "../../crates/lesto", features = ["lambda"] }
-serde.workspace = true
-garde.workspace = true
-schemars.workspace = true
-tokio.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true

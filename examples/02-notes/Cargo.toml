@@ -9,10 +9,6 @@ description = "A complete CRUD API on SQLite with the `db` feature: stores, prin
 [dependencies]
 lesto = { path = "../../crates/lesto", features = ["sqlite"] }
 sqlx = { workspace = true, features = ["sqlite", "derive"] }
-serde.workspace = true
-garde.workspace = true
-schemars.workspace = true
-tokio.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true

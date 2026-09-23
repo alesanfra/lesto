@@ -37,8 +37,8 @@ git grep -i presto                                   # the old name must not com
 
 | Goal | State | What is missing |
 |---|---|---|
-| 1. Batteries included | **not met** | user `Cargo.toml` still needs `serde`, `garde`, `schemars`, `tokio`, `sqlx` (P2) |
-| 2. Configure and go | almost | `main` is not one line without tokio in the user's manifest (P2) |
+| 1. Batteries included | met (2026-09-23) | one line; `sqlx` only for `FromRow` users (P2-3) |
+| 2. Configure and go | met (2026-09-23) | `#[lesto::main]` |
 | 3. Very fast | half | 404 path 855 ns over axum (target met); happy path 308 ns over (not "within noise") |
 | 4. Adopt from / leave for axum | friction | no `App::merge`/`nest_router`, custom extractors need an empty impl, no exit chapter (P3) |
 | 5. Standard middleware | met for lesto's own | `lesto::layers` is public; the tower-http batteries are missing (P1, P3) |
@@ -302,13 +302,20 @@ not done: `FromRow` is optional (tuples work), and sqlx's macros are far larger 
 **Depends on:** P2-1, P2-2, P2-3.
 
 **Tasks**
-- [ ] `examples/01-hello`, `02-notes`, `03-lambda`, `04-opentelemetry`, `05-routers`,
+- [x] `examples/01-hello`, `02-notes`, `03-lambda`, `04-opentelemetry`, `05-routers`,
       `99-tutorial`: remove every dependency that lesto can now provide.
-- [ ] Tutorial chapter 1 and `README.md`: the install snippet is one line.
-- [ ] Whatever cannot be removed (garde until P2-2 lands, sqlx, tracing) gets one sentence saying
+- [x] Tutorial chapter 1 and `README.md`: the install snippet is one line.
+- [x] Whatever cannot be removed (garde until P2-2 lands, sqlx, tracing) gets one sentence saying
       why it is still there.
 
 **Done when:** `examples/01-hello/Cargo.toml` lists `lesto` and nothing else.
+
+**Done (2026-09-23):** every example's `[dependencies]` is `lesto` alone, except `02-notes` and
+`04-opentelemetry`, which keep `sqlx` for `#[derive(sqlx::FromRow)]` (P2-3). `tracing` is
+re-exported as `lesto::tracing` (added to the re-export list in the README). All derives in the
+examples, the tutorial and the README went through `#[lesto::model]`; appendix B now points at
+it for "cannot find garde". Dev-dependencies (`tower`, `http-body-util`) are unchanged: they are
+test tooling, not part of the one-line claim.
 
 ---
 

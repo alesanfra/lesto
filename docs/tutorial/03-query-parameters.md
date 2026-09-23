@@ -7,7 +7,7 @@ In lesto, query parameters are declared with a struct and extracted with `Query<
 ```rust
 use lesto::prelude::*;
 
-#[derive(Deserialize, JsonSchema, Validate)]
+#[lesto::model]
 struct Pagination {
     /// How many items to skip.
     #[garde(skip)]
@@ -85,7 +85,7 @@ An `Option<T>` field is optional and, when absent, is `None`. In the documentati
 `required: false`.
 
 ```rust
-#[derive(Deserialize, JsonSchema, Validate)]
+#[lesto::model]
 #[garde(allow_unvalidated)]
 struct Search {
     q: Option<String>,
@@ -103,7 +103,7 @@ A key that appears several times (`?tag=rust&tag=web`) collects into a `Vec<T>`.
 `#[serde(default)]` so that a query string without the key is an empty list rather than a `422`.
 
 ```rust
-#[derive(Deserialize, JsonSchema, Validate)]
+#[lesto::model]
 struct Tags {
     #[garde(inner(length(min = 1)))]
     #[serde(default)]

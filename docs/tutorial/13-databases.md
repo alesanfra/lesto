@@ -500,8 +500,8 @@ Nothing new: a struct with serde, schemars, garde and `sqlx::FromRow`. The `#[le
 macro from chapter 6 gives you the request body for free:
 
 ```rust
-#[lesto::views(Create(text))]
-#[derive(Debug, Serialize, Deserialize, JsonSchema, Validate, sqlx::FromRow)]
+#[lesto::model(views(Create(text)))]
+#[derive(Debug, sqlx::FromRow)]
 pub struct Note {
     #[garde(skip)]
     pub id: i64,

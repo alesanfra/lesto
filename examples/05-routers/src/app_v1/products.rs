@@ -5,7 +5,7 @@ use lesto::prelude::*;
 use crate::AppState;
 use crate::state::Product;
 
-#[derive(Deserialize, JsonSchema, Validate)]
+#[lesto::model]
 pub struct ProductCreate {
     #[garde(length(min = 1, max = 100))]
     pub name: String,

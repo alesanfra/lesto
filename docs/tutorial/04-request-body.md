@@ -162,7 +162,7 @@ One rule, inherited from axum: **the body goes last**, because it consumes the r
 The same serde rules you saw for queries apply:
 
 ```rust
-#[derive(Deserialize, JsonSchema, Validate)]
+#[lesto::model]
 #[garde(allow_unvalidated)]
 struct Item {
     name: String,
@@ -183,7 +183,7 @@ A field with `#[serde(default)]` or of type `Option` does not appear in the sche
 If the client wants `priceWithTax` instead of `price_with_tax`:
 
 ```rust
-#[derive(Serialize, JsonSchema)]
+#[lesto::model]
 #[serde(rename_all = "camelCase")]
 struct ItemOut {
     name: String,

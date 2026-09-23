@@ -25,8 +25,8 @@ impl FromRef<AppState> for Db<Sqlite> {
 
 // ---- the store --------------------------------------------------------------------------------
 
-#[lesto::views(Create(text))]
-#[derive(Serialize, Deserialize, JsonSchema, sqlx::FromRow, Validate)]
+#[lesto::model(views(Create(text)))]
+#[derive(sqlx::FromRow)]
 struct Note {
     #[garde(skip)]
     id: i64,
@@ -82,7 +82,7 @@ async fn create_note(
     store: NoteStore<ReadWrite, Public>,
     Json(body): Json<NoteCreate>,
 ) -> Result<Json<Note>, Error> {
-    tracing::info!(length = body.text.len(), "creating a note");
+    lesto::tracing::info!(length = body.text.len(), "creating a note");
     Ok(Json(store.create(body).await?))
 }
 

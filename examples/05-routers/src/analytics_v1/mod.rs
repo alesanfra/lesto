@@ -6,14 +6,14 @@ use lesto::prelude::*;
 
 use crate::AppState;
 
-#[derive(Serialize, JsonSchema)]
+#[lesto::model]
 pub struct SalesSummary {
     pub orders: usize,
     pub items_sold: u64,
     pub revenue_cents: u64,
 }
 
-#[derive(Serialize, JsonSchema)]
+#[lesto::model]
 pub struct ProductSales {
     pub product_id: u64,
     pub name: String,
@@ -21,7 +21,7 @@ pub struct ProductSales {
     pub revenue_cents: u64,
 }
 
-#[derive(Deserialize, JsonSchema, Validate)]
+#[lesto::model]
 pub struct TopQuery {
     /// How many products to return.
     #[garde(range(min = 1, max = 50))]
