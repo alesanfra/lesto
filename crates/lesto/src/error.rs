@@ -16,7 +16,12 @@ use serde_json::{Map, Value};
 pub const PROBLEM_JSON: &str = "application/problem+json";
 
 /// Anything that can be turned into a [`StatusCode`]: a `StatusCode` or a bare `u16`.
+///
+/// A `u16` outside `100..=599` (the range RFC 9110 defines) never panics: it becomes
+/// `500 Internal Server Error` and the offending value is logged at `error`. A code read from an
+/// upstream response can be passed as is.
 pub trait IntoStatus {
+    /// The status code.
     fn into_status(self) -> StatusCode;
 }
 
@@ -28,7 +33,13 @@ impl IntoStatus for StatusCode {
 
 impl IntoStatus for u16 {
     fn into_status(self) -> StatusCode {
-        StatusCode::from_u16(self).expect("invalid HTTP status code")
+        match self {
+            100..=599 => StatusCode::from_u16(self).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
+            _ => {
+                tracing::error!(status = self, "invalid HTTP status code, answering 500");
+                StatusCode::INTERNAL_SERVER_ERROR
+            }
+        }
     }
 }
 
@@ -580,6 +591,48 @@ mod tests {
             kind: "json_invalid".into(),
         };
         assert_eq!(item.to_problem_error().pointer, "");
+    }
+
+    /// Counts `error` events; enough to see that a log record was written.
+    #[derive(Clone, Default)]
+    struct Errors(std::sync::Arc<std::sync::atomic::AtomicUsize>);
+
+    impl tracing::Subscriber for Errors {
+        fn enabled(&self, _: &tracing::Metadata<'_>) -> bool {
+            true
+        }
+        fn new_span(&self, _: &tracing::span::Attributes<'_>) -> tracing::span::Id {
+            tracing::span::Id::from_u64(1)
+        }
+        fn record(&self, _: &tracing::span::Id, _: &tracing::span::Record<'_>) {}
+        fn record_follows_from(&self, _: &tracing::span::Id, _: &tracing::span::Id) {}
+        fn event(&self, event: &tracing::Event<'_>) {
+            if *event.metadata().level() == tracing::Level::ERROR {
+                self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }
+        }
+        fn enter(&self, _: &tracing::span::Id) {}
+        fn exit(&self, _: &tracing::span::Id) {}
+    }
+
+    #[test]
+    fn out_of_range_status_is_a_logged_500_not_a_panic() {
+        let errors = Errors::default();
+        tracing::subscriber::with_default(errors.clone(), || {
+            for code in [0u16, 99, 600, 999, 1000, u16::MAX] {
+                let error = HttpError::new(code, "upstream said so");
+                assert_eq!(error.status, StatusCode::INTERNAL_SERVER_ERROR, "{code}");
+                let response = error.into_response();
+                assert_eq!(
+                    response.status(),
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "{code}"
+                );
+            }
+        });
+        assert_eq!(errors.0.load(std::sync::atomic::Ordering::SeqCst), 6);
+        assert_eq!(418u16.into_status(), StatusCode::IM_A_TEAPOT);
+        assert_eq!(599u16.into_status().as_u16(), 599);
     }
 
     #[test]

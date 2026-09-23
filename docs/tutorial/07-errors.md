@@ -29,6 +29,8 @@ content-type: application/problem+json
 
 Ready-made constructors: `bad_request`, `unauthorized`, `forbidden`, `not_found`, `conflict`,
 `internal`. For other statuses, `HttpError::new(418, "...")` or `HttpError::new(StatusCode::GONE, "...")`.
+A bare number outside `100..=599` never panics: it becomes a `500` and the value is logged at
+`error`, so a status copied from an upstream response is safe to pass through.
 
 ## The format: RFC 9457
 
