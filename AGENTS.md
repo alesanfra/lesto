@@ -447,14 +447,6 @@ Recorded here because they are not derivable from the code. Do not undo them cas
 
 ## Roadmap and non-goals
 
-The ordered, executable queue lives in [`docs/review/plan-production-ready.md`](docs/review/plan-production-ready.md):
-what blocks publication (key order as a documented guarantee, the panicking `IntoStatus`, the
-public API audit and the breaking decisions), then production robustness (shutdown deadline,
-timeout, body limit), then "batteries included" (`#[lesto::main]`, `#[lesto::model]`, one line
-in every manifest), then axum interoperability and the rest of the tower-http batteries. [`plan-oidc.md`](docs/review/plan-oidc.md) is the queue for roadmap item 2 (OAuth2 / JWT,
-branch `oidc`). [`plan-B-performance.md`](docs/review/plan-B-performance.md)
-is the finished performance workstream, with its numbers.
-
 Bigger items, easiest first (mirrored in `README.md`, keep the two lists in sync):
 
 1. Lambda adapter tested end to end on floci (<https://floci.io/>: local AWS emulator, Lambda +
