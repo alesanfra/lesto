@@ -20,3 +20,5 @@ First release, 0.1.0: `lesto`, `lesto-macros`, `lesto-cli`.
 - Features `email` and `url` (default on) for the garde rules of the same name.
 - JSON keys keep declaration order in the OpenAPI document and in response bodies.
 - `lesto dev`, `lesto run`, `lesto openapi`.
+- `lesto::db::NotFoundExt::or_not_found`: a bare `sqlx::Error::RowNotFound` answers 500, the
+  lookups that mean 404 say so.

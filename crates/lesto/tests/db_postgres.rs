@@ -378,7 +378,7 @@ async fn a_serializable_conflict_answers_409_and_not_500() {
             .map(|v| v.to_str().unwrap()),
         Some("0")
     );
-    assert!(problem.detail.contains("retry"), "{}", problem.detail);
+    assert!(problem.detail().contains("retry"), "{}", problem.detail());
 }
 
 /// The same contention, with the retry budget left on: the loser re-runs its closure, this time

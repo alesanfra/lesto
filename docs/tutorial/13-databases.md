@@ -141,8 +141,9 @@ impl<M: Mode, P> NoteStore<M, P> {
         self.read(Anyone, async |conn| {
             sqlx::query_as("SELECT id, author, text FROM notes WHERE id = ?")
                 .bind(id)
-                .fetch_one(conn) // RowNotFound → 404
+                .fetch_one(conn)
                 .await
+                .or_not_found("no such note")
         })
         .await
     }
@@ -513,11 +514,17 @@ documents itself:
 | Cause | Response |
 |---|---|
 | missing permission | 403, with `required_permission` |
-| `fetch_one` found no row (`RowNotFound`) | 404 |
+| `.or_not_found(..)` on a query that found no row | 404 |
 | unique or foreign key violation | 409 |
 | serialization failure or deadlock (`40001`, `40P01`, `SQLITE_BUSY`) | 409 with `Retry-After: 0` |
 | `Error::not_found(..)`, `Error::conflict(..)`, any `HttpError` | that error |
-| other sqlx errors, `.internal()`, `anyhow::Error` | 500, detail hidden, cause logged with `tracing` |
+| other sqlx errors (a bare `RowNotFound` too), `.internal()`, `anyhow::Error` | 500, detail hidden, cause logged with `tracing` |
+
+A `fetch_one` that finds nothing is a 500 unless you say otherwise. Only some lookups mean "the
+resource does not exist": the note named in the path, yes; the author row a note points at, no —
+that one missing is a bug, and a 404 would hide it. Mark the first kind with
+`.or_not_found("no such note")` (from the prelude); on `fetch_optional`, `None` becomes the 404
+the same way.
 
 In OpenAPI the operation gets 403, 404, 409 and `default` responses with the `Problem` schema,
 plus 401 and the security scheme when the principal is authenticated.

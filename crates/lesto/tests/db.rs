@@ -92,6 +92,7 @@ impl<M: Mode, P> NoteStore<M, P> {
                 .bind(id)
                 .fetch_one(conn)
                 .await
+                .or_not_found("no such note")
         })
         .await
     }
@@ -315,7 +316,7 @@ async fn missing_permission_is_403_with_required_permission() {
 }
 
 #[tokio::test]
-async fn row_not_found_is_404_and_unique_violation_is_409() {
+async fn or_not_found_is_404_and_unique_violation_is_409() {
     let router = router(Db::new(pool(&["dup"]).await)).await;
 
     let (status, body) = send(&router, get("/notes/99")).await;
@@ -453,9 +454,24 @@ fn error_status_mapping() {
         Error::Forbidden { permission: "x" }.status(),
         StatusCode::FORBIDDEN
     );
+    // A bare `RowNotFound` is a bug until a lookup says otherwise with `or_not_found`.
     assert_eq!(
         Error::from(sqlx::Error::RowNotFound).status(),
+        StatusCode::INTERNAL_SERVER_ERROR
+    );
+    let missing: Result<(), sqlx::Error> = Err(sqlx::Error::RowNotFound);
+    assert_eq!(
+        missing.or_not_found("no such note").unwrap_err().status(),
         StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        None::<()>.or_not_found("gone").unwrap_err().status(),
+        StatusCode::NOT_FOUND
+    );
+    let other: Result<(), sqlx::Error> = Err(sqlx::Error::PoolClosed);
+    assert_eq!(
+        other.or_not_found("x").unwrap_err().status(),
+        StatusCode::INTERNAL_SERVER_ERROR
     );
     assert_eq!(
         Error::from(sqlx::Error::PoolClosed).status(),
