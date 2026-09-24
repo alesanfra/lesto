@@ -10,7 +10,8 @@ on an `async fn`, `Json<T>`/`Query<T>`/`Path<T>` extractors that validate with g
 3.1 derived from handler argument and return types, RFC 9457 errors, Scalar at `/docs` and
 Swagger UI at `/swagger`. The `db` feature adds sqlx stores with principals and permissions,
 the `lambda` feature runs the app on AWS Lambda, the `oidc` feature verifies bearer JWTs against an
-OpenID Connect provider; `lesto-cli` adds `lesto dev`. One library crate
+OpenID Connect provider, the `mcp` feature serves routes marked `mcp = "tool"`, `"resource"` or
+`"prompt"` to AI agents over the Model Context Protocol; `lesto-cli` adds `lesto dev`. One library crate
 with features, like FastAPI's extras: `lesto-macros` is separate only because proc macros must
 be, `lesto-cli` because it is a binary. The project was called *presto* until 2026-09-12 (the
 crates.io name was taken).
@@ -56,6 +57,18 @@ crates/lesto/             library
     protect.rs            Protect / ProtectLayer: App::protect, 403 insufficient_scope
     claims.rs             Claims (blanket over DeserializeOwned), StandardClaims, scopes
     config.rs             LESTO_OIDC_* read through a getter
+  src/mcp/                feature `mcp`: routes as MCP tools, resources, prompts (design:
+                          docs/design/mcp.md)
+    mod.rs                Mcp (config), McpCall (inner-request extension), Endpoint: the /mcp
+                          handler, era selection, discover/initialize, lists, call/read/get
+    protocol.rs           JSON-RPC envelope, Era (modern 2026-07-28 / legacy 2025-*), header
+                          validation, per-era result shapes and error codes
+    catalog.rs            operations → tools, resources, prompts from the OpenAPI document:
+                          flat input schema, output schema, $defs, names and collisions per
+                          kind, method hints, resource URIs and template matching
+    dispatch.rs           arguments / resource URI → inner request (path, query, body, forwarded
+                          headers), inner response → tool result, resource contents, cache fields
+    prompt.rs             Prompt (IntoResponse + OperationOutput), PromptMessage, Role
   tests/integration.rs    end-to-end tests via tower::ServiceExt::oneshot
   benches/overhead.rs     per-request overhead against plain axum (harness = false, no dev-dep)
   tests/db.rs             SQLite in-memory end-to-end for lesto::db
@@ -70,6 +83,8 @@ crates/lesto/             library
                           (test-only keys): every check, key rotation, protect, lesto::db
   tests/oidc_provider.rs  the same against a real provider (mock-oauth2-server); skipped unless
                           LESTO_TEST_OIDC_URL is set. CI runs it with an `oauth2` service
+  tests/mcp.rs            the MCP endpoint through oneshot, both eras
+  tests/mcp_rmcp.rs       the same driven by rmcp's client (dev-dependency only) on 127.0.0.1:0
   tests/listener.rs       LISTEN_FDS socket inheritance
   tests/shutdown.rs       graceful shutdown (serve_until) finishes in-flight requests
   tests/ui/*.rs           compile-fail cases; *.expected lists the diagnostic fragments lesto owns
@@ -87,8 +102,8 @@ crates/lesto-cli/         the `lesto` binary: dev (watch + rebuild + restart, so
   src/process.rs          spawn with the socket on fd 3 (LISTEN_FDS), stop (SIGTERM, grace, SIGKILL)
   src/watch.rs            notify watcher, ignore filters, debounce
 examples/01-hello/        package `hello`: one route, the smallest app
-examples/02-notes/        package `notes`: full CRUD on SQLite with lesto::db, split into
-                          lib.rs / state.rs / auth.rs / notes/{model,store,handlers}.rs, tests/api.rs
+examples/02-notes/        package `notes`: full CRUD on SQLite with lesto::db (and MCP tools, a
+                          resource and a prompt; not delete), split into lib.rs / state.rs / auth.rs / notes/{model,store,handlers}.rs, tests/api.rs
 examples/03-lambda/       package `lambda`: chapter 14 (lesto::lambda), in-memory notes, event-fixture test
 examples/04-opentelemetry/ package `opentelemetry-example` (not `opentelemetry`: that is the API
                           crate): chapter 15 end to end — compose.yaml with Jaeger (traces) and
@@ -101,6 +116,7 @@ examples/05-routers/      package `routers`: chapter 10 as a running app, two AP
 examples/99-tutorial/     package `tutorial`: every tutorial snippet, compiled and tested (keep in sync;
                           appendix D's plain axum router too)
 docs/tutorial/            the tutorial, mdBook (docs/book.toml, docs/build.sh → docs/book, gitignored)
+docs/design/              written designs of bigger features (mcp.md), not part of the book
 ```
 
 ## Commands
@@ -114,10 +130,12 @@ cargo deny check                              # licenses and advisories (deny.to
 cargo check -p lesto --no-default-features --features db   # each feature alone must compile too
 cargo check -p lesto --no-default-features --features otel
 cargo check -p lesto --no-default-features --features oidc
+cargo check -p lesto --no-default-features --features mcp
 cargo test -p lesto --test ui                 # after changing a diagnostic message, update tests/ui/*.expected
 sh docs/build.sh                              # needs `cargo install mdbook`
 cargo bench -p lesto                          # overhead vs axum; LESTO_BENCH_ITERS/_ROUNDS shrink it
 sh scripts/bench-http.sh                      # throughput over a socket (needs `oha`)
+sh scripts/mcp-inspector.sh                   # MCP endpoint vs MCP Inspector CLI, both eras (Node 22.19+, jq)
 LESTO_PORT=8765 cargo run -p notes            # port 8000 may be taken on dev machines
 docker run --rm -e POSTGRES_PASSWORD=lesto -p 5432:5432 postgres:18   # for tests/db_postgres.rs
 (cd examples/04-opentelemetry && docker compose up -d openobserve && sh verify.sh)  # OTLP end to end
@@ -130,7 +148,7 @@ cargo run -p lesto-cli -- dev -p notes --port 8765      # lesto dev from this ch
 
 Test, clippy, fmt, rustdoc and (if docs changed) the mdBook build must pass before a change is
 done; `.github/workflows/ci.yml` runs the same on every push and pull request, in three jobs
-(lint, test with a Postgres service for `db_postgres` and a mock-oauth2-server one for `oidc_provider`, `cargo check` on the MSRV 1.94, which
+(lint, test with a Postgres service for `db_postgres`, a mock-oauth2-server one for `oidc_provider` and `scripts/mcp-inspector.sh`, `cargo check` on the MSRV 1.94, which
 `sqlx` 0.9 dictates) built with `--profile ci` (unoptimized dependencies, no debug info). When
 raising `rust-version`, change the MSRV job too. Do not claim success without running them. Gate commits on the test result, never on "it
 should pass". Run `git grep -i presto` before committing: the old name must not come back.
@@ -321,6 +339,40 @@ Recorded here because they are not derivable from the code. Do not undo them cas
   called), so builder order does not matter, and before the docs routes are added. `Claims`
   has no `on_unimplemented`: with a blanket impl rustc reports serde's own bound, which already
   says to derive `Deserialize` (`tests/ui/oidc_claims_not_deserialize.rs`).
+- **`lesto::mcp`: a tool call is an in-process request to the app's own router** (decided
+  2026-09-24, full design in `docs/design/mcp.md`). The arguments are split into path, query and
+  JSON body from the operation's OpenAPI description, the transport's headers are forwarded, and
+  the response becomes the result, so validation, auth, `protect`, layers and spans are the
+  route's own and the MCP layer validates no schema. Exposure is opt-in per route
+  (`mcp = "tool"`); `App::mcp` alone exposes nothing. Arguments are flat (parameters and body
+  properties side by side) because models handle that best; the body goes under `body` when it
+  is not an object or a name collides. A `401` (or `403 insufficient_scope`) from the route is
+  returned as the transport's own response, since that is where MCP clients look for the OAuth
+  challenge. **Dual-era, stateless**: 2026-07-28 (no handshake, `_meta` version, `Mcp-Method`/
+  `Mcp-Name` validated against the body) plus 2025-11-25/2025-06-18 served without a session,
+  because client support for 2026-07-28 was unconfirmed and even `rmcp` 3.4 defaults to the
+  legacy handshake; the era is chosen per request (`protocol::select_era`) and `Mcp::legacy(false)`
+  drops the old one. JSON responses only: no SSE, no server-to-client requests. **Hand-written
+  protocol, `rmcp` as a dev-dependency**: `rmcp` at runtime would replace only the envelope, could
+  not turn the inner `401` into the transport status, and brings a tree and major-version churn;
+  `tests/mcp_rmcp.rs` drives the server with its client in both eras instead, so a divergence
+  from the SDK's reading of the spec fails CI. Schemas are made portable for stricter clients:
+  the output schema's root is inlined (the TypeScript SDK drops a legacy tool whose output
+  schema lacks a top-level `"type": "object"`; `rmcp` does not, which is why the Inspector check
+  below matters) and `"type": [T, "null"]` becomes `anyOf`. `scripts/mcp-inspector.sh` (run by
+  CI after the tests) checks exactly that against `examples/02-notes` with a pinned Inspector
+  version, in both eras. Tool names default to the handler's name and fall
+  back to the `operationId` when two collide; two equal explicit names panic in `into_router`,
+  like an axum route conflict. Names are one namespace per kind (tools, resources, prompts).
+  **Resources and prompts are `GET` routes** (a compile error otherwise), dispatched the same
+  way (added 2026-09-24): a resource URI is `resource_base` + the path, matched segment by
+  segment and forwarded still percent-encoded (axum decodes it, so lesto never re-encodes); its
+  `ttlMs`/`cacheScope` come from the route's `Cache-Control`, and nothing is cacheable without
+  one, because the data may depend on the caller. A prompt route returns `lesto::mcp::Prompt`,
+  whose JSON *is* the `prompts/get` result, so the route stays usable over plain HTTP and the
+  endpoint passes the body through; a `4xx` from it is `-32602` (the arguments' fault), checked
+  at compile time through `__private::PromptOutput`. The methods of a kind the app does not
+  expose answer `-32601`, as the capabilities announce.
 - **`lesto::lambda` wraps `lambda_http`, it does not reimplement it.** The official runtime already
   turns API Gateway v1/v2, Function URL and ALB events into `http::Request`s and accepts any
   tower service, so the crate adds only what lesto users need: the Lambda-or-local switch on
@@ -365,6 +417,13 @@ Recorded here because they are not derivable from the code. Do not undo them cas
   `tower_http::catch_panic` returns `Response<UnsyncBoxBody<..>>`: it would re-box every
   response body, and axum would wrap it in `Body` again — an allocation per request to save a
   hundred lines.
+- **The MCP route reaches the router it is part of** without a reference cycle: `into_router`
+  builds the endpoint first, applies every layer to the router *and* to the endpoint's
+  `MethodRouter` step by step (`mcp_layer!`), then hands the finished router (without `/mcp`) to
+  the endpoint and adds the route last. The handler takes `State<S>` and builds
+  `router.with_state(state)` once, on the first call (`OnceLock`); tool calls, resource reads and prompts run inside the
+  timeout, body limit, `protect` and span of the app, but outside CORS and compression, which
+  are added after.
 - `App::serve` → `serve_at` → `serve_on` → `serve_until(listener, shutdown)`;
   `shutdown_signal()` is `SIGTERM` or `Ctrl-C`. Graceful shutdown is `axum::serve(..)
   .with_graceful_shutdown`, raced against `shutdown_timeout` (30 s default) once the signal
@@ -481,6 +540,10 @@ Recorded here because they are not derivable from the code. Do not undo them cas
 | `#[derive(Store)] expects a tuple struct` | `struct S<M, P>(lesto::db::Store<M, P, Db>);` |
 | warning: `axum::Json<T>` ... does not run `T`'s garde rules | use `lesto::Json`/`lesto::Query`, or `#[allow(deprecated)]` on the handler |
 | `type annotations needed` on `.into()` in a store closure | use `Error::not_found(..)`/`Error::conflict(..)`/`Error::http(e)` |
+| `an MCP resource must be a GET route` (or prompt) | expose an operation that changes something as `mcp = "tool"` |
+| `X cannot be the response of an MCP prompt` | return `lesto::mcp::Prompt` (or `Result<Prompt, E>`) |
+| panic: `two routes are exposed as the MCP tool x` (or resource, prompt) | two equal `mcp(.., name = ..)` of one kind; rename one |
+| panic: `cannot be an MCP resource: its query parameter q is required` | make the parameter optional, or expose the route as a tool |
 
 ## Roadmap and non-goals
 
@@ -489,9 +552,8 @@ Bigger items, easiest first (mirrored in `README.md`, keep the two lists in sync
 1. Lambda adapter tested end to end on floci (<https://floci.io/>: local AWS emulator, Lambda +
    API Gateway, LocalStack drop-in on port 4566, native binary or Docker, MIT) in CI, on top of
    the event-fixture tests in `tests/lambda.rs`.
-2. MCP from the route attribute: `mcp = "tool" | "prompt" | "resource"` on `#[lesto::get]` and
-   friends exposes the operation to agents, reusing the derived JSON schemas. Needs a written
-   design first (naming, auth, which operations map to which MCP primitive, transport).
+2. RFC 9728 protected resource metadata for MCP with `oidc`: phase 3 of `docs/design/mcp.md`.
+   Tools, resources and prompts (phases 1 and 2) are done.
 
 Smaller items, in rough priority order: crates.io publication (publish order: `lesto-macros`,
 `lesto`, `lesto-cli`; the manifests are ready); `lesto new`

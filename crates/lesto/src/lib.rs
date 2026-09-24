@@ -11,7 +11,8 @@
 //!   scheme and requirement in the document;
 //! * optional features: `db` (+ `postgres`/`mysql`/`sqlite`) adds sqlx stores with principals
 //!   and permissions ([`db`]); `lambda` runs the app on AWS Lambda ([`lambda`]); `oidc`
-//!   verifies bearer JWTs against an OpenID Connect provider ([`oidc`]); `anyhow` converts
+//!   verifies bearer JWTs against an OpenID Connect provider ([`oidc`]); `mcp` exposes selected
+//!   operations to agents over the Model Context Protocol ([`mcp`]); `anyhow` converts
 //!   `anyhow::Error` into a `500`.
 //!
 //! ```no_run
@@ -60,6 +61,8 @@ pub mod extract;
 #[cfg(feature = "lambda")]
 pub mod lambda;
 pub mod layers;
+#[cfg(feature = "mcp")]
+pub mod mcp;
 #[cfg(feature = "otel")]
 mod metrics;
 #[cfg(feature = "oidc")]
@@ -83,7 +86,8 @@ pub use extract::{Json, Path, Query};
 pub use operation::{OperationBuilder, OperationHandler, OperationInput, OperationOutput};
 pub use response::{Accepted, Created, NoContent};
 pub use route::{
-    PendingOperation, RouteInfo, RouteMeta, RouteSet, delete, get, head, options, patch, post, put,
+    McpExpose, PendingOperation, RouteInfo, RouteMeta, RouteSet, delete, get, head, options, patch,
+    post, put,
 };
 pub use security::{
     ApiKey, ApiKeyScheme, AuthScheme, Basic, BasicAuth, Bearer, BearerAuth, Security,
@@ -258,4 +262,18 @@ pub mod __private {
     #[cfg(not(feature = "strict-docs"))]
     pub fn check_strict_input<T>() {}
     pub fn check_documented_output<T: crate::OperationOutput>() {}
+
+    /// The return type of a route marked `mcp = "prompt"`.
+    #[diagnostic::on_unimplemented(
+        message = "`{Self}` cannot be the response of an MCP prompt",
+        label = "a route marked `mcp = \"prompt\"` must return `lesto::mcp::Prompt`",
+        note = "return `lesto::mcp::Prompt` or `Result<lesto::mcp::Prompt, E>` (feature `mcp`): `Prompt::new().user(\"..\")`",
+        note = "a route that returns data is a resource: `mcp = \"resource\"`"
+    )]
+    pub trait PromptOutput {}
+    #[cfg(feature = "mcp")]
+    impl PromptOutput for crate::mcp::Prompt {}
+    #[cfg(feature = "mcp")]
+    impl<E: IntoResponse> PromptOutput for Result<crate::mcp::Prompt, E> {}
+    pub fn check_prompt_output<T: PromptOutput>() {}
 }

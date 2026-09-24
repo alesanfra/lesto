@@ -9,6 +9,7 @@ pub use auth::{Tokens, User};
 pub use state::AppState;
 
 use lesto::App;
+use lesto::mcp::Mcp;
 use sqlx::sqlite::SqlitePoolOptions;
 use sqlx::{Pool, Sqlite};
 
@@ -18,6 +19,10 @@ pub fn build_app() -> App<AppState> {
         .version("0.1.0")
         .description("Public reads, authenticated writes, permission-checked deletes")
         .routes(notes::routes())
+        // The routes marked `mcp(..)` are served to agents at /mcp.
+        .mcp(Mcp::new().instructions(
+            "Short notes. Anyone can read; writing needs a bearer token with notes:write.",
+        ))
 }
 
 /// An in-memory SQLite database with the migrations in `migrations/` applied.

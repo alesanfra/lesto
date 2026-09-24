@@ -3,6 +3,7 @@
 
 mod auth;
 mod errors;
+mod mcp;
 mod oidc;
 mod state;
 mod users;

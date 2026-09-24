@@ -225,3 +225,98 @@ fn openapi_reflects_the_types() {
     assert!(patch["responses"]["403"].is_object());
     assert!(patch["responses"]["404"].is_object());
 }
+
+/// An MCP 2026-07-28 request to `/mcp`: version in `_meta`, method and tool name in headers.
+async fn mcp(
+    router: &Router,
+    method: &str,
+    params: Value,
+    token: Option<&str>,
+) -> (StatusCode, Value) {
+    let mut params = params;
+    params["_meta"] = json!({"io.modelcontextprotocol/protocolVersion": "2026-07-28"});
+    let mut req = Request::post("/mcp")
+        .header(header::CONTENT_TYPE, "application/json")
+        .header("mcp-protocol-version", "2026-07-28")
+        .header("mcp-method", method);
+    if let Some(name) = params
+        .get("name")
+        .or_else(|| params.get("uri"))
+        .and_then(Value::as_str)
+    {
+        req = req.header("mcp-name", name);
+    }
+    if let Some(t) = token {
+        req = req.header(header::AUTHORIZATION, format!("Bearer {t}"));
+    }
+    let body = json!({"jsonrpc": "2.0", "id": 1, "method": method, "params": params});
+    let res = router
+        .clone()
+        .oneshot(req.body(Body::from(body.to_string())).unwrap())
+        .await
+        .unwrap();
+    let status = res.status();
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+    )
+}
+
+#[lesto::test]
+async fn agents_use_the_same_routes_over_mcp() {
+    let r = router().await;
+
+    let (_, reply) = mcp(&r, "tools/list", json!({}), None).await;
+    let names: Vec<&str> = reply["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["name"].as_str().unwrap())
+        .collect();
+    // `delete` is not a tool.
+    assert_eq!(
+        names,
+        ["list_notes", "get_note", "create_note", "update_note"]
+    );
+
+    // Writing needs the token: the route's 401 is the MCP response's.
+    let create = json!({"name": "create_note", "arguments": {"text": "from an agent"}});
+    let (status, _) = mcp(&r, "tools/call", create.clone(), None).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    let (status, reply) = mcp(&r, "tools/call", create, Some("bob-token")).await;
+    assert_eq!(status, StatusCode::OK);
+    let note = &reply["result"]["structuredContent"];
+    assert_eq!(note["author"], "bob");
+    let id = note["id"].as_i64().unwrap();
+
+    // Path parameter and body properties side by side.
+    let update = json!({"name": "update_note", "arguments": {"id": id, "text": ""}});
+    let (_, reply) = mcp(&r, "tools/call", update, Some("bob-token")).await;
+    assert_eq!(reply["result"]["isError"], true, "{reply}");
+
+    let (_, list) = call(&r, Method::GET, "/notes", None, None).await;
+    assert_eq!(list[0]["text"], "from an agent");
+
+    // The note's text is a resource; its URI is the route's path under `lesto://notes`.
+    let (_, reply) = mcp(&r, "resources/templates/list", json!({}), None).await;
+    assert_eq!(
+        reply["result"]["resourceTemplates"][0]["uriTemplate"],
+        "lesto://notes/notes/{id}/text"
+    );
+    let read = json!({"uri": format!("lesto://notes/notes/{id}/text")});
+    let (_, reply) = mcp(&r, "resources/read", read, None).await;
+    assert_eq!(reply["result"]["contents"][0]["text"], "from an agent");
+
+    let tidy =
+        json!({"name": "tidy_note", "arguments": {"id": id.to_string(), "audience": "the team"}});
+    let (_, reply) = mcp(&r, "prompts/get", tidy, None).await;
+    let text = reply["result"]["messages"][0]["content"]["text"]
+        .as_str()
+        .unwrap();
+    assert!(
+        text.contains("the team") && text.contains("from an agent"),
+        "{text}"
+    );
+}

@@ -125,3 +125,31 @@ The provider puts in `aud` (or `iss`) something other than what lesto expects. D
 the provider's own (behind a proxy, the provider must announce the public URL). The reason is
 logged at `debug` by `lesto`: `RUST_LOG=lesto=debug` shows it when a subscriber is installed
 (chapter 15).
+
+## `an MCP resource must be a GET route` (or prompt)
+
+Resources and prompts are read, so only a `GET` route can be one. An operation that creates or
+changes something is a tool: `mcp = "tool"` (chapter 16).
+
+## `` `X` cannot be the response of an MCP prompt``
+
+A route marked `mcp = "prompt"` builds the prompt's messages: it returns `lesto::mcp::Prompt` (or
+`Result<Prompt, E>`), for example `Prompt::new().user("..")`. A route that returns data for the
+model to read is a resource: `mcp = "resource"`.
+
+## `panicked at 'two routes are exposed as the MCP tool `x`'` (or resource, prompt)
+
+Two routes of the same kind carry the same `name = "x"`. Names must be unique per kind across
+the app, nested apps included: rename one. Default names (the handler's) never collide: when two
+exposed handlers of a kind share a name, both use their `operationId`.
+
+## `panicked at 'GET /path cannot be an MCP resource: its query parameter `q` is required'`
+
+A resource is read by its URI alone, so a required query parameter could never be filled. Make
+it optional (`Option<T>`), or expose the route as a tool, whose arguments can carry it.
+
+## An MCP client says the server rejected the request with `403`
+
+The request came from a browser page whose origin is not on this machine, possibly your own
+public domain. The endpoint refuses such `Origin`s against DNS rebinding; list the page's origin
+in `Mcp::allowed_origins([..])`.

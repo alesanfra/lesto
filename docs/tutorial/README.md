@@ -23,6 +23,7 @@ Prerequisites: stable Rust (`rustup`), `curl` and a browser.
 | 13 | [Databases](13-databases.md) | sqlx stores with the `db` feature: transactions, principals, permissions |
 | 14 | [AWS Lambda](14-aws-lambda.md) | The same binary behind API Gateway with the `lambda` feature |
 | 15 | [Observability](15-observability.md) | Request and store spans, OpenTelemetry semantic conventions, OTLP |
+| 16 | [MCP](16-mcp.md) | Routes as tools, resources and prompts for AI agents, both protocol eras, authentication |
 | A | [From FastAPI to lesto](A-from-fastapi-to-lesto.md) | Correspondence table |
 | B | [Common problems](B-common-problems.md) | Compile errors and how to fix them |
 | C | [Why axum and not actix-web](C-why-axum.md) | The reasons behind the choice of core |

@@ -246,5 +246,4 @@ or send to the OpenTelemetry Lambda layer, which does that for you.
   span off.
 - `examples/04-opentelemetry` runs the whole thing against a local Jaeger or OpenObserve.
 
-Appendices: [From FastAPI to lesto](A-from-fastapi-to-lesto.md), [Common problems](B-common-problems.md),
-[Why axum and not actix-web](C-why-axum.md).
+Next: [MCP: tools, resources and prompts for agents](16-mcp.md).

@@ -1,0 +1,2 @@
+error: an MCP tool name is 1 to 128 characters of letters, digits, `_`, `-` and `.`, e.g. `name = "search_notes"`
+--> mcp_invalid_tool_name.rs:2

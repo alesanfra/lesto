@@ -40,6 +40,127 @@ struct RouteArgs {
     /// App state type used for the compile-time extractor checks (default: inferred from
     /// a `State<T>` argument, else `()`).
     state: Option<Type>,
+    /// `mcp = "tool" | "resource" | "prompt"` / `mcp(tool, name = "..")`: expose the operation
+    /// over MCP.
+    mcp: Option<McpArg>,
+}
+
+/// What an operation is over MCP.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum McpKind {
+    Tool,
+    Resource,
+    Prompt,
+}
+
+impl McpKind {
+    fn word(self) -> &'static str {
+        match self {
+            McpKind::Tool => "tool",
+            McpKind::Resource => "resource",
+            McpKind::Prompt => "prompt",
+        }
+    }
+}
+
+/// The `mcp` route option: the operation is an MCP tool, resource or prompt, optionally under
+/// an explicit name.
+struct McpArg {
+    kind: McpKind,
+    /// Where the kind was written, for the diagnostics that depend on the method.
+    span: proc_macro2::Span,
+    name: Option<LitStr>,
+}
+
+impl McpArg {
+    /// `mcp = "tool"`.
+    fn from_value(expr: &Expr) -> syn::Result<Self> {
+        let kind = expect_str(expr)?;
+        Ok(McpArg {
+            kind: mcp_kind(&kind.value(), kind.span())?,
+            span: kind.span(),
+            name: None,
+        })
+    }
+
+    /// `mcp(tool)` / `mcp(tool, name = "search_notes")`.
+    fn from_list(list: &syn::MetaList) -> syn::Result<Self> {
+        let items = list.parse_args_with(Punctuated::<Meta, Token![,]>::parse_terminated)?;
+        let mut items = items.into_iter();
+        let Some(Meta::Path(kind)) = items.next() else {
+            return Err(syn::Error::new_spanned(
+                list,
+                "`mcp(..)` starts with what the operation is: `mcp(tool, name = \"search_notes\")`",
+            ));
+        };
+        let kind_name = kind.get_ident().map(Ident::to_string).unwrap_or_default();
+        let span = kind.span();
+        let kind = mcp_kind(&kind_name, span)?;
+        let mut name = None;
+        for item in items {
+            match item {
+                Meta::NameValue(nv) if nv.path.is_ident("name") => {
+                    let value = expect_str(&nv.value)?;
+                    check_mcp_name(&value, kind)?;
+                    name = Some(value);
+                }
+                other => {
+                    return Err(syn::Error::new_spanned(
+                        other,
+                        "unknown `mcp` option; the only one is `name = \"..\"`: `mcp(tool, name = \"search_notes\")`",
+                    ));
+                }
+            }
+        }
+        Ok(McpArg { kind, span, name })
+    }
+
+    /// Resources and prompts are read, so they must be `GET` routes.
+    fn check_method(&self, method: &str) -> syn::Result<()> {
+        if self.kind == McpKind::Tool || method == "GET" {
+            return Ok(());
+        }
+        let kind = self.kind.word();
+        Err(syn::Error::new(
+            self.span,
+            format!(
+                "an MCP {kind} must be a GET route (this one is {method}); expose an operation that changes something as a tool: `mcp = \"tool\"`"
+            ),
+        ))
+    }
+}
+
+fn mcp_kind(kind: &str, span: proc_macro2::Span) -> syn::Result<McpKind> {
+    match kind {
+        "tool" => Ok(McpKind::Tool),
+        "resource" => Ok(McpKind::Resource),
+        "prompt" => Ok(McpKind::Prompt),
+        _ => Err(syn::Error::new(
+            span,
+            "unknown MCP kind; expected `mcp = \"tool\"`, `mcp = \"resource\"` or `mcp = \"prompt\"` (or `mcp(tool, name = \"..\")`)",
+        )),
+    }
+}
+
+/// MCP names: 1 to 128 characters of `A-Z a-z 0-9 _ - .`, which also keeps them safe in the
+/// `Mcp-Name` header.
+fn check_mcp_name(name: &LitStr, kind: McpKind) -> syn::Result<()> {
+    let value = name.value();
+    let valid = (1..=128).contains(&value.len())
+        && value
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'));
+    if valid {
+        Ok(())
+    } else {
+        Err(syn::Error::new(
+            name.span(),
+            format!(
+                "an MCP {} name is 1 to 128 characters of letters, digits, `_`, `-` and `.`, e.g. `name = \"search_notes\"`",
+                kind.word()
+            ),
+        ))
+    }
 }
 
 /// One item of `security(..)`: `"name"` or `name = ["scope", ..]` / `"name" = ["scope"]`.
@@ -89,6 +210,7 @@ impl Parse for RouteArgs {
             security: Vec::new(),
             public: false,
             state: None,
+            mcp: None,
         };
         if input.is_empty() {
             return Ok(args);
@@ -121,13 +243,14 @@ impl Parse for RouteArgs {
                                 })?;
                             args.state = Some(ty);
                         }
+                        "mcp" => args.mcp = Some(McpArg::from_value(&nv.value)?),
                         "deprecated" => {
                             args.deprecated = matches!(&nv.value, Expr::Lit(ExprLit { lit: Lit::Bool(b), .. }) if b.value)
                         }
                         _ => {
                             return Err(syn::Error::new_spanned(
                                 nv.path,
-                                "unknown route option; expected one of: status, tag, tags(..), summary, description, operation_id, deprecated, public, responses(..), security(..), state = T",
+                                "unknown route option; expected one of: status, tag, tags(..), summary, description, operation_id, deprecated, public, responses(..), security(..), state = T, mcp = \"tool\" | \"resource\" | \"prompt\", mcp(tool, name = \"..\")",
                             ));
                         }
                     }
@@ -158,10 +281,11 @@ impl Parse for RouteArgs {
                             args.security
                                 .extend(items.into_iter().map(|i| (i.name, i.scopes)));
                         }
+                        "mcp" => args.mcp = Some(McpArg::from_list(&list)?),
                         _ => {
                             return Err(syn::Error::new_spanned(
                                 list.path,
-                                "unknown route option; expected one of: status, tag, tags(..), summary, description, operation_id, deprecated, public, responses(..), security(..), state = T",
+                                "unknown route option; expected one of: status, tag, tags(..), summary, description, operation_id, deprecated, public, responses(..), security(..), state = T, mcp = \"tool\" | \"resource\" | \"prompt\", mcp(tool, name = \"..\")",
                             ));
                         }
                     }
@@ -390,6 +514,42 @@ fn expand(method: &str, args: RouteArgs, func: ItemFn) -> TokenStream2 {
         quote! { .security(#name, &[#(#scopes),*]) }
     });
     let public = args.public.then(|| quote! { .public() });
+    if let Some(mcp) = &args.mcp
+        && let Err(e) = mcp.check_method(method)
+    {
+        let error = e.to_compile_error();
+        return quote! { #func #error };
+    }
+    // A prompt's handler returns `lesto::mcp::Prompt`: checked on the return type's span.
+    let prompt_check = args
+        .mcp
+        .as_ref()
+        .filter(|mcp| mcp.kind == McpKind::Prompt)
+        .map(|mcp| {
+            let (ret, span) = match &func.sig.output {
+                syn::ReturnType::Type(_, ret) => (quote! { #ret }, ret.span()),
+                syn::ReturnType::Default => (quote! { () }, mcp.span),
+            };
+            let check_fn = format_ident!("__lesto_check_prompt_{}", name);
+            quote_spanned! { span =>
+                #[allow(dead_code, non_snake_case)]
+                fn #check_fn() {
+                    ::lesto::__private::check_prompt_output::<#ret>();
+                }
+            }
+        });
+    let mcp = args.mcp.map(|mcp| {
+        let constructor = match (mcp.kind, mcp.name.is_some()) {
+            (McpKind::Tool, false) => format_ident!("tool"),
+            (McpKind::Tool, true) => format_ident!("tool_named"),
+            (McpKind::Resource, false) => format_ident!("resource"),
+            (McpKind::Resource, true) => format_ident!("resource_named"),
+            (McpKind::Prompt, false) => format_ident!("prompt"),
+            (McpKind::Prompt, true) => format_ident!("prompt_named"),
+        };
+        let name = mcp.name.iter();
+        quote! { .mcp(::lesto::McpExpose::#constructor(#(#name)*)) }
+    });
     let (checks, deferred_checks) = handler_checks(&func, args.state.as_ref());
     let describe = describe_fn(&func);
 
@@ -397,6 +557,8 @@ fn expand(method: &str, args: RouteArgs, func: ItemFn) -> TokenStream2 {
         #func
 
         #checks
+
+        #prompt_check
 
         #[allow(non_camel_case_types, missing_docs)]
         #[doc(hidden)]
@@ -420,6 +582,7 @@ fn expand(method: &str, args: RouteArgs, func: ItemFn) -> TokenStream2 {
                     #(#responses)*
                     #(#security)*
                     #public
+                    #mcp
             }
 
             #describe
