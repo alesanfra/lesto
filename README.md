@@ -10,7 +10,7 @@ a lesto app is an `axum::Router`, and an axum router can be mounted in a lesto a
 
 ```toml
 [dependencies]
-lesto = "0.1"   # not on crates.io yet: path = "../lesto/crates/lesto"; features: sqlite, postgres, lambda, otel, oidc
+lesto = "0.1"   # not on crates.io yet: path = "../lesto/crates/lesto"; features: sqlite, postgres, lambda, otel, oidc, mcp
 ```
 
 | | lesto | axum + utoipa / aide | poem-openapi | dropshot | loco.rs |
@@ -58,6 +58,12 @@ on axum.
   whose check has to hold until commit, and retry a conflict before answering 409 with
   `Retry-After` instead of 500. `#[store(read = "..", write = "..")]` declares the permission
   pair on the type, so the generated `read`/`write` have no requirement argument to get wrong.
+- **MCP for AI agents** with the `mcp` feature: `mcp = "tool"` on a route and
+  `App::mcp(Mcp::new())` serve it at `/mcp` as a Model Context Protocol tool, described from the
+  route (doc comment, parameters and body as arguments, the response as output schema, hints from
+  the method). A call runs the route itself, so validation, authentication and tracing are the
+  route's own: a `422` reaches the model as a tool error it can correct, a `401` reaches the
+  client as a `401`. MCP 2026-07-28 (stateless) and the 2025 revisions, with no session.
 - **AWS Lambda** with the `lambda` feature: `lesto::lambda::serve(app)` runs the
   Lambda runtime inside Lambda (API Gateway REST and HTTP APIs, Function URLs, ALB) and a plain
   server anywhere else; REST stages are stripped, docs pages work behind them, and
@@ -87,8 +93,8 @@ builds, runs, and rebuilds + restarts on every save, keeping the port open while
 (like `fastapi dev`). `lesto run` does it once; `lesto openapi` prints the OpenAPI document without serving
 (`-o api.json` writes it to a file).
 
-**New here?** Start with the [tutorial](docs/tutorial/README.md): fifteen short chapters, from
-"Hello" to security, testing, databases, AWS Lambda and OpenTelemetry, with full code and `curl`
+**New here?** Start with the [tutorial](docs/tutorial/README.md): sixteen short chapters, from
+"Hello" to security, testing, databases, AWS Lambda, OpenTelemetry and MCP, with full code and `curl`
 commands for every step.
 The crates are not on crates.io yet: depend on them by `path` as the tutorial shows.
 
@@ -168,7 +174,7 @@ Examples: `LESTO_PORT=8765 cargo run -p hello` (smallest app), `-p notes` (CRUD 
 
 ### Attribute options
 
-`#[lesto::get("/path", status = 200, tag = "x", tags("a", "b"), summary = "...", description = "...", operation_id = "...", deprecated, responses(404, 409), security("bearerAuth"), public, state = AppState)]`
+`#[lesto::get("/path", status = 200, tag = "x", tags("a", "b"), summary = "...", description = "...", operation_id = "...", deprecated, responses(404, 409), security("bearerAuth"), public, state = AppState, mcp = "tool")]`
 
 Available: `get`, `post`, `put`, `patch`, `delete`, `head`, `options`.
 
@@ -177,6 +183,10 @@ Available: `get`, `post`, `put`, `patch`, `delete`, `head`, `options`.
 
 `state = T` only affects the compile-time checks the macro emits (otherwise the state comes from a `State<T>` argument or from the `App<S>` the `routes![]` set is added to); see `docs/tutorial/B-common-problems.md`.
 The default `operation_id` is `{function}_{path}_{method}` (`get_user_users__id__get`), unique per route as in FastAPI.
+
+`mcp = "tool"` (feature `mcp`) exposes the operation as an MCP tool named after the function;
+`mcp(tool, name = "search_notes")` names it. It takes effect once the app calls `App::mcp`; see
+the tutorial, chapter 16.
 
 Contributing or driving an agent? Read [AGENTS.md](AGENTS.md).
 
@@ -262,6 +272,7 @@ with a `WWW-Authenticate` header. See the tutorial's [Security](docs/tutorial/09
   `Isolation`, `lesto::db::Error`;
   `lesto::lambda` (feature `lambda`): `serve`, `Options`, `test::invoke`;
   `lesto::oidc` (feature `oidc`): `Oidc`, `Jwt<C>`, `StandardClaims`, `Protect`;
+  `lesto::mcp` (feature `mcp`): `Mcp`, `McpCall`;
   `lesto::trace`: the request span and `Trace`; `lesto::otel` (feature `otel`): OTLP export of
   traces and logs plus trace context propagation, configured by the `OTEL_*` variables;
   `lesto::layers`: the tower layers `into_router` installs (`ProblemLayer`, `CatchPanicLayer`,
@@ -344,7 +355,7 @@ cargo deny check                                     # licenses, advisories (car
 cargo run -p lesto-cli -- dev -p notes --port 8765   # the CLI from this checkout
 ```
 
-Features of `lesto`: `email`, `url` (garde rules) and `compression` (gzip), on by default; `pattern`; `db` + `postgres`/`mysql`/`sqlite`, `lambda`, `otel`, `anyhow`. Tests always run with all of them.
+Features of `lesto`: `email`, `url` (garde rules) and `compression` (gzip), on by default; `pattern`; `db` + `postgres`/`mysql`/`sqlite`, `lambda`, `otel`, `oidc`, `mcp`, `anyhow`. Tests always run with all of them.
 
 CI (`.github/workflows/ci.yml`) runs fmt, clippy and rustdoc with warnings denied, each feature of
 `lesto` alone (`cargo hack`), the mdBook build and `cargo deny`; the tests on stable, including the
@@ -358,10 +369,9 @@ Bigger items, easiest first:
 1. **Lambda adapter tested end to end on [floci](https://floci.io/)**: deploy the `lambda`
    example to floci's local AWS emulator (Lambda + API Gateway, a LocalStack drop-in that runs
    as a native binary, MIT) in CI, and call it over HTTP instead of only replaying event fixtures.
-2. **MCP from the route attribute**: `#[lesto::get("/notes/{id}", tag = "notes", mcp = "tool")]`
-   (or `"prompt"`, `"resource"`) exposes the operation to AI agents as an MCP tool, prompt or
-   resource, reusing the OpenAPI schemas lesto already derives. To be designed carefully before
-   any code: naming, auth, which operations map to which MCP primitive.
+2. **MCP resources and prompts**: `mcp = "resource"` (GET routes as resources and resource
+   templates) and `mcp = "prompt"`, then the RFC 9728 protected resource metadata with `oidc`.
+   Tools are done; the rest is designed in [docs/design/mcp.md](docs/design/mcp.md).
 
 Smaller items: crates.io publication, `lesto new`, `AnyOf`/`AllOf` permission requirements, per-operation
 permissions as OpenAPI scopes, `--watch`/`--ignore` for `lesto dev`, exporting the OpenAPI document as

@@ -1,6 +1,7 @@
 # MCP from the route attribute
 
-Status: proposed (2026-09-24). Not implemented. Roadmap item 2 in `AGENTS.md` and `README.md`.
+Status: phase 1 (tools, both eras) implemented on 2026-09-24; phases 2 and 3 proposed. Roadmap
+item 2 in `AGENTS.md` and `README.md`. The open decisions below were taken as recommended.
 
 This document is the written design the roadmap asks for: naming, auth, which operations map to
 which MCP primitive, and transport. Open decisions are listed at the end.
@@ -165,8 +166,8 @@ and used only in `[dev-dependencies]`, so it adds nothing to a user's build. Che
   `ServiceExt::serve` does). `Auto` probes and falls back; the tests use the two explicit modes so
   that each era is exercised on purpose.
 - **MSRV**: `rmcp` declares `rust-version = "1.88"`, below the workspace's 1.94, and the scratch
-  client builds with `cargo +1.94`. The MSRV job runs `cargo check` without dev-dependencies
-  anyway.
+  client builds with `cargo +1.94`. This matters: the MSRV job runs
+  `cargo check --workspace --all-targets --all-features`, dev-dependencies included.
 - **Graph**: `reqwest` resolves to 0.13, the version the workspace already uses. `base64` comes in
   at 0.23 next to the workspace's 0.22; `deny.toml` has `multiple-versions = "allow"`, and it is a
   dev-only duplicate.
@@ -211,10 +212,12 @@ header-safe for `Mcp-Name`.
 - **`outputSchema`**: the schema of the success JSON response. Modern: any schema (2026-07-28
   accepts any JSON Schema 2020-12). Legacy: only when it is an object schema, which the 2025
   revisions require.
-- **Annotations**, derived from the method:
-  - GET, HEAD: `readOnlyHint: true`;
-  - DELETE: `destructiveHint: true`;
-  - PUT, DELETE (and GET, HEAD): `idempotentHint: true`.
+- **Annotations**, derived from the method. MCP's defaults assume the worst (a tool that is not
+  read-only is destructive), so every hint is spelled out:
+  - GET, HEAD, OPTIONS: `readOnlyHint: true`;
+  - POST: `destructiveHint: false` (it adds), `idempotentHint: false`;
+  - PUT, DELETE: `destructiveHint: true`, `idempotentHint: true`;
+  - PATCH: `destructiveHint: true`, `idempotentHint: false`.
 - `x-mcp-header` (mirroring tool parameters into `Mcp-Param-*` headers) is not used: lesto
   routes on the body, not on headers.
 
@@ -309,6 +312,8 @@ Streamable HTTP, JSON responses only, no server-side state, one `POST` endpoint:
 - Header validation, rejected with `400` and `HeaderMismatch` (`-32020`) when it fails:
   - `MCP-Protocol-Version` is present and equals `_meta`'s `io.modelcontextprotocol/protocolVersion`;
   - `Mcp-Method` is present and equals `method`;
+  - each of these headers appears once (a repeated one could be read one way by an intermediary
+    and another way by the server);
   - `Mcp-Name` is present on `tools/call`, `resources/read` and `prompts/get` and equals
     `params.name` / `params.uri`, after decoding the `=?base64?..?=` form.
 - An unknown method answers `404` with `-32601`, which is how a modern client tells a modern
@@ -404,7 +409,8 @@ era-specific validation, everything else is shared.
   on `127.0.0.1:0` (as `tests/oidc.rs` does for its provider) and `rmcp`'s Streamable HTTP client
   connects once with `ClientLifecycleMode::Discover` (modern) and once with
   `ClientLifecycleMode::Initialize` (legacy), lists the tools, calls one successfully,
-  calls one that fails validation (`isError`), and reads a resource. It runs in the default
+  calls one that fails validation (`isError`), and one that answers `404` (`isError`). Phase 2
+  adds reading a resource. It runs in the default
   `cargo test --workspace`: no Docker, no network beyond loopback.
 - `examples/02-notes`: a few routes marked for MCP.
 - Tutorial chapter 16, "MCP", with its snippets in `examples/99-tutorial`; `README.md` (attribute

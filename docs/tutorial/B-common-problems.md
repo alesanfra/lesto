@@ -125,3 +125,19 @@ The provider puts in `aud` (or `iss`) something other than what lesto expects. D
 the provider's own (behind a proxy, the provider must announce the public URL). The reason is
 logged at `debug` by `lesto`: `RUST_LOG=lesto=debug` shows it when a subscriber is installed
 (chapter 15).
+
+## `MCP resources are not supported yet` (or prompts)
+
+Only tools can be exposed over MCP so far: write `mcp = "tool"`. A `GET` route that an agent
+should read is a read-only tool (chapter 16).
+
+## `panicked at 'two routes are exposed as the MCP tool `x`'`
+
+Two routes carry `mcp(tool, name = "x")` with the same name. Tool names must be unique across
+the app, nested apps included: rename one. Default names (the handler's) never collide: when
+two exposed handlers share a name, both use their `operationId`.
+
+## An MCP client says the server rejected the request with `403`
+
+The request came from a browser page on another origin. The endpoint refuses foreign `Origin`s
+against DNS rebinding; list the page's origin in `Mcp::allowed_origins([..])`.
