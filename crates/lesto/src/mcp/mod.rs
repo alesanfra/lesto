@@ -1,4 +1,5 @@
-//! The Model Context Protocol: operations marked `mcp = "tool"` served to agents (feature `mcp`).
+//! The Model Context Protocol: operations marked `mcp = "tool"`, `"resource"` or `"prompt"` served
+//! to agents (feature `mcp`).
 //!
 //! ```no_run
 //! use lesto::prelude::*;
@@ -29,12 +30,18 @@
 //!
 //! A tool call becomes an HTTP request to the application's own router, built from the
 //! operation's OpenAPI description: path and query parameters and the JSON body's properties
-//! are the tool's arguments, side by side. So a call runs the same extractors, validation,
+//! are the tool's arguments, side by side. Reading a resource is a `GET` of the path in its URI
+//! (`lesto://notes/notes/7` → `GET /notes/7`), and getting a prompt a `GET` with the prompt's
+//! arguments as path and query parameters; the route returns a [`Prompt`]. So a call runs the
+//! same extractors, validation,
 //! authentication, layers and tracing as the route does over HTTP: a validation failure comes
 //! back to the agent as the `422` problem (`isError: true`), and a `401` from the route becomes
 //! the `401` of the MCP request, which is what starts an MCP client's OAuth flow. The headers of
 //! the MCP request (`Authorization`, API keys, cookies, `traceparent`) are forwarded; the inner
 //! request carries an [`McpCall`] extension.
+//!
+//! A resource's route can set `Cache-Control` to let clients cache what they read: `max-age`
+//! and `public`/`private` become 2026-07-28's `ttlMs` and `cacheScope`.
 //!
 //! The endpoint speaks MCP 2026-07-28, which is stateless, and also 2025-11-25 and 2025-06-18
 //! for clients that still open with `initialize` ([`Mcp::legacy`]). It keeps no session in
@@ -43,7 +50,10 @@
 
 mod catalog;
 mod dispatch;
+mod prompt;
 mod protocol;
+
+pub use prompt::{Prompt, PromptContent, PromptMessage, Role};
 
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
@@ -61,6 +71,7 @@ use crate::error::HttpError;
 use crate::openapi::OpenApi;
 use crate::route::PendingOperation;
 use catalog::Catalog;
+use dispatch::Collected;
 use protocol::{Era, Message, RpcError};
 
 /// Default of [`Mcp::list_ttl`].
@@ -68,8 +79,8 @@ pub const DEFAULT_LIST_TTL: Duration = Duration::from_secs(300);
 
 /// The MCP endpoint's configuration, for [`App::mcp`](crate::App::mcp).
 ///
-/// Which operations are exposed is decided on the routes (`mcp = "tool"`), not here: turning
-/// the endpoint on never exposes a route by accident.
+/// Which operations are exposed is decided on the routes (`mcp = "tool"`, `"resource"`,
+/// `"prompt"`), not here: turning the endpoint on never exposes a route by accident.
 #[derive(Debug, Clone)]
 pub struct Mcp {
     path: String,
@@ -105,7 +116,7 @@ impl Mcp {
         self
     }
 
-    /// Guidance for the model on how to use these tools, sent in `server/discover` (and in
+    /// Guidance for the model on how to use this server, sent in `server/discover` (and in
     /// `initialize` for legacy clients).
     pub fn instructions(mut self, instructions: impl Into<String>) -> Self {
         self.instructions = Some(instructions.into());
@@ -128,9 +139,9 @@ impl Mcp {
         self
     }
 
-    /// How long a client may cache `tools/list` and `server/discover` (2026-07-28's `ttlMs`).
-    /// The tools are fixed for the life of the process, so this only bounds how long a
-    /// redeploy takes to show up.
+    /// How long a client may cache the lists (tools, resources, templates, prompts) and
+    /// `server/discover` (2026-07-28's `ttlMs`). They are fixed for the life of the process, so
+    /// this only bounds how long a redeploy takes to show up.
     pub fn list_ttl(mut self, ttl: Duration) -> Self {
         self.list_ttl = ttl;
         self
@@ -143,22 +154,25 @@ impl Mcp {
         self
     }
 
-    /// Prefix of the URI naming a binary tool result (default `lesto://{title}`, the app's
-    /// title in lowercase with `-` for anything but letters and digits).
+    /// Prefix of resource URIs, followed by the route's path (default `lesto://{title}`, the
+    /// app's title in lowercase with `-` for anything but letters and digits): with the default,
+    /// `GET /notes/{id}` of the app "Notes" is `lesto://notes/notes/{id}`. Also names a binary
+    /// tool result.
     pub fn resource_base(mut self, base: impl Into<String>) -> Self {
         self.resource_base = Some(base.into());
         self
     }
 }
 
-/// Marks a request made by an MCP tool call: in the request extensions of every inner request.
+/// Marks a request made over MCP (a tool call, a resource read, a prompt): in the request
+/// extensions of every inner request.
 #[derive(Debug, Clone)]
 pub struct McpCall {
     name: String,
 }
 
 impl McpCall {
-    /// The name of the tool that was called.
+    /// The name of the tool, resource or prompt.
     pub fn name(&self) -> &str {
         &self.name
     }
@@ -201,11 +215,11 @@ where
         spec: &OpenApi,
         protected: bool,
     ) -> Self {
-        let catalog = Catalog::build(operations, spec);
         let resource_base = config
             .resource_base
             .clone()
             .unwrap_or_else(|| format!("lesto://{}", slug(&spec.info.title)));
+        let catalog = Catalog::build(operations, spec, &resource_base);
         let server = Server {
             server_info: json!({ "name": spec.info.title, "version": spec.info.version }),
             config,
@@ -315,31 +329,57 @@ where
                 return error.into_response(era, id);
             }
         };
-        let result = match (era, request.method.as_str()) {
+        let params = &request.params;
+        let method = request.method.as_str();
+        // A kind the app does not expose is not in the capabilities, and its methods do not exist.
+        let catalog = &self.server.catalog;
+        let offered = match method.split_once('/').map(|(kind, _)| kind) {
+            Some("tools") => !catalog.tools.is_empty(),
+            Some("resources") => !catalog.resources.is_empty(),
+            Some("prompts") => !catalog.prompts.is_empty(),
+            _ => true,
+        };
+        if !offered {
+            return RpcError::method_not_found(era, method).into_response(Some(era), id);
+        }
+        let result = match (era, method) {
             (Era::Modern, "server/discover") => Ok(self.discover()),
-            (Era::Legacy, "initialize") => Ok(self.initialize(&request.params)),
+            (Era::Legacy, "initialize") => Ok(self.initialize(params)),
             (Era::Legacy, "ping") => Ok(Map::new()),
-            (_, "tools/list") => Ok(self.list_tools(era)),
-            (_, "tools/call") => {
-                let router = self.ready.get_or_init(|| {
-                    self.router
-                        .get()
-                        .cloned()
-                        .unwrap_or_default()
-                        .with_state(state)
-                });
-                match self.call_tool(era, &request.params, &headers, router).await {
-                    Ok(result) => Ok(result),
-                    Err(Outcome::Response(response)) => return *response,
-                    Err(Outcome::Error(error)) => Err(error),
-                }
+            (_, "tools/list") => Ok(self.list(era, "tools", self.tools(era))),
+            (_, "resources/list") => Ok(self.list(era, "resources", self.resources(false))),
+            (_, "resources/templates/list") => {
+                Ok(self.list(era, "resourceTemplates", self.resources(true)))
             }
-            (_, method) => Err(RpcError::method_not_found(era, method)),
+            (_, "prompts/list") => Ok(self.list(era, "prompts", self.prompts())),
+            (_, "tools/call") => {
+                self.call_tool(era, params, &headers, self.router(state))
+                    .await
+            }
+            (_, "resources/read") => {
+                self.read_resource(era, params, &headers, self.router(state))
+                    .await
+            }
+            (_, "prompts/get") => self.get_prompt(params, &headers, self.router(state)).await,
+            (_, method) => Err(RpcError::method_not_found(era, method).into()),
         };
         match result {
             Ok(result) => protocol::result_response(era, id, result, &self.server.server_info),
-            Err(error) => error.into_response(Some(era), id),
+            Err(Outcome::Response(response)) => *response,
+            Err(Outcome::Error(error)) => error.into_response(Some(era), id),
         }
+    }
+
+    /// The app's router with the state: built by the first call that needs it, since the state
+    /// only arrives with a request.
+    fn router(&self, state: S) -> &Router {
+        self.ready.get_or_init(|| {
+            self.router
+                .get()
+                .cloned()
+                .unwrap_or_default()
+                .with_state(state)
+        })
     }
 
     /// No `Origin` (not a browser), an allowed origin, or a page on this machine calling a
@@ -380,8 +420,15 @@ where
 
     fn capabilities(&self) -> Value {
         let mut capabilities = Map::new();
-        if !self.server.catalog.tools.is_empty() {
+        let catalog = &self.server.catalog;
+        if !catalog.tools.is_empty() {
             capabilities.insert("tools".into(), json!({ "listChanged": false }));
+        }
+        if !catalog.resources.is_empty() {
+            capabilities.insert("resources".into(), json!({ "listChanged": false }));
+        }
+        if !catalog.prompts.is_empty() {
+            capabilities.insert("prompts".into(), json!({ "listChanged": false }));
         }
         Value::Object(capabilities)
     }
@@ -421,21 +468,35 @@ where
         result
     }
 
-    fn list_tools(&self, era: Era) -> Map<String, Value> {
-        let modern = era == Era::Modern;
-        let tools: Vec<Value> = self
-            .server
-            .catalog
-            .tools
-            .iter()
-            .map(|tool| tool.definition(modern))
-            .collect();
+    /// A list result: `items` under `key`, cacheable in 2026-07-28.
+    fn list(&self, era: Era, key: &str, items: Vec<Value>) -> Map<String, Value> {
         let mut result = Map::new();
-        result.insert("tools".into(), tools.into());
-        if modern {
+        result.insert(key.into(), items.into());
+        if era == Era::Modern {
             self.cacheable(&mut result);
         }
         result
+    }
+
+    fn tools(&self, era: Era) -> Vec<Value> {
+        let modern = era == Era::Modern;
+        let tools = &self.server.catalog.tools;
+        tools.iter().map(|tool| tool.definition(modern)).collect()
+    }
+
+    /// The fixed resources, or the templates.
+    fn resources(&self, templates: bool) -> Vec<Value> {
+        let resources = &self.server.catalog.resources;
+        resources
+            .iter()
+            .filter(|r| r.template == templates)
+            .map(|r| r.definition.clone())
+            .collect()
+    }
+
+    fn prompts(&self) -> Vec<Value> {
+        let prompts = &self.server.catalog.prompts;
+        prompts.iter().map(|p| p.definition.clone()).collect()
     }
 
     async fn call_tool(
@@ -454,43 +515,147 @@ where
             .catalog
             .tool(name)
             .ok_or_else(|| RpcError::invalid_params(format!("unknown tool: {name}")))?;
-        let empty = Map::new();
-        let arguments = match params.get("arguments") {
-            None | Some(Value::Null) => &empty,
-            Some(Value::Object(arguments)) => arguments,
-            Some(_) => return Err(RpcError::invalid_params("`arguments` must be an object").into()),
-        };
+        let arguments = arguments(params)?;
         let meta = params.get("_meta").and_then(Value::as_object);
-        let request =
-            dispatch::request(tool, arguments, headers, meta).map_err(RpcError::invalid_params)?;
+        let request = dispatch::request(&tool.target, arguments, headers, meta)
+            .map_err(RpcError::invalid_params)?;
         let uri = format!("{}{}", self.server.resource_base, request.uri());
+        let response = send(router, request, name).await?;
+        Ok(dispatch::tool_result(
+            tool,
+            era == Era::Modern,
+            &response,
+            uri,
+        ))
+    }
 
-        let mut router = router.clone();
-        std::future::poll_fn(|cx| Service::<axum::extract::Request>::poll_ready(&mut router, cx))
-            .await
-            .unwrap_or_else(|never| match never {});
-        let response = match router.call(request).await {
-            Ok(response) => response,
-            Err(never) => match never {},
-        };
-        if dispatch::is_auth_challenge(&response) {
-            return Err(Outcome::Response(Box::new(response)));
+    async fn read_resource(
+        &self,
+        era: Era,
+        params: &Map<String, Value>,
+        headers: &HeaderMap,
+        router: &Router,
+    ) -> Result<Map<String, Value>, Outcome> {
+        let uri = params
+            .get("uri")
+            .and_then(Value::as_str)
+            .ok_or_else(|| RpcError::invalid_params("`uri` must be the URI of a resource"))?;
+        let not_found = || Outcome::from(RpcError::resource_not_found(era, uri));
+        // The path and query after the base, as the route receives them.
+        let target = uri
+            .strip_prefix(self.server.resource_base.as_str())
+            .filter(|rest| rest.starts_with('/'))
+            .ok_or_else(not_found)?;
+        let target = target.split_once('#').map_or(target, |(before, _)| before);
+        let path = target.split_once('?').map_or(target, |(path, _)| path);
+        let resource = self.server.catalog.resource(path).ok_or_else(not_found)?;
+        let meta = params.get("_meta").and_then(Value::as_object);
+        let request = dispatch::build(&resource.target, target, None, headers, meta)
+            .map_err(RpcError::invalid_params)?;
+        let response = send(router, request, &resource.target.name).await?;
+        if response.status == StatusCode::NOT_FOUND {
+            return Err(not_found());
         }
-        dispatch::result(tool, era == Era::Modern, response, uri)
-            .await
-            .map_err(|message| {
-                tracing::error!(tool = name, "{message}");
-                RpcError::new(
-                    StatusCode::OK,
-                    protocol::INTERNAL_ERROR,
-                    "the tool call failed",
-                )
-                .into()
-            })
+        if !response.status.is_success() {
+            return Err(route_failed(protocol::INTERNAL_ERROR, &response).into());
+        }
+        let mut result = dispatch::resource_result(uri, &response);
+        if era == Era::Modern {
+            let (ttl_ms, scope) = dispatch::resource_cache(&response.headers);
+            result.insert("ttlMs".into(), ttl_ms.into());
+            result.insert("cacheScope".into(), scope.into());
+        }
+        Ok(result)
+    }
+
+    async fn get_prompt(
+        &self,
+        params: &Map<String, Value>,
+        headers: &HeaderMap,
+        router: &Router,
+    ) -> Result<Map<String, Value>, Outcome> {
+        let name = params
+            .get("name")
+            .and_then(Value::as_str)
+            .ok_or_else(|| RpcError::invalid_params("`name` must be the name of a prompt"))?;
+        let prompt = self
+            .server
+            .catalog
+            .prompt(name)
+            .ok_or_else(|| RpcError::invalid_params(format!("unknown prompt: {name}")))?;
+        let arguments = arguments(params)?;
+        let meta = params.get("_meta").and_then(Value::as_object);
+        let request = dispatch::request(&prompt.target, arguments, headers, meta)
+            .map_err(RpcError::invalid_params)?;
+        let response = send(router, request, name).await?;
+        // A 4xx is the arguments' fault (a missing or invalid one): the client can fix them.
+        if response.status.is_client_error() {
+            return Err(route_failed(protocol::INVALID_PARAMS, &response).into());
+        }
+        if !response.status.is_success() {
+            return Err(route_failed(protocol::INTERNAL_ERROR, &response).into());
+        }
+        match serde_json::from_slice::<Value>(&response.bytes) {
+            Ok(Value::Object(result)) => Ok(result),
+            _ => {
+                tracing::error!(
+                    prompt = name,
+                    "the prompt's route did not answer a JSON object"
+                );
+                Err(internal_error().into())
+            }
+        }
     }
 }
 
-/// How a `tools/call` ends when it does not produce a result.
+/// `arguments` of a call: absent or an object.
+fn arguments(params: &Map<String, Value>) -> Result<&Map<String, Value>, RpcError> {
+    static EMPTY: OnceLock<Map<String, Value>> = OnceLock::new();
+    match params.get("arguments") {
+        None | Some(Value::Null) => Ok(EMPTY.get_or_init(Map::new)),
+        Some(Value::Object(arguments)) => Ok(arguments),
+        Some(_) => Err(RpcError::invalid_params("`arguments` must be an object")),
+    }
+}
+
+/// Send the inner request through the app's router and read the response. An authentication
+/// challenge ends the MCP request with the route's own response.
+async fn send(
+    router: &Router,
+    request: axum::extract::Request,
+    name: &str,
+) -> Result<Collected, Outcome> {
+    let mut router = router.clone();
+    std::future::poll_fn(|cx| Service::<axum::extract::Request>::poll_ready(&mut router, cx))
+        .await
+        .unwrap_or_else(|never| match never {});
+    let response = match router.call(request).await {
+        Ok(response) => response,
+        Err(never) => match never {},
+    };
+    if dispatch::is_auth_challenge(&response) {
+        return Err(Outcome::Response(Box::new(response)));
+    }
+    Collected::read(response).await.map_err(|message| {
+        tracing::error!(name, "{message}");
+        internal_error().into()
+    })
+}
+
+fn internal_error() -> RpcError {
+    RpcError::new(StatusCode::OK, protocol::INTERNAL_ERROR, "the call failed")
+}
+
+/// The route behind a resource or a prompt failed: `code`, with the problem's detail as the
+/// message and the problem as `data`.
+fn route_failed(code: i64, response: &Collected) -> RpcError {
+    let message = response
+        .problem_message()
+        .unwrap_or_else(|| format!("the route answered {}", response.status));
+    RpcError::failed(code, message, response.error_data())
+}
+
+/// How a request ends when it does not produce a result.
 enum Outcome {
     /// A JSON-RPC error.
     Error(RpcError),

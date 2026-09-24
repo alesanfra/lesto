@@ -1,0 +1,4 @@
+cannot be the response of an MCP prompt
+a route marked `mcp = "prompt"` must return `lesto::mcp::Prompt`
+return `lesto::mcp::Prompt` or `Result<lesto::mcp::Prompt, E>` (feature `mcp`): `Prompt::new().user("..")`
+--> mcp_prompt_output.rs:5

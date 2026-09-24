@@ -1,0 +1,2 @@
+error: an MCP resource must be a GET route (this one is POST); expose an operation that changes something as a tool: `mcp = "tool"`
+--> mcp_resource_not_get.rs:2

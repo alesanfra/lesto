@@ -33,6 +33,8 @@ pub(crate) const INVALID_REQUEST: i64 = -32600;
 pub(crate) const METHOD_NOT_FOUND: i64 = -32601;
 pub(crate) const INVALID_PARAMS: i64 = -32602;
 pub(crate) const INTERNAL_ERROR: i64 = -32603;
+/// Legacy "resource not found" (2025 revisions); modern uses `INVALID_PARAMS`.
+const RESOURCE_NOT_FOUND: i64 = -32002;
 const HEADER_MISMATCH: i64 = -32020;
 const UNSUPPORTED_PROTOCOL_VERSION: i64 = -32022;
 
@@ -86,6 +88,22 @@ impl RpcError {
             METHOD_NOT_FOUND,
             format!("method not found: {method}"),
         )
+    }
+
+    /// A `resources/read` of a URI no route serves, or that the route answered `404`: `-32602`
+    /// in 2026-07-28, `-32002` before.
+    pub fn resource_not_found(era: Era, uri: &str) -> Self {
+        let code = match era {
+            Era::Modern => INVALID_PARAMS,
+            Era::Legacy => RESOURCE_NOT_FOUND,
+        };
+        Self::new(StatusCode::OK, code, format!("resource not found: {uri}"))
+            .with_data(json!({ "uri": uri }))
+    }
+
+    /// A failure of the route behind a resource or a prompt, with its problem as `data`.
+    pub fn failed(code: i64, message: impl Into<String>, data: Value) -> Self {
+        Self::new(StatusCode::OK, code, message).with_data(data)
     }
 
     fn header_mismatch(message: impl Into<String>) -> Self {

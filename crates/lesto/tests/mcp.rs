@@ -5,7 +5,7 @@ use http_body_util::BodyExt;
 use lesto::axum::Router;
 use lesto::axum::body::Body;
 use lesto::http::{HeaderMap, Request, StatusCode, header};
-use lesto::mcp::{Mcp, McpCall};
+use lesto::mcp::{Mcp, McpCall, Prompt};
 use lesto::prelude::*;
 use serde_json::{Value, json};
 use tower::ServiceExt;
@@ -619,4 +619,273 @@ async fn colliding_default_names_fall_back_to_the_operation_id() {
         .map(|t| t["name"].as_str().unwrap())
         .collect();
     assert_eq!(names, ["list_one_get", "list_two_get"]);
+}
+
+// ---- resources and prompts ---------------------------------------------------------------
+
+/// Every note.
+#[lesto::get("/notes", mcp = "resource")]
+async fn all_notes() -> (HeaderMap, Json<Vec<Note>>) {
+    let mut headers = HeaderMap::new();
+    headers.insert(header::CACHE_CONTROL, "public, max-age=30".parse().unwrap());
+    let note = Note {
+        id: 1,
+        title: "first".into(),
+    };
+    (headers, Json(vec![note]))
+}
+
+/// One note.
+#[lesto::get("/notes/{id}", responses(404), mcp(resource, name = "note"))]
+async fn one_note(Path(id): Path<u64>) -> Result<Json<Note>, HttpError> {
+    get_note(Path(id)).await
+}
+
+#[derive(Debug, Deserialize, JsonSchema, Validate)]
+struct Tone {
+    /// How the review should sound.
+    #[garde(length(min = 1))]
+    tone: Option<String>,
+}
+
+/// Review a note.
+///
+/// Asks for a short review of the note's title.
+#[lesto::get("/prompts/review/{id}", mcp = "prompt")]
+async fn review(Path(id): Path<u64>, Query(tone): Query<Tone>) -> Result<Prompt, HttpError> {
+    if id != 1 {
+        return Err(HttpError::not_found(format!("note {id} not found")));
+    }
+    let tone = tone.tone.unwrap_or_else(|| "kind".into());
+    Ok(Prompt::new()
+        .description(format!("Review of note {id}"))
+        .user(format!("Review the note \"first\" in a {tone} tone.")))
+}
+
+/// Resources and prompts, next to one tool.
+fn library(mcp: Mcp) -> Router {
+    App::new()
+        .title("Notes API")
+        .routes(routes![all_notes, one_note, review, whoami])
+        .mcp(mcp)
+        .into_router()
+}
+
+#[tokio::test]
+async fn resources_and_templates_are_listed_from_the_routes() {
+    let reply = modern(library(Mcp::new()), "server/discover", json!({})).await;
+    assert_eq!(
+        reply.body["result"]["capabilities"],
+        json!({
+            "tools": {"listChanged": false},
+            "resources": {"listChanged": false},
+            "prompts": {"listChanged": false},
+        })
+    );
+
+    let reply = modern(library(Mcp::new()), "resources/list", json!({})).await;
+    let result = &reply.body["result"];
+    assert_eq!(result["ttlMs"], 300_000);
+    assert_eq!(
+        result["resources"],
+        json!([{
+            "uri": "lesto://notes-api/notes",
+            "name": "all_notes",
+            "title": "Every note.",
+            "description": "Every note.",
+            "mimeType": "application/json",
+        }])
+    );
+
+    let reply = modern(library(Mcp::new()), "resources/templates/list", json!({})).await;
+    assert_eq!(
+        reply.body["result"]["resourceTemplates"],
+        json!([{
+            "uriTemplate": "lesto://notes-api/notes/{id}",
+            "name": "note",
+            "title": "One note.",
+            "description": "One note.",
+            "mimeType": "application/json",
+        }])
+    );
+
+    let reply = legacy(library(Mcp::new()), "resources/list", json!({})).await;
+    assert!(reply.body["result"].get("ttlMs").is_none());
+    assert_eq!(reply.body["result"]["resources"][0]["name"], "all_notes");
+}
+
+async fn read(router: Router, uri: &str) -> Reply {
+    let params = json!({"uri": uri});
+    modern_with(router, "resources/read", params, &[("mcp-name", uri)]).await
+}
+
+#[tokio::test]
+async fn reading_a_resource_is_a_get_of_its_path() {
+    let reply = read(library(Mcp::new()), "lesto://notes-api/notes/1").await;
+    assert_eq!(reply.status, StatusCode::OK);
+    let result = &reply.body["result"];
+    let contents = &result["contents"][0];
+    assert_eq!(contents["uri"], "lesto://notes-api/notes/1");
+    assert_eq!(contents["mimeType"], "application/json");
+    let note: Value = serde_json::from_str(contents["text"].as_str().unwrap()).unwrap();
+    assert_eq!(note, json!({"id": 1, "title": "first"}));
+    // No `Cache-Control`: nothing may be cached.
+    assert_eq!(result["ttlMs"], 0);
+    assert_eq!(result["cacheScope"], "private");
+
+    // The route's `Cache-Control` becomes the caching fields.
+    let reply = read(library(Mcp::new()), "lesto://notes-api/notes").await;
+    assert_eq!(reply.body["result"]["ttlMs"], 30_000);
+    assert_eq!(reply.body["result"]["cacheScope"], "public");
+}
+
+#[tokio::test]
+async fn unknown_resources_are_not_found() {
+    // The route answers 404, no route matches, another scheme.
+    for uri in [
+        "lesto://notes-api/notes/2",
+        "lesto://notes-api/elsewhere",
+        "https://example.com/notes/1",
+    ] {
+        let reply = read(library(Mcp::new()), uri).await;
+        assert_eq!(reply.body["error"]["code"], -32602, "{uri}");
+        assert_eq!(reply.body["error"]["data"]["uri"], uri);
+    }
+
+    let body = json!({"jsonrpc": "2.0", "id": 1, "method": "resources/read",
+        "params": {"uri": "lesto://notes-api/notes/2"}});
+    let reply = send(
+        library(Mcp::new()),
+        &[("mcp-protocol-version", "2025-11-25")],
+        body,
+    )
+    .await;
+    assert_eq!(reply.body["error"]["code"], -32002);
+}
+
+#[tokio::test]
+async fn resource_base_changes_the_uris() {
+    let mcp = Mcp::new().resource_base("notes://");
+    let reply = modern(library(mcp.clone()), "resources/list", json!({})).await;
+    assert_eq!(
+        reply.body["result"]["resources"][0]["uri"],
+        "notes:///notes"
+    );
+    let reply = read(library(mcp), "notes:///notes/1").await;
+    assert_eq!(
+        reply.body["result"]["contents"][0]["uri"],
+        "notes:///notes/1"
+    );
+}
+
+#[tokio::test]
+async fn prompts_are_listed_with_their_parameters() {
+    let reply = modern(library(Mcp::new()), "prompts/list", json!({})).await;
+    assert_eq!(
+        reply.body["result"]["prompts"],
+        json!([{
+            "name": "review",
+            "title": "Review a note.",
+            "description": "Review a note.\n\nAsks for a short review of the note's title.",
+            "arguments": [
+                {"name": "id", "required": true},
+                {"name": "tone", "description": "How the review should sound.", "required": false},
+            ],
+        }])
+    );
+}
+
+#[tokio::test]
+async fn getting_a_prompt_runs_the_route() {
+    let params = json!({"name": "review", "arguments": {"id": "1", "tone": "blunt"}});
+    let reply = modern(library(Mcp::new()), "prompts/get", params).await;
+    let result = &reply.body["result"];
+    assert_eq!(result["resultType"], "complete");
+    assert_eq!(result["description"], "Review of note 1");
+    assert_eq!(
+        result["messages"],
+        json!([{"role": "user", "content": {"type": "text", "text": "Review the note \"first\" in a blunt tone."}}])
+    );
+
+    // A 4xx from the route is the arguments' fault: invalid params, with the problem.
+    let params = json!({"name": "review", "arguments": {"id": "2"}});
+    let reply = modern(library(Mcp::new()), "prompts/get", params).await;
+    assert_eq!(reply.body["error"]["code"], -32602);
+    assert_eq!(reply.body["error"]["message"], "note 2 not found");
+    assert_eq!(reply.body["error"]["data"]["status"], 404);
+
+    let params = json!({"name": "review", "arguments": {"id": "one"}});
+    let reply = modern(library(Mcp::new()), "prompts/get", params).await;
+    assert_eq!(reply.body["error"]["code"], -32602);
+    assert_eq!(reply.body["error"]["data"]["status"], 422, "{}", reply.body);
+
+    let params = json!({"name": "nope"});
+    let reply = modern(library(Mcp::new()), "prompts/get", params).await;
+    assert_eq!(reply.body["error"]["message"], "unknown prompt: nope");
+}
+
+#[tokio::test]
+async fn a_prompt_is_json_over_http() {
+    let request = Request::get("/prompts/review/1")
+        .body(Body::empty())
+        .unwrap();
+    let response = library(Mcp::new()).oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    let prompt: Prompt = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(prompt.messages().len(), 1);
+}
+
+/// Needs a token.
+#[lesto::get("/secret", mcp = "resource")]
+async fn secret(auth: Bearer) -> String {
+    auth.token().to_string()
+}
+
+#[tokio::test]
+async fn a_resource_behind_auth_answers_401() {
+    let router = App::new()
+        .title("Notes API")
+        .routes(routes![secret])
+        .mcp(Mcp::new())
+        .into_router();
+    let reply = read(router.clone(), "lesto://notes-api/secret").await;
+    assert_eq!(reply.status, StatusCode::UNAUTHORIZED);
+    assert!(reply.headers.contains_key(header::WWW_AUTHENTICATE));
+
+    let params = json!({"uri": "lesto://notes-api/secret"});
+    let reply = modern_with(
+        router,
+        "resources/read",
+        params,
+        &[
+            ("mcp-name", "lesto://notes-api/secret"),
+            ("authorization", "Bearer abc"),
+        ],
+    )
+    .await;
+    assert_eq!(reply.body["result"]["contents"][0]["text"], "abc");
+    assert_eq!(
+        reply.body["result"]["contents"][0]["mimeType"],
+        "text/plain"
+    );
+}
+
+#[test]
+#[should_panic(expected = "its query parameter `q` is required")]
+fn a_resource_cannot_require_a_query_parameter() {
+    #[derive(Deserialize, JsonSchema, Validate)]
+    struct Q {
+        #[garde(skip)]
+        q: String,
+    }
+    /// Search.
+    #[lesto::get("/find", mcp = "resource")]
+    async fn find(Query(q): Query<Q>) -> String {
+        q.q
+    }
+    let _: Router = App::new()
+        .routes(routes![find])
+        .mcp(Mcp::new())
+        .into_router();
 }

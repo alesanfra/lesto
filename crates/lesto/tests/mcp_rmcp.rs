@@ -1,10 +1,12 @@
 //! lesto's MCP endpoint driven by the official Rust SDK's client (`rmcp`, a dev-dependency), once
 //! in each protocol era: what an agent actually sends, over a real socket on loopback.
 
-use lesto::mcp::Mcp;
+use lesto::mcp::{Mcp, Prompt};
 use lesto::prelude::*;
 use rmcp::ServiceExt;
-use rmcp::model::{CallToolRequestParams, ProtocolVersion};
+use rmcp::model::{
+    CallToolRequestParams, GetPromptRequestParams, ProtocolVersion, ReadResourceRequestParams,
+};
 use rmcp::service::{ClientLifecycleMode, ClientServiceExt, RoleClient, RunningService};
 use rmcp::transport::StreamableHttpClientTransport;
 use serde_json::json;
@@ -36,6 +38,21 @@ async fn get_note(Path(id): Path<u64>) -> Result<Json<Note>, HttpError> {
     Err(HttpError::not_found(format!("note {id} not found")))
 }
 
+/// One note, as a resource.
+#[lesto::get("/notes/{id}/view", mcp(resource, name = "note"))]
+async fn view_note(Path(id): Path<u64>) -> Json<Note> {
+    Json(Note {
+        id,
+        title: "first".into(),
+    })
+}
+
+/// Summarize a note.
+#[lesto::get("/prompts/summarize/{id}", mcp = "prompt")]
+async fn summarize(Path(id): Path<u64>) -> Prompt {
+    Prompt::new().user(format!("Summarize note {id}."))
+}
+
 /// Serve the app on an ephemeral port; the server stops when the returned sender is dropped.
 async fn serve() -> (String, tokio::sync::oneshot::Sender<()>) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -43,7 +60,7 @@ async fn serve() -> (String, tokio::sync::oneshot::Sender<()>) {
     let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
     let app = App::new()
         .title("Notes")
-        .routes(routes![create_note, get_note])
+        .routes(routes![create_note, get_note, view_note, summarize])
         .mcp(Mcp::new());
     tokio::spawn(app.serve_until(listener, async {
         let _ = stopped.await;
@@ -83,6 +100,28 @@ async fn exercise(client: RunningService<RoleClient, ()>) {
         .await
         .unwrap();
     assert_eq!(missing.is_error, Some(true));
+
+    let templates = client.list_all_resource_templates().await.unwrap();
+    assert_eq!(templates.len(), 1);
+    assert_eq!(templates[0].uri_template, "lesto://notes/notes/{id}/view");
+    let read: ReadResourceRequestParams =
+        serde_json::from_value(json!({"uri": "lesto://notes/notes/7/view"})).unwrap();
+    let contents = serde_json::to_value(client.read_resource(read).await.unwrap()).unwrap();
+    let text = contents["contents"][0]["text"].as_str().unwrap();
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(text).unwrap(),
+        json!({"id": 7, "title": "first"})
+    );
+
+    let prompts = client.list_all_prompts().await.unwrap();
+    assert_eq!(prompts[0].name, "summarize");
+    let get: GetPromptRequestParams =
+        serde_json::from_value(json!({"name": "summarize", "arguments": {"id": "3"}})).unwrap();
+    let prompt = serde_json::to_value(client.get_prompt(get).await.unwrap()).unwrap();
+    assert_eq!(
+        prompt["messages"][0]["content"]["text"],
+        "Summarize note 3."
+    );
 
     client.cancel().await.unwrap();
 }

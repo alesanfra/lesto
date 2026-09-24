@@ -1,15 +1,16 @@
-//! A `tools/call` as an HTTP request to the application's own router, and the response as the
-//! tool's result.
+//! A `tools/call`, `resources/read` or `prompts/get` as an HTTP request to the application's own
+//! router, and the response as the result.
 
 use axum::body::Body;
+use axum::body::Bytes;
 use axum::extract::Request;
 use axum::response::Response;
 use base64::Engine;
 use http::{HeaderMap, HeaderName, HeaderValue, StatusCode, header};
-use serde_json::{Map, Value};
+use serde_json::{Map, Value, json};
 
 use super::McpCall;
-use super::catalog::{BodyArgs, Tool};
+use super::catalog::{BodyArgs, Target, Tool};
 
 /// Headers of the transport request that do not describe the inner one: framing, hop-by-hop,
 /// and MCP's own.
@@ -36,29 +37,29 @@ fn skipped(name: &HeaderName) -> bool {
 /// It belongs to this call, so it wins on the inner request.
 const META_TRACE_KEYS: [&str; 3] = ["traceparent", "tracestate", "baggage"];
 
-/// The inner request for `tool` called with `arguments`. `Err` is the message of an
+/// The inner request for `target` called with `arguments`. `Err` is the message of an
 /// invalid-params error.
 pub(crate) fn request(
-    tool: &Tool,
+    target: &Target,
     arguments: &Map<String, Value>,
     transport: &HeaderMap,
     meta: Option<&Map<String, Value>>,
 ) -> Result<Request, String> {
-    let path = fill_path(tool, arguments)?;
-    let query = query_string(tool, arguments)?;
+    let path = fill_path(target, arguments)?;
+    let query = query_string(target, arguments)?;
     let uri = if query.is_empty() {
         path
     } else {
         format!("{path}?{query}")
     };
-    let body = match &tool.body {
+    let body = match &target.body {
         BodyArgs::None => None,
         BodyArgs::Flat => {
             let body: Map<String, Value> = arguments
                 .iter()
                 .filter(|(key, _)| {
-                    !tool.path_params.iter().any(|p| &p.name == *key)
-                        && !tool.query_params.contains(key)
+                    !target.path_params.iter().any(|p| &p.name == *key)
+                        && !target.query_params.contains(key)
                 })
                 .map(|(k, v)| (k.clone(), v.clone()))
                 .collect();
@@ -66,10 +67,20 @@ pub(crate) fn request(
         }
         BodyArgs::Wrapped { .. } => arguments.get("body").filter(|v| !v.is_null()).cloned(),
     };
+    build(target, &uri, body, transport, meta)
+}
 
+/// The inner request to `uri` (path and query) for `target`, with the transport's headers.
+pub(crate) fn build(
+    target: &Target,
+    uri: &str,
+    body: Option<Value>,
+    transport: &HeaderMap,
+    meta: Option<&Map<String, Value>>,
+) -> Result<Request, String> {
     let mut request = Request::builder()
-        .method(tool.method.clone())
-        .uri(&uri)
+        .method(target.method.clone())
+        .uri(uri)
         .body(match &body {
             Some(body) => Body::from(serde_json::to_vec(body).expect("a JSON value serializes")),
             None => Body::empty(),
@@ -100,7 +111,7 @@ pub(crate) fn request(
         );
     }
     request.extensions_mut().insert(McpCall {
-        name: tool.name.clone(),
+        name: target.name.clone(),
     });
     Ok(request)
 }
@@ -117,10 +128,10 @@ fn scalar(name: &str, value: &Value) -> Result<String, String> {
     }
 }
 
-fn fill_path(tool: &Tool, arguments: &Map<String, Value>) -> Result<String, String> {
-    let mut path = String::with_capacity(tool.path.len());
-    let mut rest = tool.path.as_str();
-    let mut params = tool.path_params.iter();
+fn fill_path(target: &Target, arguments: &Map<String, Value>) -> Result<String, String> {
+    let mut path = String::with_capacity(target.path.len());
+    let mut rest = target.path.as_str();
+    let mut params = target.path_params.iter();
     while let Some(start) = rest.find('{') {
         let Some(end) = rest[start..].find('}') else {
             break;
@@ -156,9 +167,9 @@ fn percent_encode(value: &str, keep_slash: bool, out: &mut String) {
 }
 
 /// Query parameters the way `lesto::Query` reads them: arrays as repeated keys, `null` omitted.
-fn query_string(tool: &Tool, arguments: &Map<String, Value>) -> Result<String, String> {
+fn query_string(target: &Target, arguments: &Map<String, Value>) -> Result<String, String> {
     let mut query = form_urlencoded::Serializer::new(String::new());
-    for name in &tool.query_params {
+    for name in &target.query_params {
         match arguments.get(name) {
             None | Some(Value::Null) => {}
             Some(Value::Array(items)) => {
@@ -189,58 +200,102 @@ pub(crate) fn is_auth_challenge(response: &Response) -> bool {
     }
 }
 
+/// An inner response, read: what the result builders need.
+pub(crate) struct Collected {
+    pub status: StatusCode,
+    pub headers: HeaderMap,
+    /// The media type without parameters, lowercase (`application/json`), empty if absent.
+    pub essence: String,
+    pub bytes: Bytes,
+}
+
+impl Collected {
+    pub async fn read(response: Response) -> Result<Collected, String> {
+        let (parts, body) = response.into_parts();
+        let essence = parts
+            .headers
+            .get(header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default()
+            .split(';')
+            .next()
+            .unwrap_or_default()
+            .trim()
+            .to_ascii_lowercase();
+        let bytes = axum::body::to_bytes(body, usize::MAX)
+            .await
+            .map_err(|e| format!("reading the response failed: {e}"))?;
+        Ok(Collected {
+            status: parts.status,
+            headers: parts.headers,
+            essence,
+            bytes,
+        })
+    }
+
+    fn is_json(&self) -> bool {
+        self.essence == "application/json" || self.essence.ends_with("+json")
+    }
+
+    /// JSON, `text/*`, or no declared type: shown as text.
+    fn is_text(&self) -> bool {
+        self.is_json() || self.essence.starts_with("text/") || self.essence.is_empty()
+    }
+
+    fn text(&self) -> String {
+        String::from_utf8_lossy(&self.bytes).into_owned()
+    }
+
+    /// The body of a failed response as JSON-RPC error `data`: the problem, or the text.
+    pub fn error_data(&self) -> Value {
+        serde_json::from_slice(&self.bytes).unwrap_or_else(|_| self.text().into())
+    }
+
+    /// The problem's `detail` (else its `title`), to put in a JSON-RPC error message.
+    pub fn problem_message(&self) -> Option<String> {
+        let problem: Value = serde_json::from_slice(&self.bytes).ok()?;
+        problem
+            .get("detail")
+            .or_else(|| problem.get("title"))
+            .and_then(Value::as_str)
+            .map(String::from)
+    }
+}
+
 /// The `tools/call` result for the inner response: its body as content, `isError` on failure,
 /// `structuredContent` when the tool declares an output schema. `uri` names a binary body.
-pub(crate) async fn result(
+pub(crate) fn tool_result(
     tool: &Tool,
     modern: bool,
-    response: Response,
+    response: &Collected,
     uri: String,
-) -> Result<Map<String, Value>, String> {
-    let status = response.status();
-    let content_type = response
-        .headers()
-        .get(header::CONTENT_TYPE)
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or_default()
-        .to_string();
-    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
-        .await
-        .map_err(|e| format!("reading the response of `{}` failed: {e}", tool.name))?;
-
+) -> Map<String, Value> {
     let mut result = Map::new();
     let mut content = Vec::new();
-    let essence = content_type
-        .split(';')
-        .next()
-        .unwrap_or_default()
-        .trim()
-        .to_ascii_lowercase();
-    let is_json = essence == "application/json" || essence.ends_with("+json");
-    if bytes.is_empty() {
+    let essence = response.essence.as_str();
+    if response.bytes.is_empty() {
         // `204 No Content` and friends: nothing to show.
-    } else if is_json || essence.starts_with("text/") || essence.is_empty() {
-        let text = String::from_utf8_lossy(&bytes).into_owned();
-        if status.is_success()
-            && is_json
+    } else if response.is_text() {
+        if response.status.is_success()
+            && response.is_json()
             && tool.structured(modern)
-            && let Ok(value) = serde_json::from_slice::<Value>(&bytes)
+            && let Ok(value) = serde_json::from_slice::<Value>(&response.bytes)
             && (modern || value.is_object())
         {
             result.insert("structuredContent".into(), value);
         }
-        content.push(serde_json::json!({ "type": "text", "text": text }));
+        content.push(json!({ "type": "text", "text": response.text() }));
     } else {
-        let data = base64::engine::general_purpose::STANDARD.encode(&bytes);
+        let data = base64::engine::general_purpose::STANDARD.encode(&response.bytes);
         let item = if essence.starts_with("image/") || essence.starts_with("audio/") {
             let kind = if essence.starts_with("image/") {
                 "image"
             } else {
                 "audio"
             };
-            serde_json::json!({ "type": kind, "data": data, "mimeType": essence })
+            json!({ "type": kind, "data": data, "mimeType": essence })
         } else {
-            serde_json::json!({
+            json!({
                 "type": "resource",
                 "resource": { "uri": uri, "mimeType": essence, "blob": data },
             })
@@ -248,10 +303,61 @@ pub(crate) async fn result(
         content.push(item);
     }
     result.insert("content".into(), Value::Array(content));
-    if !status.is_success() {
+    if !response.status.is_success() {
         result.insert("isError".into(), true.into());
     }
-    Ok(result)
+    result
+}
+
+/// The `resources/read` result for a successful inner response: one content item, text for
+/// JSON and `text/*`, a base64 `blob` otherwise.
+pub(crate) fn resource_result(uri: &str, response: &Collected) -> Map<String, Value> {
+    let mut item = Map::new();
+    item.insert("uri".into(), uri.into());
+    if !response.essence.is_empty() {
+        item.insert("mimeType".into(), response.essence.clone().into());
+    }
+    if response.is_text() {
+        item.insert("text".into(), response.text().into());
+    } else {
+        let data = base64::engine::general_purpose::STANDARD.encode(&response.bytes);
+        item.insert("blob".into(), data.into());
+    }
+    let mut result = Map::new();
+    result.insert("contents".into(), json!([item]));
+    result
+}
+
+/// 2026-07-28's caching fields for a resource, from the inner response's `Cache-Control`:
+/// `max-age` is the time to live, `public` / `private` the scope. Without the header, nothing
+/// may be cached (`0`, `private`): the data may change and may depend on the caller.
+pub(crate) fn resource_cache(headers: &HeaderMap) -> (u64, &'static str) {
+    let mut ttl_ms = 0;
+    let mut scope = "private";
+    let directives = headers
+        .get_all(header::CACHE_CONTROL)
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .flat_map(|v| v.split(','))
+        .map(str::trim);
+    let mut no_store = false;
+    for directive in directives {
+        let (name, value) = directive.split_once('=').unwrap_or((directive, ""));
+        match name.to_ascii_lowercase().as_str() {
+            "max-age" => {
+                if let Ok(seconds) = value.trim_matches('"').parse::<u64>() {
+                    ttl_ms = seconds.saturating_mul(1000);
+                }
+            }
+            "public" => scope = "public",
+            "no-store" | "no-cache" => no_store = true,
+            _ => {}
+        }
+    }
+    if no_store {
+        ttl_ms = 0;
+    }
+    (ttl_ms, scope)
 }
 
 #[cfg(test)]
@@ -260,8 +366,8 @@ mod tests {
     use crate::mcp::catalog::PathParam;
     use serde_json::json;
 
-    fn tool(path: &str, params: &[(&str, bool)], query: &[&str], body: BodyArgs) -> Tool {
-        Tool {
+    fn tool(path: &str, params: &[(&str, bool)], query: &[&str], body: BodyArgs) -> Target {
+        Target {
             name: "t".into(),
             method: http::Method::POST,
             path: path.into(),
@@ -274,8 +380,6 @@ mod tests {
                 .collect(),
             query_params: query.iter().map(|q| q.to_string()).collect(),
             body,
-            definition: Map::new(),
-            output_schema: None,
         }
     }
 
@@ -329,5 +433,21 @@ mod tests {
         assert!(headers.get(header::CONTENT_LENGTH).is_none());
         assert_eq!(headers["traceparent"], "from-meta");
         assert!(headers.get(header::CONTENT_TYPE).is_none());
+    }
+
+    #[test]
+    fn resource_caching_follows_cache_control() {
+        let mut headers = HeaderMap::new();
+        assert_eq!(resource_cache(&headers), (0, "private"));
+        headers.insert(
+            header::CACHE_CONTROL,
+            HeaderValue::from_static("public, max-age=60"),
+        );
+        assert_eq!(resource_cache(&headers), (60_000, "public"));
+        headers.insert(
+            header::CACHE_CONTROL,
+            HeaderValue::from_static("max-age=60, no-store"),
+        );
+        assert_eq!(resource_cache(&headers), (0, "private"));
     }
 }

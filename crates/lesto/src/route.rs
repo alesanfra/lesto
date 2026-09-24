@@ -48,20 +48,30 @@ pub struct RouteMeta {
     pub security: Vec<(String, Vec<String>)>,
     /// Explicitly public: emits `security: []`, overriding app-wide requirements.
     pub public: bool,
-    /// Expose the operation over MCP (`mcp = "tool"`); served once the app calls `App::mcp`.
+    /// Expose the operation over MCP (`mcp = "tool" | "resource" | "prompt"`); served once the
+    /// app calls `App::mcp`.
     pub mcp: Option<McpExpose>,
 }
 
 /// How a route is exposed over the Model Context Protocol: the `mcp` route option.
 ///
-/// Only tools exist so far. The value is inert unless the app serves MCP (`App::mcp`, feature
-/// `mcp`).
+/// The value is inert unless the app serves MCP (`App::mcp`, feature `mcp`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum McpExpose {
     /// An MCP tool; `name` overrides the default (the handler's name).
     Tool {
         /// Explicit tool name.
+        name: Option<String>,
+    },
+    /// An MCP resource (a `GET` route): a resource template when the path has parameters.
+    Resource {
+        /// Explicit resource name.
+        name: Option<String>,
+    },
+    /// An MCP prompt (a `GET` route returning `lesto::mcp::Prompt`).
+    Prompt {
+        /// Explicit prompt name.
         name: Option<String>,
     },
 }
@@ -76,6 +86,39 @@ impl McpExpose {
     pub fn tool_named(name: impl Into<String>) -> Self {
         McpExpose::Tool {
             name: Some(name.into()),
+        }
+    }
+
+    /// A resource named after the handler (`mcp = "resource"`).
+    pub fn resource() -> Self {
+        McpExpose::Resource { name: None }
+    }
+
+    /// A resource with an explicit name (`mcp(resource, name = "..")`).
+    pub fn resource_named(name: impl Into<String>) -> Self {
+        McpExpose::Resource {
+            name: Some(name.into()),
+        }
+    }
+
+    /// A prompt named after the handler (`mcp = "prompt"`).
+    pub fn prompt() -> Self {
+        McpExpose::Prompt { name: None }
+    }
+
+    /// A prompt with an explicit name (`mcp(prompt, name = "..")`).
+    pub fn prompt_named(name: impl Into<String>) -> Self {
+        McpExpose::Prompt {
+            name: Some(name.into()),
+        }
+    }
+
+    /// The explicit name, if one was given.
+    pub fn name(&self) -> Option<&str> {
+        match self {
+            McpExpose::Tool { name }
+            | McpExpose::Resource { name }
+            | McpExpose::Prompt { name } => name.as_deref(),
         }
     }
 }

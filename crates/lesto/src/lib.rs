@@ -262,4 +262,18 @@ pub mod __private {
     #[cfg(not(feature = "strict-docs"))]
     pub fn check_strict_input<T>() {}
     pub fn check_documented_output<T: crate::OperationOutput>() {}
+
+    /// The return type of a route marked `mcp = "prompt"`.
+    #[diagnostic::on_unimplemented(
+        message = "`{Self}` cannot be the response of an MCP prompt",
+        label = "a route marked `mcp = \"prompt\"` must return `lesto::mcp::Prompt`",
+        note = "return `lesto::mcp::Prompt` or `Result<lesto::mcp::Prompt, E>` (feature `mcp`): `Prompt::new().user(\"..\")`",
+        note = "a route that returns data is a resource: `mcp = \"resource\"`"
+    )]
+    pub trait PromptOutput {}
+    #[cfg(feature = "mcp")]
+    impl PromptOutput for crate::mcp::Prompt {}
+    #[cfg(feature = "mcp")]
+    impl<E: IntoResponse> PromptOutput for Result<crate::mcp::Prompt, E> {}
+    pub fn check_prompt_output<T: PromptOutput>() {}
 }

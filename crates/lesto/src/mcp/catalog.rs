@@ -1,13 +1,15 @@
-//! Operations marked `mcp = "tool"` turned into MCP tools, from the OpenAPI document lesto
-//! already builds: one input schema out of the path and query parameters and the JSON body, the
-//! success response as the output schema, hints from the HTTP method.
+//! Operations marked `mcp = ".."` turned into MCP tools, resources and prompts, from the OpenAPI
+//! document lesto already builds. A tool gets one input schema out of the path and query
+//! parameters and the JSON body, the success response as the output schema and hints from the
+//! HTTP method; a resource gets a URI (a template when the path has parameters); a prompt gets
+//! its parameters as arguments.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 use http::Method;
 use serde_json::{Map, Value, json};
 
-use crate::openapi::{OpenApi, Operation, ParameterIn};
+use crate::openapi::{OpenApi, Operation, Parameter, ParameterIn};
 use crate::route::{McpExpose, PendingOperation};
 
 const COMPONENTS_PREFIX: &str = "#/components/schemas/";
@@ -33,8 +35,10 @@ pub(crate) struct PathParam {
     pub wildcard: bool,
 }
 
+/// The route an MCP primitive calls, and how its arguments map onto a request.
 #[derive(Debug, Clone)]
-pub(crate) struct Tool {
+pub(crate) struct Target {
+    /// The tool, resource or prompt name (for `McpCall` and the logs).
     pub name: String,
     pub method: Method,
     /// Final path template, axum syntax.
@@ -42,6 +46,11 @@ pub(crate) struct Tool {
     pub path_params: Vec<PathParam>,
     pub query_params: Vec<String>,
     pub body: BodyArgs,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct Tool {
+    pub target: Target,
     /// The tool as `tools/list` shows it, without `outputSchema`.
     pub definition: Map<String, Value>,
     /// The success response's schema, and whether it is an object schema (the only kind legacy
@@ -67,52 +76,128 @@ impl Tool {
     }
 }
 
+/// A `GET` route read as an MCP resource: a fixed URI, or a URI template when its path has
+/// parameters.
+#[derive(Debug, Clone)]
+pub(crate) struct Resource {
+    pub target: Target,
+    /// The entry of `resources/list` (`uri`) or `resources/templates/list` (`uriTemplate`).
+    pub definition: Value,
+    pub template: bool,
+}
+
+impl Resource {
+    /// Whether `path` (a request path, still percent-encoded) is one this route serves: literal
+    /// segments equal, a parameter any non-empty segment, a wildcard the non-empty rest.
+    pub fn matches(&self, path: &str) -> bool {
+        let mut wanted = self.target.path.split('/');
+        let mut given = path.split('/');
+        loop {
+            match (wanted.next(), given.next()) {
+                (None, None) => return true,
+                (Some(w), Some(g)) if w.starts_with("{*") && w.ends_with('}') => {
+                    return !g.is_empty() || given.any(|g| !g.is_empty());
+                }
+                (Some(w), Some(g)) if w.starts_with('{') && w.ends_with('}') => {
+                    if g.is_empty() {
+                        return false;
+                    }
+                }
+                (Some(w), Some(g)) if w == g => {}
+                _ => return false,
+            }
+        }
+    }
+}
+
+/// A `GET` route returning `lesto::mcp::Prompt`: its parameters are the prompt's arguments.
+#[derive(Debug, Clone)]
+pub(crate) struct Prompt {
+    pub target: Target,
+    /// The entry of `prompts/list`.
+    pub definition: Value,
+}
+
 #[derive(Debug, Default)]
 pub(crate) struct Catalog {
     pub tools: Vec<Tool>,
-    index: HashMap<String, usize>,
+    tool_index: HashMap<String, usize>,
+    pub resources: Vec<Resource>,
+    pub prompts: Vec<Prompt>,
+    prompt_index: HashMap<String, usize>,
+}
+
+/// The three kinds of primitive, to name them one namespace at a time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum Kind {
+    Tool,
+    Resource,
+    Prompt,
+}
+
+impl Kind {
+    fn of(expose: &McpExpose) -> Kind {
+        match expose {
+            McpExpose::Tool { .. } => Kind::Tool,
+            McpExpose::Resource { .. } => Kind::Resource,
+            McpExpose::Prompt { .. } => Kind::Prompt,
+        }
+    }
+
+    fn word(self) -> &'static str {
+        match self {
+            Kind::Tool => "tool",
+            Kind::Resource => "resource",
+            Kind::Prompt => "prompt",
+        }
+    }
 }
 
 impl Catalog {
     pub fn tool(&self, name: &str) -> Option<&Tool> {
-        self.index.get(name).map(|&i| &self.tools[i])
+        self.tool_index.get(name).map(|&i| &self.tools[i])
     }
 
-    /// The tools of `operations`, in registration order, documented from `spec` (which must
-    /// have been built from the same operations).
+    pub fn prompt(&self, name: &str) -> Option<&Prompt> {
+        self.prompt_index.get(name).map(|&i| &self.prompts[i])
+    }
+
+    /// The resource serving `path`: a fixed URI first, then the templates in registration
+    /// order, as a router would try them.
+    pub fn resource(&self, path: &str) -> Option<&Resource> {
+        self.resources
+            .iter()
+            .find(|r| !r.template && r.target.path == path)
+            .or_else(|| {
+                self.resources
+                    .iter()
+                    .find(|r| r.template && r.matches(path))
+            })
+    }
+
+    /// The tools, resources and prompts of `operations`, in registration order, documented from
+    /// `spec` (which must have been built from the same operations). Resource URIs start with
+    /// `resource_base`.
     ///
-    /// Panics, like axum on conflicting routes, when two operations ask for the same explicit
-    /// tool name or a body is not JSON: both are mistakes in the application, found at startup.
-    pub fn build(operations: &[(String, PendingOperation)], spec: &OpenApi) -> Catalog {
-        let exposed: Vec<(&String, &PendingOperation, Option<&str>)> = operations
+    /// Panics, like axum on conflicting routes, when two operations of one kind ask for the same
+    /// explicit name, a tool's body is not JSON, or a resource needs a query parameter: those
+    /// are mistakes in the application, found at startup.
+    pub fn build(
+        operations: &[(String, PendingOperation)],
+        spec: &OpenApi,
+        resource_base: &str,
+    ) -> Catalog {
+        let exposed: Vec<(&String, &PendingOperation, &McpExpose)> = operations
             .iter()
             .filter_map(|(path, pending)| {
-                pending.meta.mcp.as_ref().map(|expose| match expose {
-                    McpExpose::Tool { name } => (path, pending, name.as_deref()),
-                })
+                pending
+                    .meta
+                    .mcp
+                    .as_ref()
+                    .map(|expose| (path, pending, expose))
             })
             .collect();
-
-        // Explicit names first: they must be unique, and they win over a default name.
-        let mut explicit: HashMap<&str, String> = HashMap::new();
-        for (path, pending, name) in &exposed {
-            if let Some(name) = name {
-                let route = format!("{} {path}", pending.meta.method);
-                if let Some(other) = explicit.insert(name, route.clone()) {
-                    panic!(
-                        "two routes are exposed as the MCP tool `{name}`: {other} and {route}; give one of them another `mcp(tool, name = \"..\")`"
-                    );
-                }
-            }
-        }
-        let mut default_counts: HashMap<String, usize> = HashMap::new();
-        for (_, pending, name) in &exposed {
-            if name.is_none()
-                && let Some(fn_name) = &pending.meta.name
-            {
-                *default_counts.entry(fn_name.clone()).or_default() += 1;
-            }
-        }
+        let names = names(&exposed);
 
         let schemas = spec
             .components
@@ -125,26 +210,8 @@ impl Catalog {
             })
             .unwrap_or_default();
         let mut catalog = Catalog::default();
-        for (path, pending, name) in exposed {
+        for ((path, pending, expose), name) in exposed.into_iter().zip(names) {
             let meta = &pending.meta;
-            let operation_id = meta.default_operation_id(path);
-            // The handler's name, unless another tool has it too: then the operationId, which
-            // is unique by construction.
-            let name = match (name, &meta.name) {
-                (Some(name), _) => name.to_string(),
-                (None, Some(fn_name))
-                    if default_counts.get(fn_name) == Some(&1)
-                        && !explicit.contains_key(fn_name.as_str()) =>
-                {
-                    fn_name.clone()
-                }
-                (None, _) => operation_id,
-            };
-            if catalog.index.contains_key(&name) {
-                panic!(
-                    "two routes are exposed as the MCP tool `{name}`; give one of them `mcp(tool, name = \"..\")`"
-                );
-            }
             let operation = spec
                 .paths
                 .get(path)
@@ -155,11 +222,205 @@ impl Catalog {
                         meta.method
                     )
                 });
-            let tool = tool(name, path, &meta.method, operation, &schemas);
-            catalog.index.insert(tool.name.clone(), catalog.tools.len());
-            catalog.tools.push(tool);
+            match Kind::of(expose) {
+                Kind::Tool => {
+                    let tool = tool(name, path, &meta.method, operation, &schemas);
+                    catalog
+                        .tool_index
+                        .insert(tool.target.name.clone(), catalog.tools.len());
+                    catalog.tools.push(tool);
+                }
+                Kind::Resource => {
+                    let resource = resource(name, path, operation, resource_base);
+                    catalog.resources.push(resource);
+                }
+                Kind::Prompt => {
+                    let prompt = prompt(name, path, operation);
+                    catalog
+                        .prompt_index
+                        .insert(prompt.target.name.clone(), catalog.prompts.len());
+                    catalog.prompts.push(prompt);
+                }
+            }
         }
         catalog
+    }
+}
+
+/// The name of each exposed operation, one namespace per kind: the explicit name, else the
+/// handler's name, else (when two handlers of a kind share a name, or an explicit name takes
+/// it) the `operationId`, which is unique by construction.
+fn names(exposed: &[(&String, &PendingOperation, &McpExpose)]) -> Vec<String> {
+    // Explicit names first: they must be unique, and they win over a default name.
+    let mut explicit: HashMap<(Kind, &str), String> = HashMap::new();
+    for (path, pending, expose) in exposed {
+        if let Some(name) = expose.name() {
+            let kind = Kind::of(expose);
+            let route = format!("{} {path}", pending.meta.method);
+            if let Some(other) = explicit.insert((kind, name), route.clone()) {
+                let kind = kind.word();
+                panic!(
+                    "two routes are exposed as the MCP {kind} `{name}`: {other} and {route}; give one of them another `mcp({kind}, name = \"..\")`"
+                );
+            }
+        }
+    }
+    let mut default_counts: HashMap<(Kind, &str), usize> = HashMap::new();
+    for (_, pending, expose) in exposed {
+        if expose.name().is_none()
+            && let Some(fn_name) = &pending.meta.name
+        {
+            *default_counts
+                .entry((Kind::of(expose), fn_name.as_str()))
+                .or_default() += 1;
+        }
+    }
+
+    let mut taken: HashSet<(Kind, String)> = HashSet::new();
+    exposed
+        .iter()
+        .map(|(path, pending, expose)| {
+            let kind = Kind::of(expose);
+            let meta = &pending.meta;
+            let name = match (expose.name(), &meta.name) {
+                (Some(name), _) => name.to_string(),
+                (None, Some(fn_name))
+                    if default_counts.get(&(kind, fn_name.as_str())) == Some(&1)
+                        && !explicit.contains_key(&(kind, fn_name.as_str())) =>
+                {
+                    fn_name.clone()
+                }
+                (None, _) => meta.default_operation_id(path),
+            };
+            if !taken.insert((kind, name.clone())) {
+                let kind = kind.word();
+                panic!(
+                    "two routes are exposed as the MCP {kind} `{name}`; give one of them `mcp({kind}, name = \"..\")`"
+                );
+            }
+            name
+        })
+        .collect()
+}
+
+/// The path and query parameters of `operation`, with the argument name (`rest` for
+/// `{*rest}`) and whether the parameter is in the path and a wildcard.
+fn parameters(operation: &Operation) -> impl Iterator<Item = (&Parameter, String, bool)> {
+    operation
+        .parameters
+        .iter()
+        .filter(|parameter| matches!(parameter.location, ParameterIn::Path | ParameterIn::Query))
+        .map(|parameter| {
+            let wildcard = parameter.name.starts_with('*');
+            let arg = parameter.name.trim_start_matches('*').to_string();
+            (parameter, arg, wildcard)
+        })
+}
+
+/// The target of a route with no body: its parameters split into path and query.
+fn target(name: String, method: &Method, path: &str, operation: &Operation) -> Target {
+    let mut path_params = Vec::new();
+    let mut query_params = Vec::new();
+    for (parameter, arg, wildcard) in parameters(operation) {
+        match parameter.location {
+            ParameterIn::Path => path_params.push(PathParam {
+                name: arg,
+                wildcard,
+            }),
+            _ => query_params.push(arg),
+        }
+    }
+    Target {
+        name,
+        method: method.clone(),
+        path: path.to_string(),
+        path_params,
+        query_params,
+        body: BodyArgs::None,
+    }
+}
+
+/// A parameter's description: the parameter's own, else its schema's.
+fn parameter_description(parameter: &Parameter) -> Option<String> {
+    parameter.description.clone().or_else(|| {
+        parameter.schema.as_ref().and_then(|s| {
+            s.clone()
+                .to_value()
+                .get("description")?
+                .as_str()
+                .map(String::from)
+        })
+    })
+}
+
+/// The summary and description of the doc comment, as MCP's `title` and `description`.
+fn describe(operation: &Operation, definition: &mut Map<String, Value>) {
+    if let Some(summary) = &operation.summary {
+        definition.insert("title".into(), summary.clone().into());
+    }
+    let description = match (&operation.summary, &operation.description) {
+        (Some(summary), Some(description)) => Some(format!("{summary}\n\n{description}")),
+        (Some(text), None) | (None, Some(text)) => Some(text.clone()),
+        (None, None) => None,
+    };
+    if let Some(description) = description {
+        definition.insert("description".into(), description.into());
+    }
+}
+
+fn resource(name: String, path: &str, operation: &Operation, base: &str) -> Resource {
+    if let Some((parameter, _, _)) =
+        parameters(operation).find(|(p, _, _)| p.location == ParameterIn::Query && p.required)
+    {
+        panic!(
+            "GET {path} cannot be an MCP resource: its query parameter `{}` is required, and a resource URI has no way to pass it; make it optional or expose the route as a tool",
+            parameter.name
+        );
+    }
+    let target = target(name, &Method::GET, path, operation);
+    let template = !target.path_params.is_empty();
+    // axum's `{id}` is already an RFC 6570 expression; `{*rest}` spans segments, which is
+    // RFC 6570's reserved expansion `{+rest}`.
+    let uri = format!("{base}{}", path.replace("{*", "{+"));
+    let mut definition = Map::new();
+    definition.insert(
+        if template { "uriTemplate" } else { "uri" }.into(),
+        uri.into(),
+    );
+    definition.insert("name".into(), target.name.clone().into());
+    describe(operation, &mut definition);
+    if let Some(mime_type) = success_media_type(operation) {
+        definition.insert("mimeType".into(), mime_type.into());
+    }
+    Resource {
+        target,
+        definition: Value::Object(definition),
+        template,
+    }
+}
+
+fn prompt(name: String, path: &str, operation: &Operation) -> Prompt {
+    let arguments: Vec<Value> = parameters(operation)
+        .map(|(parameter, arg, _)| {
+            let mut argument = Map::new();
+            argument.insert("name".into(), arg.into());
+            if let Some(description) = parameter_description(parameter) {
+                argument.insert("description".into(), description.into());
+            }
+            argument.insert("required".into(), parameter.required.into());
+            Value::Object(argument)
+        })
+        .collect();
+    let target = target(name, &Method::GET, path, operation);
+    let mut definition = Map::new();
+    definition.insert("name".into(), target.name.clone().into());
+    describe(operation, &mut definition);
+    if !arguments.is_empty() {
+        definition.insert("arguments".into(), arguments.into());
+    }
+    Prompt {
+        target,
+        definition: Value::Object(definition),
     }
 }
 
@@ -172,16 +433,7 @@ fn tool(
 ) -> Tool {
     let mut properties = Map::new();
     let mut required = Vec::new();
-    let mut path_params = Vec::new();
-    let mut query_params = Vec::new();
-
-    for parameter in &operation.parameters {
-        let location = parameter.location;
-        if !matches!(location, ParameterIn::Path | ParameterIn::Query) {
-            continue;
-        }
-        let wildcard = parameter.name.starts_with('*');
-        let arg = parameter.name.trim_start_matches('*').to_string();
+    for (parameter, arg, _) in parameters(operation) {
         let mut schema = parameter
             .schema
             .as_ref()
@@ -192,18 +444,12 @@ fn tool(
         }
         properties.insert(arg.clone(), schema);
         if parameter.required {
-            required.push(arg.clone());
-        }
-        match location {
-            ParameterIn::Path => path_params.push(PathParam {
-                name: arg,
-                wildcard,
-            }),
-            _ => query_params.push(arg),
+            required.push(arg);
         }
     }
+    let mut target = target(name, method, path, operation);
 
-    let body = match &operation.request_body {
+    target.body = match &operation.request_body {
         None => BodyArgs::None,
         Some(body) => {
             let Some(schema) = body
@@ -272,18 +518,8 @@ fn tool(
     });
 
     let mut definition = Map::new();
-    definition.insert("name".into(), name.clone().into());
-    if let Some(summary) = &operation.summary {
-        definition.insert("title".into(), summary.clone().into());
-    }
-    let description = match (&operation.summary, &operation.description) {
-        (Some(summary), Some(description)) => Some(format!("{summary}\n\n{description}")),
-        (Some(text), None) | (None, Some(text)) => Some(text.clone()),
-        (None, None) => None,
-    };
-    if let Some(description) = description {
-        definition.insert("description".into(), description.into());
-    }
+    definition.insert("name".into(), target.name.clone().into());
+    describe(operation, &mut definition);
     definition.insert("inputSchema".into(), input);
     definition.insert(
         "annotations".into(),
@@ -291,12 +527,7 @@ fn tool(
     );
 
     Tool {
-        name,
-        method: method.clone(),
-        path: path.to_string(),
-        path_params,
-        query_params,
-        body,
+        target,
         definition,
         output_schema,
     }
@@ -315,6 +546,15 @@ fn success_schema(operation: &Operation) -> Option<Value> {
                 .and_then(|m| m.schema.as_ref())
         })
         .map(|schema| schema.clone().to_value())
+}
+
+/// The media type of the first 2xx response that has a body.
+fn success_media_type(operation: &Operation) -> Option<String> {
+    operation
+        .responses
+        .iter()
+        .filter(|(status, _)| status.starts_with('2'))
+        .find_map(|(_, response)| response.content.keys().next().cloned())
 }
 
 /// Hints derived from the method. MCP's defaults assume the worst (a tool may be destructive),
