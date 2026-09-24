@@ -132,6 +132,7 @@ cargo test -p lesto --test ui                 # after changing a diagnostic mess
 sh docs/build.sh                              # needs `cargo install mdbook`
 cargo bench -p lesto                          # overhead vs axum; LESTO_BENCH_ITERS/_ROUNDS shrink it
 sh scripts/bench-http.sh                      # throughput over a socket (needs `oha`)
+sh scripts/mcp-inspector.sh                   # MCP endpoint vs MCP Inspector CLI, both eras (Node 22.19+, jq)
 LESTO_PORT=8765 cargo run -p notes            # port 8000 may be taken on dev machines
 docker run --rm -e POSTGRES_PASSWORD=lesto -p 5432:5432 postgres:18   # for tests/db_postgres.rs
 (cd examples/04-opentelemetry && docker compose up -d openobserve && sh verify.sh)  # OTLP end to end
@@ -144,7 +145,7 @@ cargo run -p lesto-cli -- dev -p notes --port 8765      # lesto dev from this ch
 
 Test, clippy, fmt, rustdoc and (if docs changed) the mdBook build must pass before a change is
 done; `.github/workflows/ci.yml` runs the same on every push and pull request, in three jobs
-(lint, test with a Postgres service for `db_postgres` and a mock-oauth2-server one for `oidc_provider`, `cargo check` on the MSRV 1.94, which
+(lint, test with a Postgres service for `db_postgres`, a mock-oauth2-server one for `oidc_provider` and `scripts/mcp-inspector.sh`, `cargo check` on the MSRV 1.94, which
 `sqlx` 0.9 dictates) built with `--profile ci` (unoptimized dependencies, no debug info). When
 raising `rust-version`, change the MSRV job too. Do not claim success without running them. Gate commits on the test result, never on "it
 should pass". Run `git grep -i presto` before committing: the old name must not come back.
@@ -355,9 +356,9 @@ Recorded here because they are not derivable from the code. Do not undo them cas
   from the SDK's reading of the spec fails CI. Schemas are made portable for stricter clients:
   the output schema's root is inlined (the TypeScript SDK drops a legacy tool whose output
   schema lacks a top-level `"type": "object"`; `rmcp` does not, which is why the Inspector check
-  below matters) and `"type": [T, "null"]` becomes `anyOf`. Before changing the catalog, run
-  `npx @modelcontextprotocol/inspector@latest --cli <url> --method tools/list --strict` in both
-  `--protocol-era`s against `examples/02-notes`. Tool names default to the handler's name and fall
+  below matters) and `"type": [T, "null"]` becomes `anyOf`. `scripts/mcp-inspector.sh` (run by
+  CI after the tests) checks exactly that against `examples/02-notes` with a pinned Inspector
+  version, in both eras. Tool names default to the handler's name and fall
   back to the `operationId` when two collide; two equal explicit names panic in `into_router`,
   like an axum route conflict. Only tools so far: `mcp = "resource"`/`"prompt"` are compile
   errors until implemented.

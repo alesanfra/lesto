@@ -427,7 +427,10 @@ era-specific validation, everything else is shared.
   calls one that fails validation (`isError`), and one that answers `404` (`isError`). Phase 2
   adds reading a resource. It runs in the default
   `cargo test --workspace`: no Docker, no network beyond loopback.
-- `examples/02-notes`: a few routes marked for MCP.
+- `examples/02-notes`: every route but `delete` marked for MCP.
+- `scripts/mcp-inspector.sh`, run in CI after the tests: `examples/02-notes` against the MCP
+  Inspector's CLI (pinned version, TypeScript SDK) in both eras: `tools/list --strict`, a call, a
+  tool error, the `401`. A second client next to `rmcp`, stricter about schemas.
 - Tutorial chapter 16, "MCP", with its snippets in `examples/99-tutorial`; `README.md` (attribute
   options, roadmap); `AGENTS.md` (layout, design decisions, roadmap entry removed).
 - `cargo check -p lesto --no-default-features --features mcp` added to the per-feature checks.

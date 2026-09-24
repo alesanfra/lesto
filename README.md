@@ -360,7 +360,7 @@ Features of `lesto`: `email`, `url` (garde rules) and `compression` (gzip), on b
 CI (`.github/workflows/ci.yml`) runs fmt, clippy and rustdoc with warnings denied, each feature of
 `lesto` alone (`cargo hack`), the mdBook build and `cargo deny`; the tests on stable, including the
 PostgreSQL row level security tests against a `postgres:18` service and the OpenID Connect tests
-against a mock-oauth2-server one; and `cargo check` on the MSRV (1.94).
+against a mock-oauth2-server one, then the MCP endpoint against the MCP Inspector's CLI; and `cargo check` on the MSRV (1.94).
 
 ## Roadmap
 

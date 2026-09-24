@@ -104,6 +104,15 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo test --workspace --profile ci --locked
+      # The MCP endpoint against a second client, the MCP Inspector (TypeScript SDK), next to
+      # rmcp in the tests: strict tool schemas, calls, tool errors and the 401, in both eras.
+      # Here rather than in a job of its own, to reuse the build of examples/02-notes above.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - run: sh scripts/mcp-inspector.sh
+        env:
+          CARGO_PROFILE: ci
 
   msrv:
     name: MSRV (1.94)
