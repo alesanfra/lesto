@@ -126,16 +126,27 @@ the provider's own (behind a proxy, the provider must announce the public URL). 
 logged at `debug` by `lesto`: `RUST_LOG=lesto=debug` shows it when a subscriber is installed
 (chapter 15).
 
-## `MCP resources are not supported yet` (or prompts)
+## `an MCP resource must be a GET route` (or prompt)
 
-Only tools can be exposed over MCP so far: write `mcp = "tool"`. A `GET` route that an agent
-should read is a read-only tool (chapter 16).
+Resources and prompts are read, so only a `GET` route can be one. An operation that creates or
+changes something is a tool: `mcp = "tool"` (chapter 16).
 
-## `panicked at 'two routes are exposed as the MCP tool `x`'`
+## `` `X` cannot be the response of an MCP prompt``
 
-Two routes carry `mcp(tool, name = "x")` with the same name. Tool names must be unique across
-the app, nested apps included: rename one. Default names (the handler's) never collide: when
-two exposed handlers share a name, both use their `operationId`.
+A route marked `mcp = "prompt"` builds the prompt's messages: it returns `lesto::mcp::Prompt` (or
+`Result<Prompt, E>`), for example `Prompt::new().user("..")`. A route that returns data for the
+model to read is a resource: `mcp = "resource"`.
+
+## `panicked at 'two routes are exposed as the MCP tool `x`'` (or resource, prompt)
+
+Two routes of the same kind carry the same `name = "x"`. Names must be unique per kind across
+the app, nested apps included: rename one. Default names (the handler's) never collide: when two
+exposed handlers of a kind share a name, both use their `operationId`.
+
+## `panicked at 'GET /path cannot be an MCP resource: its query parameter `q` is required'`
+
+A resource is read by its URI alone, so a required query parameter could never be filled. Make
+it optional (`Option<T>`), or expose the route as a tool, whose arguments can carry it.
 
 ## An MCP client says the server rejected the request with `403`
 

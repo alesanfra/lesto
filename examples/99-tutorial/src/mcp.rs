@@ -1,5 +1,6 @@
-// Chapter 16: MCP, operations as tools for agents (feature `mcp`)
-use lesto::mcp::{Mcp, McpCall};
+// Chapter 16: MCP, operations as tools, resources and prompts for agents (feature `mcp`)
+use lesto::http::{HeaderMap, header};
+use lesto::mcp::{Mcp, McpCall, Prompt};
 use lesto::prelude::*;
 
 #[lesto::model]
@@ -69,12 +70,55 @@ async fn search(Query(search): Query<Search>) -> Json<Vec<Note>> {
 #[lesto::delete("/notes/{id}", status = 204, tag = "notes")]
 async fn delete_note(Path(_id): Path<u64>) {}
 
-/// The chapter's app: four routes, three of them tools.
+/// The text of a note, as Markdown.
+#[lesto::get("/notes/{id}/text", tag = "notes", mcp(resource, name = "note_text"))]
+async fn note_text(Path(id): Path<u64>) -> Result<(HeaderMap, String), HttpError> {
+    if id != 1 {
+        return Err(HttpError::not_found(format!("note {id} not found")));
+    }
+    let mut headers = HeaderMap::new();
+    headers.insert(header::CONTENT_TYPE, "text/markdown".parse().unwrap());
+    headers.insert(
+        header::CACHE_CONTROL,
+        "private, max-age=60".parse().unwrap(),
+    );
+    Ok((headers, "# Groceries\n\n- milk".into()))
+}
+
+#[lesto::model]
+pub struct Plan {
+    /// When the plan is for, e.g. `this week`.
+    #[garde(length(min = 1))]
+    when: Option<String>,
+}
+
+/// Plan the tasks of a note.
+#[lesto::get("/prompts/plan/{id}", tag = "prompts", mcp = "prompt")]
+async fn plan(Path(id): Path<u64>, Query(plan): Query<Plan>) -> Result<Prompt, HttpError> {
+    if id != 1 {
+        return Err(HttpError::not_found(format!("note {id} not found")));
+    }
+    let when = plan.when.unwrap_or_else(|| "today".into());
+    Ok(Prompt::new()
+        .user(format!(
+            "Turn this note into a plan for {when}:\n\n# Groceries\n\n- milk"
+        ))
+        .assistant("Here is a plan, one step per line:"))
+}
+
+/// The chapter's app: six routes; three tools, a resource, a prompt.
 #[allow(dead_code)]
 pub fn mcp_app() -> App {
     App::new()
         .title("Notes")
-        .routes(routes![create_note, get_note, search, delete_note])
+        .routes(routes![
+            create_note,
+            get_note,
+            search,
+            delete_note,
+            note_text,
+            plan
+        ])
         .mcp(Mcp::new().instructions("Notes of one user. Search before creating a duplicate."))
 }
 
@@ -108,6 +152,22 @@ mod tests {
             .header("mcp-name", name)
             .body(Body::from(body.to_string()))
             .unwrap()
+    }
+
+    /// Any other 2026-07-28 request; `name` goes in `Mcp-Name` (a prompt's name, a resource's
+    /// URI).
+    fn request(method: &str, params: Value, name: Option<&str>) -> Request<Body> {
+        let mut params = params;
+        params["_meta"] = json!({"io.modelcontextprotocol/protocolVersion": "2026-07-28"});
+        let body = json!({"jsonrpc": "2.0", "id": 1, "method": method, "params": params});
+        let mut request = Request::post("/mcp")
+            .header("content-type", "application/json")
+            .header("mcp-protocol-version", "2026-07-28")
+            .header("mcp-method", method);
+        if let Some(name) = name {
+            request = request.header("mcp-name", name);
+        }
+        request.body(Body::from(body.to_string())).unwrap()
     }
 
     async fn result(request: Request<Body>) -> Value {
@@ -159,5 +219,26 @@ mod tests {
             .map(|tool| tool["name"].as_str().unwrap())
             .collect();
         assert_eq!(names, ["create_note", "get_note", "search_notes"]);
+    }
+
+    #[lesto::test]
+    async fn a_resource_is_read_by_its_uri() {
+        let uri = "lesto://notes/notes/1/text";
+        let result = result(request("resources/read", json!({"uri": uri}), Some(uri))).await;
+        let contents = &result["contents"][0];
+        assert_eq!(contents["mimeType"], "text/markdown");
+        assert_eq!(contents["text"], "# Groceries\n\n- milk");
+        assert_eq!(result["ttlMs"], 60_000);
+        assert_eq!(result["cacheScope"], "private");
+    }
+
+    #[lesto::test]
+    async fn a_prompt_is_built_by_its_route() {
+        let params = json!({"name": "plan", "arguments": {"id": "1", "when": "this week"}});
+        let result = result(request("prompts/get", params, Some("plan"))).await;
+        assert_eq!(result["messages"][0]["role"], "user");
+        let text = result["messages"][0]["content"]["text"].as_str().unwrap();
+        assert!(text.starts_with("Turn this note into a plan for this week"));
+        assert_eq!(result["messages"][1]["role"], "assistant");
     }
 }

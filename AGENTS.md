@@ -10,8 +10,8 @@ on an `async fn`, `Json<T>`/`Query<T>`/`Path<T>` extractors that validate with g
 3.1 derived from handler argument and return types, RFC 9457 errors, Scalar at `/docs` and
 Swagger UI at `/swagger`. The `db` feature adds sqlx stores with principals and permissions,
 the `lambda` feature runs the app on AWS Lambda, the `oidc` feature verifies bearer JWTs against an
-OpenID Connect provider, the `mcp` feature serves routes marked `mcp = "tool"` to AI agents over
-the Model Context Protocol; `lesto-cli` adds `lesto dev`. One library crate
+OpenID Connect provider, the `mcp` feature serves routes marked `mcp = "tool"`, `"resource"` or
+`"prompt"` to AI agents over the Model Context Protocol; `lesto-cli` adds `lesto dev`. One library crate
 with features, like FastAPI's extras: `lesto-macros` is separate only because proc macros must
 be, `lesto-cli` because it is a binary. The project was called *presto* until 2026-09-12 (the
 crates.io name was taken).
@@ -57,15 +57,18 @@ crates/lesto/             library
     protect.rs            Protect / ProtectLayer: App::protect, 403 insufficient_scope
     claims.rs             Claims (blanket over DeserializeOwned), StandardClaims, scopes
     config.rs             LESTO_OIDC_* read through a getter
-  src/mcp/                feature `mcp`: routes as MCP tools (design: docs/design/mcp.md)
+  src/mcp/                feature `mcp`: routes as MCP tools, resources, prompts (design:
+                          docs/design/mcp.md)
     mod.rs                Mcp (config), McpCall (inner-request extension), Endpoint: the /mcp
-                          handler, era selection, discover/initialize/tools
+                          handler, era selection, discover/initialize, lists, call/read/get
     protocol.rs           JSON-RPC envelope, Era (modern 2026-07-28 / legacy 2025-*), header
                           validation, per-era result shapes and error codes
-    catalog.rs            operations → tools from the OpenAPI document: flat input schema,
-                          output schema, $defs, names and collisions, method hints
-    dispatch.rs           arguments → inner request (path, query, body, forwarded headers),
-                          inner response → tool result
+    catalog.rs            operations → tools, resources, prompts from the OpenAPI document:
+                          flat input schema, output schema, $defs, names and collisions per
+                          kind, method hints, resource URIs and template matching
+    dispatch.rs           arguments / resource URI → inner request (path, query, body, forwarded
+                          headers), inner response → tool result, resource contents, cache fields
+    prompt.rs             Prompt (IntoResponse + OperationOutput), PromptMessage, Role
   tests/integration.rs    end-to-end tests via tower::ServiceExt::oneshot
   benches/overhead.rs     per-request overhead against plain axum (harness = false, no dev-dep)
   tests/db.rs             SQLite in-memory end-to-end for lesto::db
@@ -99,8 +102,8 @@ crates/lesto-cli/         the `lesto` binary: dev (watch + rebuild + restart, so
   src/process.rs          spawn with the socket on fd 3 (LISTEN_FDS), stop (SIGTERM, grace, SIGKILL)
   src/watch.rs            notify watcher, ignore filters, debounce
 examples/01-hello/        package `hello`: one route, the smallest app
-examples/02-notes/        package `notes`: full CRUD on SQLite with lesto::db (and MCP tools but delete), split into
-                          lib.rs / state.rs / auth.rs / notes/{model,store,handlers}.rs, tests/api.rs
+examples/02-notes/        package `notes`: full CRUD on SQLite with lesto::db (and MCP tools, a
+                          resource and a prompt; not delete), split into lib.rs / state.rs / auth.rs / notes/{model,store,handlers}.rs, tests/api.rs
 examples/03-lambda/       package `lambda`: chapter 14 (lesto::lambda), in-memory notes, event-fixture test
 examples/04-opentelemetry/ package `opentelemetry-example` (not `opentelemetry`: that is the API
                           crate): chapter 15 end to end — compose.yaml with Jaeger (traces) and
@@ -360,8 +363,16 @@ Recorded here because they are not derivable from the code. Do not undo them cas
   CI after the tests) checks exactly that against `examples/02-notes` with a pinned Inspector
   version, in both eras. Tool names default to the handler's name and fall
   back to the `operationId` when two collide; two equal explicit names panic in `into_router`,
-  like an axum route conflict. Only tools so far: `mcp = "resource"`/`"prompt"` are compile
-  errors until implemented.
+  like an axum route conflict. Names are one namespace per kind (tools, resources, prompts).
+  **Resources and prompts are `GET` routes** (a compile error otherwise), dispatched the same
+  way (added 2026-09-24): a resource URI is `resource_base` + the path, matched segment by
+  segment and forwarded still percent-encoded (axum decodes it, so lesto never re-encodes); its
+  `ttlMs`/`cacheScope` come from the route's `Cache-Control`, and nothing is cacheable without
+  one, because the data may depend on the caller. A prompt route returns `lesto::mcp::Prompt`,
+  whose JSON *is* the `prompts/get` result, so the route stays usable over plain HTTP and the
+  endpoint passes the body through; a `4xx` from it is `-32602` (the arguments' fault), checked
+  at compile time through `__private::PromptOutput`. The methods of a kind the app does not
+  expose answer `-32601`, as the capabilities announce.
 - **`lesto::lambda` wraps `lambda_http`, it does not reimplement it.** The official runtime already
   turns API Gateway v1/v2, Function URL and ALB events into `http::Request`s and accepts any
   tower service, so the crate adds only what lesto users need: the Lambda-or-local switch on
@@ -410,7 +421,7 @@ Recorded here because they are not derivable from the code. Do not undo them cas
   builds the endpoint first, applies every layer to the router *and* to the endpoint's
   `MethodRouter` step by step (`mcp_layer!`), then hands the finished router (without `/mcp`) to
   the endpoint and adds the route last. The handler takes `State<S>` and builds
-  `router.with_state(state)` once, on the first tool call (`OnceLock`); tool calls run inside the
+  `router.with_state(state)` once, on the first call (`OnceLock`); tool calls, resource reads and prompts run inside the
   timeout, body limit, `protect` and span of the app, but outside CORS and compression, which
   are added after.
 - `App::serve` → `serve_at` → `serve_on` → `serve_until(listener, shutdown)`;
@@ -529,8 +540,10 @@ Recorded here because they are not derivable from the code. Do not undo them cas
 | `#[derive(Store)] expects a tuple struct` | `struct S<M, P>(lesto::db::Store<M, P, Db>);` |
 | warning: `axum::Json<T>` ... does not run `T`'s garde rules | use `lesto::Json`/`lesto::Query`, or `#[allow(deprecated)]` on the handler |
 | `type annotations needed` on `.into()` in a store closure | use `Error::not_found(..)`/`Error::conflict(..)`/`Error::http(e)` |
-| `MCP resources are not supported yet` (or prompts) | only `mcp = "tool"` exists so far |
-| panic: `two routes are exposed as the MCP tool x` | two equal `mcp(tool, name = ..)`; rename one |
+| `an MCP resource must be a GET route` (or prompt) | expose an operation that changes something as `mcp = "tool"` |
+| `X cannot be the response of an MCP prompt` | return `lesto::mcp::Prompt` (or `Result<Prompt, E>`) |
+| panic: `two routes are exposed as the MCP tool x` (or resource, prompt) | two equal `mcp(.., name = ..)` of one kind; rename one |
+| panic: `cannot be an MCP resource: its query parameter q is required` | make the parameter optional, or expose the route as a tool |
 
 ## Roadmap and non-goals
 
@@ -539,8 +552,8 @@ Bigger items, easiest first (mirrored in `README.md`, keep the two lists in sync
 1. Lambda adapter tested end to end on floci (<https://floci.io/>: local AWS emulator, Lambda +
    API Gateway, LocalStack drop-in on port 4566, native binary or Docker, MIT) in CI, on top of
    the event-fixture tests in `tests/lambda.rs`.
-2. MCP resources and prompts (`mcp = "resource" | "prompt"`), then RFC 9728 protected resource
-   metadata with `oidc`: phases 2 and 3 of `docs/design/mcp.md`. Tools (phase 1) are done.
+2. RFC 9728 protected resource metadata for MCP with `oidc`: phase 3 of `docs/design/mcp.md`.
+   Tools, resources and prompts (phases 1 and 2) are done.
 
 Smaller items, in rough priority order: crates.io publication (publish order: `lesto-macros`,
 `lesto`, `lesto-cli`; the manifests are ready); `lesto new`

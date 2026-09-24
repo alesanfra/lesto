@@ -1,6 +1,7 @@
 # MCP from the route attribute
 
-Status: phase 1 (tools, both eras) implemented on 2026-09-24; phases 2 and 3 proposed. Roadmap
+Status: phases 1 (tools, both eras) and 2 (resources and prompts) implemented on 2026-09-24;
+phase 3 proposed. Roadmap
 item 2 in `AGENTS.md` and `README.md`. The open decisions below were taken as recommended.
 
 This document is the written design the roadmap asks for: naming, auth, which operations map to
@@ -234,12 +235,17 @@ header-safe for `Mcp-Name`.
   for example `lesto://notes-api/notes/{id}`.
 - A route without path parameters is a resource (`resources/list`); a route with parameters is a
   resource template (`resources/templates/list`). axum's `{id}` path syntax is already an RFC 6570
-  level 1 template, so no conversion is needed.
-- `resources/read` matches the URI against the templates segment by segment, percent-decodes the
-  parameters and issues the GET. The response body becomes `contents` with the response's
-  `Content-Type` as `mimeType` (text for JSON and `text/*`, base64 `blob` otherwise).
-- A 404 is "resource not found": `-32602` (modern) or `-32002` (legacy). Other failures are
-  `-32603` with the problem in `data`, except 401 and 403, which follow the Auth rules below.
+  level 1 template; a wildcard `{*rest}` becomes the reserved expansion `{+rest}`.
+- `resources/read` strips the base, matches the path against the fixed resources and then the
+  templates segment by segment, and issues the GET with the path (and any query) as given. The
+  parameters are not decoded and re-encoded: the URI is already percent-encoded and axum decodes
+  it, which is what a direct request would get. The response body becomes `contents` with the
+  response's `Content-Type` as `mimeType` (text for JSON and `text/*`, base64 `blob` otherwise).
+- A 404, a URI outside the base or one no route matches is "resource not found": `-32602`
+  (modern) or `-32002` (legacy), with the URI in `data`. Other failures are `-32603` with the
+  problem in `data`, except 401 and 403, which follow the Auth rules below.
+- A resource or prompt is listed with the doc comment (`title`, `description`) and the media
+  type of its success response (`mimeType`, resources only).
 - A resource route with a *required* query parameter panics at startup with a clear message:
   resources have no way to pass one.
 
@@ -250,7 +256,10 @@ header-safe for `Mcp-Name`.
   parameter works.
 - The handler returns `lesto::mcp::Prompt` (or `Result<Prompt, E>`): a list of messages, which
   implements `IntoResponse` (JSON) and `OperationOutput`. Over plain HTTP the same route returns
-  the messages as JSON.
+  the messages as JSON. Its JSON is exactly the `prompts/get` result (`description`,
+  `messages`), so the endpoint passes the body through.
+- A `4xx` from the route (missing or invalid arguments, a `404`) is `-32602` with the problem in
+  `data`, the way MCP reports bad prompt arguments; a `5xx` is `-32603`.
 
 ## Dispatch of `tools/call`
 
@@ -405,13 +414,16 @@ era-specific validation, everything else is shared.
 
 - `crates/lesto/src/route.rs`: `McpExpose` on `RouteMeta` (the macro option's runtime value).
 - `crates/lesto/src/mcp/` (phase 1 as built)
-  - `mod.rs`: `Mcp`, `McpCall`, the `/mcp` handler, era selection, discover/initialize/tools
-  - `protocol.rs`: JSON-RPC envelope, `Era`, header validation, `_meta`, caching fields, the
-    per-era result shapes and error codes
-  - `catalog.rs`: operations to tools; name collisions; schema assembly
-  - `dispatch.rs`: arguments to request, response to result
-  - phase 2 adds resources and prompts to `catalog.rs` and a `prompt.rs` for `Prompt`; if
-    `protocol.rs` grows past one reader's worth, it splits into `modern.rs` and `legacy.rs`.
+  - `mod.rs`: `Mcp`, `McpCall`, the `/mcp` handler, era selection, discover/initialize, the
+    lists, `tools/call`, `resources/read`, `prompts/get`
+  - `protocol.rs`: JSON-RPC envelope, `Era`, header validation, `_meta`, the per-era result
+    shapes and error codes; if it grows past one reader's worth, it splits into `modern.rs` and
+    `legacy.rs`
+  - `catalog.rs`: operations to tools, resources and prompts; names per kind; schema assembly;
+    resource template matching
+  - `dispatch.rs`: arguments (or a resource URI) to request, response to result, resource
+    caching fields
+  - `prompt.rs`: `Prompt`
 - `crates/lesto-macros`: the `mcp` option in `RouteArgs`, the compile-time checks, and
   `tests/ui/mcp_*.rs` cases for each diagnostic.
 - `crates/lesto/tests/mcp.rs`, all through `oneshot`:
@@ -419,19 +431,21 @@ era-specific validation, everything else is shared.
     unknown method;
   - legacy: `initialize` negotiation, `ping`, the same calls with legacy shapes;
   - `Mcp::legacy(false)` refusing `initialize` with the supported versions in the message;
-  - `422` as `isError`, `401` propagated to the transport, Origin checks, caching fields;
-    resources and prompts in phase 2.
+  - `422` as `isError`, `401` propagated to the transport, Origin checks, caching fields,
+    resources (lists, read, not found per era, `Cache-Control`), prompts (list, get, `4xx` as
+    invalid params).
 - `crates/lesto/tests/mcp_rmcp.rs`: interoperability with the official client. An app is served
   on `127.0.0.1:0` (as `tests/oidc.rs` does for its provider) and `rmcp`'s Streamable HTTP client
   connects once with `ClientLifecycleMode::Discover` (modern) and once with
   `ClientLifecycleMode::Initialize` (legacy), lists the tools, calls one successfully,
-  calls one that fails validation (`isError`), and one that answers `404` (`isError`). Phase 2
-  adds reading a resource. It runs in the default
+  calls one that fails validation (`isError`), and one that answers `404` (`isError`), lists
+  the resource templates, reads a resource and gets a prompt. It runs in the default
   `cargo test --workspace`: no Docker, no network beyond loopback.
-- `examples/02-notes`: every route but `delete` marked for MCP.
+- `examples/02-notes`: every route but `delete` marked for MCP: four tools, a resource template
+  (`note_text`) and a prompt (`tidy_note`).
 - `scripts/mcp-inspector.sh`, run in CI after the tests: `examples/02-notes` against the MCP
   Inspector's CLI (pinned version, TypeScript SDK) in both eras: `tools/list --strict`, a call, a
-  tool error, the `401`. A second client next to `rmcp`, stricter about schemas.
+  resource read, a prompt, a tool error, the `401`. A second client next to `rmcp`, stricter about schemas.
 - Tutorial chapter 16, "MCP", with its snippets in `examples/99-tutorial`; `README.md` (attribute
   options, roadmap); `AGENTS.md` (layout, design decisions, roadmap entry removed).
 - `cargo check -p lesto --no-default-features --features mcp` added to the per-feature checks.

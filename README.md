@@ -63,7 +63,10 @@ on axum.
   route (doc comment, parameters and body as arguments, the response as output schema, hints from
   the method). A call runs the route itself, so validation, authentication and tracing are the
   route's own: a `422` reaches the model as a tool error it can correct, a `401` reaches the
-  client as a `401`. MCP 2026-07-28 (stateless) and the 2025 revisions, with no session.
+  client as a `401`. `mcp = "resource"` makes a `GET` route a resource (a URI template when the
+  path has parameters, cached as its `Cache-Control` says), `mcp = "prompt"` a prompt built by a
+  route returning `lesto::mcp::Prompt`. MCP 2026-07-28 (stateless) and the 2025 revisions, with
+  no session.
 - **AWS Lambda** with the `lambda` feature: `lesto::lambda::serve(app)` runs the
   Lambda runtime inside Lambda (API Gateway REST and HTTP APIs, Function URLs, ALB) and a plain
   server anywhere else; REST stages are stripped, docs pages work behind them, and
@@ -174,7 +177,7 @@ Examples: `LESTO_PORT=8765 cargo run -p hello` (smallest app), `-p notes` (CRUD 
 
 ### Attribute options
 
-`#[lesto::get("/path", status = 200, tag = "x", tags("a", "b"), summary = "...", description = "...", operation_id = "...", deprecated, responses(404, 409), security("bearerAuth"), public, state = AppState, mcp = "tool")]`
+`#[lesto::get("/path", status = 200, tag = "x", tags("a", "b"), summary = "...", description = "...", operation_id = "...", deprecated, responses(404, 409), security("bearerAuth"), public, state = AppState, mcp = "tool" | "resource" | "prompt")]`
 
 Available: `get`, `post`, `put`, `patch`, `delete`, `head`, `options`.
 
@@ -185,8 +188,10 @@ Available: `get`, `post`, `put`, `patch`, `delete`, `head`, `options`.
 The default `operation_id` is `{function}_{path}_{method}` (`get_user_users__id__get`), unique per route as in FastAPI.
 
 `mcp = "tool"` (feature `mcp`) exposes the operation as an MCP tool named after the function;
-`mcp(tool, name = "search_notes")` names it. It takes effect once the app calls `App::mcp`; see
-the tutorial, chapter 16.
+`mcp(tool, name = "search_notes")` names it. `mcp = "resource"` (a `GET` route) serves it as a
+resource at `lesto://{title}{path}`, `mcp = "prompt"` (a `GET` route returning
+`lesto::mcp::Prompt`) as a prompt whose arguments are the path and query parameters; both take
+`name = ".."` too. It takes effect once the app calls `App::mcp`; see the tutorial, chapter 16.
 
 Contributing or driving an agent? Read [AGENTS.md](AGENTS.md).
 
@@ -272,7 +277,7 @@ with a `WWW-Authenticate` header. See the tutorial's [Security](docs/tutorial/09
   `Isolation`, `lesto::db::Error`;
   `lesto::lambda` (feature `lambda`): `serve`, `Options`, `test::invoke`;
   `lesto::oidc` (feature `oidc`): `Oidc`, `Jwt<C>`, `StandardClaims`, `Protect`;
-  `lesto::mcp` (feature `mcp`): `Mcp`, `McpCall`;
+  `lesto::mcp` (feature `mcp`): `Mcp`, `McpCall`, `Prompt`;
   `lesto::trace`: the request span and `Trace`; `lesto::otel` (feature `otel`): OTLP export of
   traces and logs plus trace context propagation, configured by the `OTEL_*` variables;
   `lesto::layers`: the tower layers `into_router` installs (`ProblemLayer`, `CatchPanicLayer`,
@@ -280,7 +285,7 @@ with a `WWW-Authenticate` header. See the tutorial's [Security](docs/tutorial/09
 - `crates/lesto-macros/` — `#[lesto::get(...)]` attributes and friends, `#[lesto::views]`, `#[derive(Store)]`.
 - `crates/lesto-cli/` — the `lesto` command: `dev` (watch, rebuild, restart with the socket kept open), `run`.
 - `examples/01-hello/` — the smallest app. `examples/02-notes/` — full CRUD on SQLite with `lesto::db`,
-  split into modules, also served to agents as MCP tools. `examples/03-lambda/` — the same kind of API on AWS Lambda.
+  split into modules, also served to agents as MCP tools, a resource and a prompt. `examples/03-lambda/` — the same kind of API on AWS Lambda.
   `examples/04-opentelemetry/` — traces and logs in a local Jaeger or OpenObserve, `docker compose` included.
   `examples/05-routers/` — two APIs in one service (`/api/app/v1`, `/api/analytics/v1`), mounted with `nest`.
   `examples/06-oidc/` — bearer JWTs from a real OpenID Connect provider in Docker, `App::protect` included.
@@ -369,9 +374,9 @@ Bigger items, easiest first:
 1. **Lambda adapter tested end to end on [floci](https://floci.io/)**: deploy the `lambda`
    example to floci's local AWS emulator (Lambda + API Gateway, a LocalStack drop-in that runs
    as a native binary, MIT) in CI, and call it over HTTP instead of only replaying event fixtures.
-2. **MCP resources and prompts**: `mcp = "resource"` (GET routes as resources and resource
-   templates) and `mcp = "prompt"`, then the RFC 9728 protected resource metadata with `oidc`.
-   Tools are done; the rest is designed in [docs/design/mcp.md](docs/design/mcp.md).
+2. **MCP protected resource metadata**: RFC 9728's `/.well-known/oauth-protected-resource` with
+   `oidc`, so MCP clients find the authorization server on their own. Tools, resources and
+   prompts are done; this is phase 3 of [docs/design/mcp.md](docs/design/mcp.md).
 
 Smaller items: crates.io publication, `lesto new`, `AnyOf`/`AllOf` permission requirements, per-operation
 permissions as OpenAPI scopes, `--watch`/`--ignore` for `lesto dev`, exporting the OpenAPI document as

@@ -246,4 +246,4 @@ or send to the OpenTelemetry Lambda layer, which does that for you.
   span off.
 - `examples/04-opentelemetry` runs the whole thing against a local Jaeger or OpenObserve.
 
-Next: [MCP: operations as tools for agents](16-mcp.md).
+Next: [MCP: tools, resources and prompts for agents](16-mcp.md).
