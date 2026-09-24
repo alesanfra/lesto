@@ -41,7 +41,7 @@ until curl -sf "http://127.0.0.1:$port/notes" >/dev/null; do
 done
 
 fail() {
-    echo "FAIL ($era): $1" >&2
+    echo "  FAIL  $1" >&2
     shift
     for file in "$@"; do
         echo "--- $file" >&2
@@ -61,7 +61,15 @@ inspector() {
     return $status
 }
 
+pass() {
+    echo "  ok    $1"
+}
+
 for era in legacy modern; do
+    case $era in
+        legacy) echo "MCP 2025-11-25 (legacy, opens with initialize):" ;;
+        modern) echo "MCP 2026-07-28 (stateless):" ;;
+    esac
     inspector list --method tools/list --strict ||
         fail "tools/list exited with an error" "$work/list.out" "$work/list.err"
     if grep -qi 'warning\|error' "$work/list.err"; then
@@ -70,18 +78,21 @@ for era in legacy modern; do
     names=$(head -n 1 "$work/list.out" | jq -r '[.result.tools[].name] | join(",")')
     [ "$names" = "list_notes,get_note,create_note,update_note" ] ||
         fail "unexpected tools: $names" "$work/list.out"
+    pass "tools/list shows the 4 tools, no --strict warning"
 
     inspector create --header "Authorization: Bearer bob-token" \
         --method tools/call --tool-name create_note --tool-arg "text=from the $era inspector" ||
         fail "create_note failed" "$work/create.out" "$work/create.err"
     author=$(head -n 1 "$work/create.out" | jq -r '.result.structuredContent.author')
     [ "$author" = "bob" ] || fail "create_note returned author '$author'" "$work/create.out"
+    pass "create_note with bob's token creates the note"
 
     inspector invalid --header "Authorization: Bearer bob-token" \
         --method tools/call --tool-name update_note --tool-args-json '{"id": 1, "text": ""}' || true
     is_error=$(head -n 1 "$work/invalid.out" | jq -r '.result.isError')
     [ "$is_error" = "true" ] || fail "update_note with an empty text is not a tool error" "$work/invalid.out"
     grep -q '422' "$work/invalid.out" || fail "the tool error does not carry the 422" "$work/invalid.out"
+    pass "update_note with an empty text is refused: tool error with the validation problem"
 
     # --stored-auth-only: fail instead of opening a browser for the OAuth flow.
     inspector anonymous --stored-auth-only \
@@ -91,6 +102,7 @@ for era in legacy modern; do
         jq -r '.error.code // empty')
     [ "$code" = "auth_required" ] ||
         fail "a call without a token did not ask for authentication" "$work/anonymous.out" "$work/anonymous.err"
-
-    echo "ok ($era): 4 tools, strict schemas, call, tool error, 401"
+    pass "create_note without a token is refused (as it should): the client is asked to log in"
 done
+echo "All checks passed."
+
