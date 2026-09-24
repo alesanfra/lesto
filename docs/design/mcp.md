@@ -403,14 +403,15 @@ era-specific validation, everything else is shared.
 
 ## Code layout
 
-- `crates/lesto/src/mcp/`
-  - `mod.rs`: `Mcp`, `McpExpose`, `McpCall`, `App::mcp`, the `/mcp` handler and era selection
-  - `protocol/mod.rs`: JSON-RPC envelope, shared MCP types, `Era`
-  - `protocol/modern.rs`: header validation, `server/discover`, `_meta`, caching fields
-  - `protocol/legacy.rs`: `initialize`, `ping`, legacy result shapes and codes
-  - `catalog.rs`: operations to tools, resources and prompts; name collisions; schema assembly
+- `crates/lesto/src/route.rs`: `McpExpose` on `RouteMeta` (the macro option's runtime value).
+- `crates/lesto/src/mcp/` (phase 1 as built)
+  - `mod.rs`: `Mcp`, `McpCall`, the `/mcp` handler, era selection, discover/initialize/tools
+  - `protocol.rs`: JSON-RPC envelope, `Era`, header validation, `_meta`, caching fields, the
+    per-era result shapes and error codes
+  - `catalog.rs`: operations to tools; name collisions; schema assembly
   - `dispatch.rs`: arguments to request, response to result
-  - `prompt.rs`: `Prompt`
+  - phase 2 adds resources and prompts to `catalog.rs` and a `prompt.rs` for `Prompt`; if
+    `protocol.rs` grows past one reader's worth, it splits into `modern.rs` and `legacy.rs`.
 - `crates/lesto-macros`: the `mcp` option in `RouteArgs`, the compile-time checks, and
   `tests/ui/mcp_*.rs` cases for each diagnostic.
 - `crates/lesto/tests/mcp.rs`, all through `oneshot`:
@@ -418,8 +419,8 @@ era-specific validation, everything else is shared.
     unknown method;
   - legacy: `initialize` negotiation, `ping`, the same calls with legacy shapes;
   - `Mcp::legacy(false)` refusing `initialize` with the supported versions in the message;
-  - `422` as `isError`, `401` propagated to the transport, resources, prompts, Origin checks,
-    caching fields.
+  - `422` as `isError`, `401` propagated to the transport, Origin checks, caching fields;
+    resources and prompts in phase 2.
 - `crates/lesto/tests/mcp_rmcp.rs`: interoperability with the official client. An app is served
   on `127.0.0.1:0` (as `tests/oidc.rs` does for its provider) and `rmcp`'s Streamable HTTP client
   connects once with `ClientLifecycleMode::Discover` (modern) and once with
