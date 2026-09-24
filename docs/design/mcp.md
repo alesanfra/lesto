@@ -304,8 +304,16 @@ Streamable HTTP, JSON responses only, no server-side state, one `POST` endpoint:
   `Last-Event-ID` is ignored.
 - JSON-RPC batches are refused with `-32600` (removed from the protocol in 2025-06-18).
 - The `Origin` header is validated on every request, which the spec requires against DNS
-  rebinding: no `Origin` is allowed (non-browser clients), a same-host origin is allowed,
-  anything else answers `403` unless listed in `Mcp::allowed_origins`.
+  rebinding: no `Origin` is allowed (non-browser clients); a loopback origin is allowed when the
+  `Host` is loopback too (a local page, such as the MCP Inspector, calling a local server);
+  anything else answers `403` unless listed in `Mcp::allowed_origins`. The first version
+  allowed an origin equal to the `Host` header, which rebinding defeats: the hostile page's
+  origin and the `Host` it sends are the same attacker-chosen name (found on 2026-09-24 while
+  comparing with `rmcp`, which validates `Host` against an allowlist instead). A `Host`
+  allowlist was not adopted as the default: it breaks every deployment behind a public name
+  until configured, while a rebinding attack always carries a non-loopback `Origin`, since
+  browsers send `Origin` on every `POST`, same-origin ones included (Fetch standard), and a
+  rebinding request is same-origin from the page's point of view.
 - `/mcp` is not part of the OpenAPI document, like the docs routes.
 - With no server-side state, the endpoint runs unchanged behind a load balancer and on AWS
   Lambda (`lesto::lambda`).

@@ -139,5 +139,6 @@ two exposed handlers share a name, both use their `operationId`.
 
 ## An MCP client says the server rejected the request with `403`
 
-The request came from a browser page on another origin. The endpoint refuses foreign `Origin`s
-against DNS rebinding; list the page's origin in `Mcp::allowed_origins([..])`.
+The request came from a browser page whose origin is not on this machine, possibly your own
+public domain. The endpoint refuses such `Origin`s against DNS rebinding; list the page's origin
+in `Mcp::allowed_origins([..])`.

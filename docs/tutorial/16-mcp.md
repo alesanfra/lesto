@@ -149,9 +149,11 @@ npx @modelcontextprotocol/inspector@latest --cli http://127.0.0.1:8000/mcp \
 The Inspector speaks the 2025 protocol unless told otherwise (`--protocol-era modern`); lesto
 answers both.
 
-Browsers are held to the same-origin rule: a request with an `Origin` header from another host
-is refused with `403`, which protects a local server against DNS rebinding.
-`Mcp::allowed_origins(["https://app.example.com"])` lets a web client in.
+Browser pages are held back: a request with an `Origin` header is refused with `403` unless the
+page and the server are both on this machine (`localhost`, `127.0.0.1`, `[::1]`), or the origin is
+listed with `Mcp::allowed_origins(["https://app.example.com"])`. That protects a local server
+against DNS rebinding, where a hostile page reaches `127.0.0.1` under its own name. Agents and
+command line clients send no `Origin` and are not affected.
 
 ## Options
 

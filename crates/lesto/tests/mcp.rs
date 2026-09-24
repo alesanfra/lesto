@@ -495,22 +495,40 @@ async fn batches_and_bad_json_are_refused() {
 
 #[tokio::test]
 async fn foreign_origins_are_refused() {
-    let evil = [
-        ("origin", "https://evil.example"),
-        ("host", "localhost:8000"),
-    ];
-    let reply = modern_with(app(Mcp::new()), "tools/list", json!({}), &evil).await;
-    assert_eq!(reply.status, StatusCode::FORBIDDEN);
+    async fn status(mcp: Mcp, origin: &str, host: &str) -> StatusCode {
+        let headers = [("origin", origin), ("host", host)];
+        modern_with(app(mcp), "tools/list", json!({}), &headers)
+            .await
+            .status
+    }
 
-    let own = [
-        ("origin", "http://localhost:8000"),
-        ("host", "localhost:8000"),
-    ];
-    let reply = modern_with(app(Mcp::new()), "tools/list", json!({}), &own).await;
-    assert_eq!(reply.status, StatusCode::OK);
-
-    let allowed = Mcp::new().allowed_origins(["https://evil.example"]);
-    let reply = modern_with(app(allowed), "tools/list", json!({}), &evil).await;
+    // A local page (the MCP Inspector at localhost:6274) calling a local server.
+    assert_eq!(
+        status(Mcp::new(), "http://localhost:6274", "127.0.0.1:8000").await,
+        StatusCode::OK
+    );
+    assert_eq!(
+        status(Mcp::new(), "https://evil.example", "localhost:8000").await,
+        StatusCode::FORBIDDEN
+    );
+    // DNS rebinding: evil.example now resolves to 127.0.0.1, so its page's origin and the Host
+    // it sends agree. Comparing the two would let it in.
+    assert_eq!(
+        status(Mcp::new(), "http://evil.example:8000", "evil.example:8000").await,
+        StatusCode::FORBIDDEN
+    );
+    // A public origin is refused unless listed, even the endpoint's own.
+    assert_eq!(
+        status(Mcp::new(), "https://api.example.com", "api.example.com").await,
+        StatusCode::FORBIDDEN
+    );
+    let allowed = Mcp::new().allowed_origins(["https://api.example.com"]);
+    assert_eq!(
+        status(allowed, "https://api.example.com", "api.example.com").await,
+        StatusCode::OK
+    );
+    // No Origin: not a browser.
+    let reply = modern(app(Mcp::new()), "tools/list", json!({})).await;
     assert_eq!(reply.status, StatusCode::OK);
 }
 

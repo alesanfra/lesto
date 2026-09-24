@@ -114,9 +114,11 @@ impl Mcp {
 
     /// Allow browser pages from these origins (`https://app.example.com`) to call the endpoint.
     ///
-    /// A request without `Origin` (every non-browser client) and one from the endpoint's own
-    /// host are always allowed; any other origin is refused with `403`, as the specification
-    /// requires against DNS rebinding.
+    /// A request without `Origin` (every non-browser client) is always allowed, and so is a page
+    /// on a loopback origin (`http://localhost:6274`) calling the endpoint on a loopback host.
+    /// Any other origin, the endpoint's own public one included, is refused with `403`: that is
+    /// what the specification requires against DNS rebinding, where a hostile page's origin and
+    /// the `Host` it sends agree with each other.
     pub fn allowed_origins<I, O>(mut self, origins: I) -> Self
     where
         I: IntoIterator<Item = O>,
@@ -250,6 +252,25 @@ where
     }
 }
 
+/// Whether `authority` (`host[:port]`) names this machine: `localhost`, `127.0.0.0/8` or `[::1]`.
+fn is_loopback(authority: &str) -> bool {
+    let host = if let Some(rest) = authority.strip_prefix('[') {
+        match rest.split_once(']') {
+            Some((host, _)) => host,
+            None => return false,
+        }
+    } else {
+        authority
+            .rsplit_once(':')
+            .map_or(authority, |(host, _)| host)
+    };
+    if host.eq_ignore_ascii_case("localhost") {
+        return true;
+    }
+    host.parse::<std::net::IpAddr>()
+        .is_ok_and(|ip| ip.is_loopback())
+}
+
 /// `My Notes API` → `my-notes-api`.
 fn slug(title: &str) -> String {
     let mut slug = String::new();
@@ -321,7 +342,13 @@ where
         }
     }
 
-    /// No `Origin` (not a browser), the endpoint's own host, or an allowed origin.
+    /// No `Origin` (not a browser), an allowed origin, or a page on this machine calling a
+    /// server on this machine.
+    ///
+    /// Comparing `Origin` with `Host` would not do: under DNS rebinding a page on `evil.com`,
+    /// whose name now resolves to 127.0.0.1, sends `Origin: http://evil.com:8000` *and*
+    /// `Host: evil.com:8000`. What the attacker cannot choose is a loopback origin, since the
+    /// page's origin is the name it was loaded from.
     fn origin_allowed(&self, uri: &Uri, headers: &HeaderMap) -> bool {
         let Some(origin) = headers.get(header::ORIGIN) else {
             return true;
@@ -334,7 +361,7 @@ where
             .config
             .allowed_origins
             .iter()
-            .any(|o| o == origin)
+            .any(|o| o.eq_ignore_ascii_case(origin))
         {
             return true;
         }
@@ -342,10 +369,13 @@ where
             .get(header::HOST)
             .and_then(|h| h.to_str().ok())
             .or_else(|| uri.authority().map(|a| a.as_str()));
-        let authority = origin
-            .strip_prefix("https://")
-            .or_else(|| origin.strip_prefix("http://"));
-        matches!((authority, host), (Some(a), Some(h)) if a.eq_ignore_ascii_case(h))
+        let origin_authority = origin
+            .strip_prefix("http://")
+            .or_else(|| origin.strip_prefix("https://"));
+        matches!(
+            (origin_authority, host),
+            (Some(origin), Some(host)) if is_loopback(origin) && is_loopback(host)
+        )
     }
 
     fn capabilities(&self) -> Value {
@@ -477,6 +507,30 @@ impl From<RpcError> for Outcome {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn loopback_authorities() {
+        for yes in [
+            "localhost",
+            "localhost:8000",
+            "127.0.0.1:8000",
+            "127.1.2.3",
+            "[::1]:8000",
+            "LOCALHOST",
+        ] {
+            assert!(is_loopback(yes), "{yes}");
+        }
+        for no in [
+            "evil.com:8000",
+            "localhost.evil.com",
+            "10.0.0.1",
+            "[::2]:80",
+            "[::1",
+            "",
+        ] {
+            assert!(!is_loopback(no), "{no}");
+        }
+    }
 
     #[test]
     fn slug_keeps_letters_and_digits() {
