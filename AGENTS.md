@@ -99,7 +99,7 @@ crates/lesto-cli/         the `lesto` binary: dev (watch + rebuild + restart, so
   src/process.rs          spawn with the socket on fd 3 (LISTEN_FDS), stop (SIGTERM, grace, SIGKILL)
   src/watch.rs            notify watcher, ignore filters, debounce
 examples/01-hello/        package `hello`: one route, the smallest app
-examples/02-notes/        package `notes`: full CRUD on SQLite with lesto::db, split into
+examples/02-notes/        package `notes`: full CRUD on SQLite with lesto::db (and MCP tools but delete), split into
                           lib.rs / state.rs / auth.rs / notes/{model,store,handlers}.rs, tests/api.rs
 examples/03-lambda/       package `lambda`: chapter 14 (lesto::lambda), in-memory notes, event-fixture test
 examples/04-opentelemetry/ package `opentelemetry-example` (not `opentelemetry`: that is the API

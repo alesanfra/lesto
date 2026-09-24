@@ -280,7 +280,7 @@ with a `WWW-Authenticate` header. See the tutorial's [Security](docs/tutorial/09
 - `crates/lesto-macros/` — `#[lesto::get(...)]` attributes and friends, `#[lesto::views]`, `#[derive(Store)]`.
 - `crates/lesto-cli/` — the `lesto` command: `dev` (watch, rebuild, restart with the socket kept open), `run`.
 - `examples/01-hello/` — the smallest app. `examples/02-notes/` — full CRUD on SQLite with `lesto::db`,
-  split into modules. `examples/03-lambda/` — the same kind of API on AWS Lambda.
+  split into modules, also served to agents as MCP tools. `examples/03-lambda/` — the same kind of API on AWS Lambda.
   `examples/04-opentelemetry/` — traces and logs in a local Jaeger or OpenObserve, `docker compose` included.
   `examples/05-routers/` — two APIs in one service (`/api/app/v1`, `/api/analytics/v1`), mounted with `nest`.
   `examples/06-oidc/` — bearer JWTs from a real OpenID Connect provider in Docker, `App::protect` included.

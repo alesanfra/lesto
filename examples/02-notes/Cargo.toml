@@ -4,10 +4,10 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish = false
-description = "A complete CRUD API on SQLite with the `db` feature: stores, principals, permissions, views"
+description = "A complete CRUD API on SQLite with the `db` feature: stores, principals, permissions, views, MCP tools"
 
 [dependencies]
-lesto = { path = "../../crates/lesto", features = ["sqlite"] }
+lesto = { path = "../../crates/lesto", features = ["sqlite", "mcp"] }
 sqlx = { workspace = true, features = ["sqlite", "derive", "macros", "migrate"] }
 
 [dev-dependencies]

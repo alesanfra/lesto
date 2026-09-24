@@ -4,7 +4,8 @@ The [Model Context Protocol](https://modelcontextprotocol.io) (MCP) is how AI ag
 ChatGPT, IDE assistants) discover and call tools. With the `mcp` feature, a route becomes a tool
 with one attribute option. lesto builds the tool's description from what it already knows about
 the route, and a tool call runs the route itself. The code of this chapter is in
-`examples/99-tutorial/src/mcp.rs`.
+`examples/99-tutorial/src/mcp.rs`; `examples/02-notes` serves its whole API as tools too, bearer
+tokens and permissions included, except `DELETE`.
 
 ## Setup
 

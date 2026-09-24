@@ -7,6 +7,13 @@
 //! curl -s -X POST localhost:8765/notes -H 'Authorization: Bearer bob-token' \
 //!      -H 'Content-Type: application/json' -d '{"text":"hello"}'
 //! ```
+//!
+//! The same API is an MCP server at `/mcp` (every route but `DELETE`), e.g. for Claude Code:
+//!
+//! ```sh
+//! claude mcp add --transport http notes http://localhost:8765/mcp \
+//!     --header 'Authorization: Bearer bob-token'
+//! ```
 
 use notes::{AppState, Tokens, build_app, connect};
 

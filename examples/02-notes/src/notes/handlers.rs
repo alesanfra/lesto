@@ -1,4 +1,7 @@
 //! HTTP handlers. The store in the signature says who may call and whether it writes.
+//!
+//! Every route but `delete` is also an MCP tool: agents may read, create and edit notes, and
+//! deleting stays a decision for a human with an HTTP client (tutorial chapter 16).
 
 use lesto::RouteSet;
 use lesto::db::{Error, Public, ReadOnly, ReadWrite};
@@ -10,19 +13,19 @@ use crate::auth::User;
 use crate::state::AppState;
 
 /// List notes.
-#[lesto::get("/notes", tag = "notes")]
+#[lesto::get("/notes", tag = "notes", mcp(tool, name = "list_notes"))]
 async fn list(store: NoteStore<ReadOnly, Public>) -> Result<Json<Vec<Note>>, Error> {
     Ok(Json(store.list().await?))
 }
 
 /// Read one note.
-#[lesto::get("/notes/{id}", tag = "notes")]
+#[lesto::get("/notes/{id}", tag = "notes", mcp(tool, name = "get_note"))]
 async fn get(store: NoteStore<ReadOnly, Public>, Path(id): Path<i64>) -> Result<Json<Note>, Error> {
     Ok(Json(store.get(id).await?))
 }
 
 /// Create a note (needs `notes:write`).
-#[lesto::post("/notes", status = 201, tag = "notes")]
+#[lesto::post("/notes", status = 201, tag = "notes", mcp(tool, name = "create_note"))]
 async fn create(
     store: NoteStore<ReadWrite, User>,
     Json(body): Json<NoteCreate>,
@@ -31,7 +34,7 @@ async fn create(
 }
 
 /// Edit a note (needs `notes:write`, author only).
-#[lesto::patch("/notes/{id}", tag = "notes")]
+#[lesto::patch("/notes/{id}", tag = "notes", mcp(tool, name = "update_note"))]
 async fn update(
     store: NoteStore<ReadWrite, User>,
     Path(id): Path<i64>,
