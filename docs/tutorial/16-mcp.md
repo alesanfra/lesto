@@ -65,7 +65,10 @@ out of reach: turning MCP on never exposes a route by accident.
   `PATCH` and `DELETE` are destructive, and `PUT` and `DELETE` are idempotent.
 
 The schemas carry the garde rules, as in the OpenAPI document (`minLength: 1` on `title`), so
-the model knows the constraints before it calls.
+the model knows the constraints before it calls. Two details differ from the OpenAPI document,
+for the sake of clients that are stricter than JSON Schema: an `Option<T>` field is written as
+`anyOf` a `T` or `null` rather than `"type": [.., "null"]`, and the output schema's root is
+written out in full rather than as a `$ref`.
 
 ## What a call does
 
@@ -127,9 +130,24 @@ Run the app (`lesto dev`, or `LESTO_PORT=8000 cargo run`), then point a client a
 
 ```sh
 claude mcp add --transport http notes http://127.0.0.1:8000/mcp   # Claude Code
-npx @modelcontextprotocol/inspector                               # the MCP Inspector: pick
-                                                                  # "Streamable HTTP" and the URL
+npx @modelcontextprotocol/inspector@latest --server-url http://127.0.0.1:8000/mcp --transport http
 ```
+
+The second command opens the [MCP Inspector](https://modelcontextprotocol.io/docs/2026-07-28/tools/inspector)
+in the browser (`@latest`: an older copy cached by `npx` may be the deprecated v1). Its command
+line mode is handy in scripts, and `--strict` reports tool schemas that some model providers
+would reject:
+
+```sh
+npx @modelcontextprotocol/inspector@latest --cli http://127.0.0.1:8000/mcp \
+    --method tools/list --strict
+npx @modelcontextprotocol/inspector@latest --cli http://127.0.0.1:8000/mcp \
+    --header "Authorization: Bearer bob-token" \
+    --method tools/call --tool-name create_note --tool-arg text=hello
+```
+
+The Inspector speaks the 2025 protocol unless told otherwise (`--protocol-era modern`); lesto
+answers both.
 
 Browsers are held to the same-origin rule: a request with an `Origin` header from another host
 is refused with `403`, which protects a local server against DNS rebinding.

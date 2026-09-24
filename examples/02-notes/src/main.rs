@@ -13,6 +13,9 @@
 //! ```sh
 //! claude mcp add --transport http notes http://localhost:8765/mcp \
 //!     --header 'Authorization: Bearer bob-token'
+//! npx @modelcontextprotocol/inspector@latest --cli http://localhost:8765/mcp \
+//!     --header 'Authorization: Bearer bob-token' --method tools/call \
+//!     --tool-name create_note --tool-arg text=hello
 //! ```
 
 use notes::{AppState, Tokens, build_app, connect};

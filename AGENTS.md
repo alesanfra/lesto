@@ -352,7 +352,12 @@ Recorded here because they are not derivable from the code. Do not undo them cas
   protocol, `rmcp` as a dev-dependency**: `rmcp` at runtime would replace only the envelope, could
   not turn the inner `401` into the transport status, and brings a tree and major-version churn;
   `tests/mcp_rmcp.rs` drives the server with its client in both eras instead, so a divergence
-  from the SDK's reading of the spec fails CI. Tool names default to the handler's name and fall
+  from the SDK's reading of the spec fails CI. Schemas are made portable for stricter clients:
+  the output schema's root is inlined (the TypeScript SDK drops a legacy tool whose output
+  schema lacks a top-level `"type": "object"`; `rmcp` does not, which is why the Inspector check
+  below matters) and `"type": [T, "null"]` becomes `anyOf`. Before changing the catalog, run
+  `npx @modelcontextprotocol/inspector@latest --cli <url> --method tools/list --strict` in both
+  `--protocol-era`s against `examples/02-notes`. Tool names default to the handler's name and fall
   back to the `operationId` when two collide; two equal explicit names panic in `into_router`,
   like an axum route conflict. Only tools so far: `mcp = "resource"`/`"prompt"` are compile
   errors until implemented.

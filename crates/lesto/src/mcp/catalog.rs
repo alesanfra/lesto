@@ -243,7 +243,7 @@ fn tool(
                     BodyArgs::Flat
                 }
                 _ => {
-                    properties.insert("body".into(), schema);
+                    properties.insert("body".into(), resolved.clone());
                     if body.required {
                         required.push("body".into());
                     }
@@ -264,10 +264,10 @@ fn tool(
     let input = standalone(Value::Object(input), schemas);
 
     let output_schema = success_schema(operation).map(|schema| {
-        let is_object = resolve(&schema, schemas)
-            .get("type")
-            .and_then(Value::as_str)
-            == Some("object");
+        // The root is inlined, not a `$ref`: the 2025 revisions require `"type": "object"` at the
+        // top of an output schema, and clients drop a tool whose schema does not have it.
+        let schema = resolve(&schema, schemas).clone();
+        let is_object = schema.get("type").and_then(Value::as_str) == Some("object");
         (standalone(schema, schemas), is_object)
     });
 
@@ -360,7 +360,7 @@ fn standalone(schema: Value, schemas: &Map<String, Value>) -> Value {
             collect_refs(component, &mut pending);
         }
     }
-    let mut schema = rewrite_refs(schema);
+    let mut schema = portable(rewrite_refs(schema));
     if !reached.is_empty()
         && let Value::Object(object) = &mut schema
     {
@@ -368,12 +368,69 @@ fn standalone(schema: Value, schemas: &Map<String, Value>) -> Value {
             .into_iter()
             .filter_map(|name| {
                 let component = schemas.get(&name)?.clone();
-                Some((name, rewrite_refs(component)))
+                Some((name, portable(rewrite_refs(component))))
             })
             .collect();
         object.insert("$defs".into(), Value::Object(defs));
     }
     schema
+}
+
+/// Keywords that describe a value rather than constrain it: they stay outside the `anyOf`.
+const ANNOTATION_KEYWORDS: [&str; 7] = [
+    "title",
+    "description",
+    "default",
+    "deprecated",
+    "examples",
+    "readOnly",
+    "writeOnly",
+];
+
+/// `{"type": ["string", "null"], "minLength": 1}` (what schemars writes for an `Option<T>`)
+/// becomes `{"anyOf": [{"type": "string", "minLength": 1}, {"type": "null"}]}`. Both are JSON
+/// Schema, but some model providers accept a single `type` only (Gemini's function
+/// declarations), and the MCP Inspector's `--strict` flags the array form as not portable.
+fn portable(value: Value) -> Value {
+    match value {
+        Value::Object(object) => {
+            let mut object: Map<String, Value> = object
+                .into_iter()
+                .map(|(key, value)| (key, portable(value)))
+                .collect();
+            let nullable = match object.get("type") {
+                Some(Value::Array(types)) if types.len() == 2 => {
+                    let mut non_null = types.iter().filter(|t| t.as_str() != Some("null"));
+                    match (non_null.next(), non_null.next()) {
+                        (Some(single), None) => Some(single.clone()),
+                        _ => None,
+                    }
+                }
+                _ => None,
+            };
+            if let Some(single) = nullable {
+                object.remove("type");
+                let mut branch = Map::new();
+                branch.insert("type".into(), single);
+                let mut outer = Map::new();
+                for (key, value) in object {
+                    if ANNOTATION_KEYWORDS.contains(&key.as_str()) {
+                        outer.insert(key, value);
+                    } else {
+                        branch.insert(key, value);
+                    }
+                }
+                outer.insert(
+                    "anyOf".into(),
+                    json!([Value::Object(branch), {"type": "null"}]),
+                );
+                return Value::Object(outer);
+            }
+            Value::Object(object)
+        }
+        Value::Array(items) => Value::Array(items.into_iter().map(portable).collect()),
+        other => other,
+    }
 }
 
 fn collect_refs(value: &Value, out: &mut Vec<String>) {
@@ -434,6 +491,26 @@ mod tests {
             "#/$defs/Tag"
         );
         assert!(schema["$defs"].get("Unused").is_none());
+    }
+
+    #[test]
+    fn nullable_types_become_any_of() {
+        let schema = portable(json!({
+            "type": "object",
+            "properties": {
+                "text": {"type": ["string", "null"], "minLength": 1, "description": "Text."},
+                "either": {"type": ["string", "integer"]},
+            },
+        }));
+        assert_eq!(
+            schema["properties"]["text"],
+            json!({"description": "Text.", "anyOf": [{"type": "string", "minLength": 1}, {"type": "null"}]})
+        );
+        // Only the `Option<T>` shape is rewritten.
+        assert_eq!(
+            schema["properties"]["either"]["type"],
+            json!(["string", "integer"])
+        );
     }
 
     #[test]

@@ -43,7 +43,8 @@ lesto's server is **dual-era**:
   already allow a server that assigns no `Mcp-Session-Id` and opens no SSE stream; `initialize` is
   answered from the static catalog and nothing is remembered between requests.
 
-Why both: at the time of writing, the Tier 1 SDKs (TypeScript, Python, Go, C#) and the Rust SDK
+Why both, confirmed in practice: MCP Inspector v2 (2.8.0) opens ad-hoc URL connections with
+the legacy `initialize` unless given `--protocol-era modern`. At the time of writing, the Tier 1 SDKs (TypeScript, Python, Go, C#) and the Rust SDK
 (`rmcp` 3.4) support 2026-07-28, but which clients (Claude, ChatGPT, VS Code, Cursor
 and others) speak it could not be confirmed. A legacy client talking to a modern-only server
 fails with a `400` and has no way to move forward, so a modern-only server would lock those
@@ -209,6 +210,12 @@ header-safe for `Mcp-Name`.
   The body goes under a `body` property instead when it is not an object schema, or when one of
   its property names collides with a path or query parameter. `$ref`s into `components.schemas`
   are carried as `$defs`, so the schema stands alone.
+- **Portable schemas** (found with MCP Inspector v2 on 2026-09-24): the root of an output
+  schema is inlined, never a bare `$ref`, because the 2025 revisions require `"type": "object"`
+  at the top and the TypeScript SDK drops a tool without it (`rmcp` does not, so only a real
+  client showed it); and schemars' `"type": ["T", "null"]` for `Option<T>` is rewritten as
+  `anyOf: [{"type": "T", ..}, {"type": "null"}]`, which the Inspector's `--strict` flags as a
+  portability problem (Gemini's function declarations take a single `type`).
 - **`outputSchema`**: the schema of the success JSON response. Modern: any schema (2026-07-28
   accepts any JSON Schema 2020-12). Legacy: only when it is an object schema, which the 2025
   revisions require.

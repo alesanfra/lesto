@@ -204,16 +204,22 @@ async fn tools_are_listed_from_the_routes() {
         input["properties"]["title"]["description"],
         "The note's title."
     );
-    assert!(input["properties"].get("body").is_some());
+    // `Option<String>` as `anyOf`, not `type: ["string", "null"]`, which some providers reject.
+    assert_eq!(
+        input["properties"]["body"]["anyOf"],
+        json!([{"type": "string"}, {"type": "null"}])
+    );
     assert_eq!(input["required"], json!(["title"]));
     assert_eq!(
         create["annotations"],
         json!({"title": "Create a note.", "readOnlyHint": false, "destructiveHint": false, "idempotentHint": false})
     );
-    // The success response (201) is the output schema, standalone.
+    // The success response (201) is the output schema, with its root inlined: legacy clients
+    // drop a tool whose output schema has no top-level `"type": "object"`.
     let output = &create["outputSchema"];
-    assert_eq!(output["$ref"], "#/$defs/Note");
-    assert_eq!(output["$defs"]["Note"]["type"], "object");
+    assert_eq!(output["type"], "object");
+    assert!(output.get("$ref").is_none());
+    assert_eq!(output["properties"]["title"]["type"], "string");
 
     let search = &tools[1];
     assert_eq!(search["inputSchema"]["required"], json!(["q"]));
@@ -423,7 +429,7 @@ async fn legacy_results_keep_their_shape() {
     assert!(result.get("ttlMs").is_none());
     let tools = result["tools"].as_array().unwrap();
     // 2025 revisions only accept object output schemas: the array one is left out.
-    assert!(tools[0].get("outputSchema").is_some());
+    assert_eq!(tools[0]["outputSchema"]["type"], "object");
     assert!(tools[1].get("outputSchema").is_none());
 
     let reply = legacy(
