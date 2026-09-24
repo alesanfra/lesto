@@ -40,6 +40,88 @@ struct RouteArgs {
     /// App state type used for the compile-time extractor checks (default: inferred from
     /// a `State<T>` argument, else `()`).
     state: Option<Type>,
+    /// `mcp = "tool"` / `mcp(tool, name = "..")`: expose the operation over MCP.
+    mcp: Option<McpArg>,
+}
+
+/// The `mcp` route option: the operation is an MCP tool, optionally under an explicit name.
+struct McpArg {
+    name: Option<LitStr>,
+}
+
+impl McpArg {
+    /// `mcp = "tool"`.
+    fn from_value(expr: &Expr) -> syn::Result<Self> {
+        let kind = expect_str(expr)?;
+        check_mcp_kind(&kind.value(), kind.span())?;
+        Ok(McpArg { name: None })
+    }
+
+    /// `mcp(tool)` / `mcp(tool, name = "search_notes")`.
+    fn from_list(list: &syn::MetaList) -> syn::Result<Self> {
+        let items = list.parse_args_with(Punctuated::<Meta, Token![,]>::parse_terminated)?;
+        let mut items = items.into_iter();
+        let Some(Meta::Path(kind)) = items.next() else {
+            return Err(syn::Error::new_spanned(
+                list,
+                "`mcp(..)` starts with what the operation is: `mcp(tool, name = \"search_notes\")`",
+            ));
+        };
+        let kind_name = kind.get_ident().map(Ident::to_string).unwrap_or_default();
+        check_mcp_kind(&kind_name, kind.span())?;
+        let mut name = None;
+        for item in items {
+            match item {
+                Meta::NameValue(nv) if nv.path.is_ident("name") => {
+                    let value = expect_str(&nv.value)?;
+                    check_mcp_name(&value)?;
+                    name = Some(value);
+                }
+                other => {
+                    return Err(syn::Error::new_spanned(
+                        other,
+                        "unknown `mcp` option; the only one is `name = \"..\"`: `mcp(tool, name = \"search_notes\")`",
+                    ));
+                }
+            }
+        }
+        Ok(McpArg { name })
+    }
+}
+
+/// Only tools are exposed so far; resources and prompts are planned (docs/design/mcp.md).
+fn check_mcp_kind(kind: &str, span: proc_macro2::Span) -> syn::Result<()> {
+    match kind {
+        "tool" => Ok(()),
+        "resource" | "prompt" => Err(syn::Error::new(
+            span,
+            format!(
+                "MCP {kind}s are not supported yet; expose the operation as a tool: `mcp = \"tool\"`"
+            ),
+        )),
+        _ => Err(syn::Error::new(
+            span,
+            "unknown MCP kind; expected `mcp = \"tool\"` or `mcp(tool, name = \"..\")`",
+        )),
+    }
+}
+
+/// MCP tool names: 1 to 128 characters of `A-Z a-z 0-9 _ - .`, which also keeps them safe in
+/// the `Mcp-Name` header.
+fn check_mcp_name(name: &LitStr) -> syn::Result<()> {
+    let value = name.value();
+    let valid = (1..=128).contains(&value.len())
+        && value
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'));
+    if valid {
+        Ok(())
+    } else {
+        Err(syn::Error::new(
+            name.span(),
+            "an MCP tool name is 1 to 128 characters of letters, digits, `_`, `-` and `.`, e.g. `name = \"search_notes\"`",
+        ))
+    }
 }
 
 /// One item of `security(..)`: `"name"` or `name = ["scope", ..]` / `"name" = ["scope"]`.
@@ -89,6 +171,7 @@ impl Parse for RouteArgs {
             security: Vec::new(),
             public: false,
             state: None,
+            mcp: None,
         };
         if input.is_empty() {
             return Ok(args);
@@ -121,13 +204,14 @@ impl Parse for RouteArgs {
                                 })?;
                             args.state = Some(ty);
                         }
+                        "mcp" => args.mcp = Some(McpArg::from_value(&nv.value)?),
                         "deprecated" => {
                             args.deprecated = matches!(&nv.value, Expr::Lit(ExprLit { lit: Lit::Bool(b), .. }) if b.value)
                         }
                         _ => {
                             return Err(syn::Error::new_spanned(
                                 nv.path,
-                                "unknown route option; expected one of: status, tag, tags(..), summary, description, operation_id, deprecated, public, responses(..), security(..), state = T",
+                                "unknown route option; expected one of: status, tag, tags(..), summary, description, operation_id, deprecated, public, responses(..), security(..), state = T, mcp = \"tool\", mcp(tool, name = \"..\")",
                             ));
                         }
                     }
@@ -158,10 +242,11 @@ impl Parse for RouteArgs {
                             args.security
                                 .extend(items.into_iter().map(|i| (i.name, i.scopes)));
                         }
+                        "mcp" => args.mcp = Some(McpArg::from_list(&list)?),
                         _ => {
                             return Err(syn::Error::new_spanned(
                                 list.path,
-                                "unknown route option; expected one of: status, tag, tags(..), summary, description, operation_id, deprecated, public, responses(..), security(..), state = T",
+                                "unknown route option; expected one of: status, tag, tags(..), summary, description, operation_id, deprecated, public, responses(..), security(..), state = T, mcp = \"tool\", mcp(tool, name = \"..\")",
                             ));
                         }
                     }
@@ -390,6 +475,10 @@ fn expand(method: &str, args: RouteArgs, func: ItemFn) -> TokenStream2 {
         quote! { .security(#name, &[#(#scopes),*]) }
     });
     let public = args.public.then(|| quote! { .public() });
+    let mcp = args.mcp.map(|mcp| match mcp.name {
+        Some(name) => quote! { .mcp(::lesto::McpExpose::tool_named(#name)) },
+        None => quote! { .mcp(::lesto::McpExpose::tool()) },
+    });
     let (checks, deferred_checks) = handler_checks(&func, args.state.as_ref());
     let describe = describe_fn(&func);
 
@@ -420,6 +509,7 @@ fn expand(method: &str, args: RouteArgs, func: ItemFn) -> TokenStream2 {
                     #(#responses)*
                     #(#security)*
                     #public
+                    #mcp
             }
 
             #describe

@@ -75,6 +75,9 @@ sqlite = ["db", "sqlx/sqlite"]
 lambda = ["dep:lambda_http", "dep:tower", "dep:http-body-util"]
 # `lesto::oidc`: bearer JWTs verified against an OpenID Connect provider (discovery + JWKS).
 oidc = ["dep:reqwest", "dep:jsonwebtoken"]
+# `lesto::mcp`: routes marked `mcp = "tool"` are served to agents over the Model Context Protocol
+# at `/mcp` (`App::mcp`). No dependency of its own.
+mcp = []
 # `lesto::otel`: OTLP export of spans *and* log events, configured by the standard `OTEL_*`
 # variables (`App::serve` sets it up by itself), plus trace context propagation so an incoming
 # `traceparent` continues here. The spans themselves need no feature.
@@ -92,7 +95,7 @@ all-features = true
 
 [dev-dependencies]
 # Tests exercise every feature.
-lesto = { path = ".", features = ["anyhow", "email", "url", "compression", "sqlite", "postgres", "lambda", "otel", "oidc"] }
+lesto = { path = ".", features = ["anyhow", "email", "url", "compression", "sqlite", "postgres", "lambda", "otel", "oidc", "mcp"] }
 # `postgres` and `uuid` for `tests/db_postgres.rs`, which binds a `Uuid`; lesto itself never
 # binds one, so the `db` feature does not ask sqlx for it.
 sqlx = { workspace = true, features = ["sqlite", "postgres", "uuid", "derive"] }
@@ -107,6 +110,8 @@ jsonwebtoken = { workspace = true, features = ["aws_lc_rs", "use_pem"] }
 base64.workspace = true
 # `tests/oidc_provider.rs`: asks a real provider for tokens (the same reqwest the feature uses).
 reqwest = { workspace = true, features = ["rustls", "form", "json"] }
+# `tests/mcp_rmcp.rs`: the official MCP SDK's client, against lesto's server in both eras.
+rmcp.workspace = true
 
 [target.'cfg(unix)'.dev-dependencies]
 libc = "0.2"

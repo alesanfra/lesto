@@ -100,6 +100,21 @@ pub struct PathItem {
 }
 
 impl PathItem {
+    /// The operation for the given HTTP method, if there is one.
+    pub fn operation(&self, method: &http::Method) -> Option<&Operation> {
+        match *method {
+            http::Method::GET => self.get.as_ref(),
+            http::Method::PUT => self.put.as_ref(),
+            http::Method::POST => self.post.as_ref(),
+            http::Method::DELETE => self.delete.as_ref(),
+            http::Method::OPTIONS => self.options.as_ref(),
+            http::Method::HEAD => self.head.as_ref(),
+            http::Method::PATCH => self.patch.as_ref(),
+            http::Method::TRACE => self.trace.as_ref(),
+            _ => None,
+        }
+    }
+
     /// Mutable slot for the given HTTP method, or `None` for methods OpenAPI does not model.
     pub fn slot_mut(&mut self, method: &http::Method) -> Option<&mut Option<Operation>> {
         Some(match *method {

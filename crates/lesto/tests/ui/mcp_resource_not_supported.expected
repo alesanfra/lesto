@@ -1,0 +1,2 @@
+error: MCP resources are not supported yet; expose the operation as a tool: `mcp = "tool"`
+--> mcp_resource_not_supported.rs:2

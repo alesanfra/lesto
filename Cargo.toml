@@ -60,6 +60,8 @@ reqwest = { version = "0.13", default-features = false }
 jsonwebtoken = { version = "11", default-features = false }
 anyhow = "1"
 uuid = { version = "1", default-features = false }
+# Dev-only: the MCP client of `crates/lesto/tests/mcp_rmcp.rs`. Plain HTTP on loopback, no TLS.
+rmcp = { version = "3.4", default-features = false, features = ["client", "transport-streamable-http-client-reqwest"] }
 
 # Intra-workspace dependency: `version` is required to publish, `path` to build from a checkout.
 lesto-macros = { path = "crates/lesto-macros", version = "0.1.0" }

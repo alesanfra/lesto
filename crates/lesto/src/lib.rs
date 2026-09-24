@@ -11,7 +11,8 @@
 //!   scheme and requirement in the document;
 //! * optional features: `db` (+ `postgres`/`mysql`/`sqlite`) adds sqlx stores with principals
 //!   and permissions ([`db`]); `lambda` runs the app on AWS Lambda ([`lambda`]); `oidc`
-//!   verifies bearer JWTs against an OpenID Connect provider ([`oidc`]); `anyhow` converts
+//!   verifies bearer JWTs against an OpenID Connect provider ([`oidc`]); `mcp` exposes selected
+//!   operations to agents over the Model Context Protocol ([`mcp`]); `anyhow` converts
 //!   `anyhow::Error` into a `500`.
 //!
 //! ```no_run
@@ -60,6 +61,8 @@ pub mod extract;
 #[cfg(feature = "lambda")]
 pub mod lambda;
 pub mod layers;
+#[cfg(feature = "mcp")]
+pub mod mcp;
 #[cfg(feature = "otel")]
 mod metrics;
 #[cfg(feature = "oidc")]
@@ -83,7 +86,8 @@ pub use extract::{Json, Path, Query};
 pub use operation::{OperationBuilder, OperationHandler, OperationInput, OperationOutput};
 pub use response::{Accepted, Created, NoContent};
 pub use route::{
-    PendingOperation, RouteInfo, RouteMeta, RouteSet, delete, get, head, options, patch, post, put,
+    McpExpose, PendingOperation, RouteInfo, RouteMeta, RouteSet, delete, get, head, options, patch,
+    post, put,
 };
 pub use security::{
     ApiKey, ApiKeyScheme, AuthScheme, Basic, BasicAuth, Bearer, BearerAuth, Security,

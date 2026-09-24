@@ -48,6 +48,36 @@ pub struct RouteMeta {
     pub security: Vec<(String, Vec<String>)>,
     /// Explicitly public: emits `security: []`, overriding app-wide requirements.
     pub public: bool,
+    /// Expose the operation over MCP (`mcp = "tool"`); served once the app calls `App::mcp`.
+    pub mcp: Option<McpExpose>,
+}
+
+/// How a route is exposed over the Model Context Protocol: the `mcp` route option.
+///
+/// Only tools exist so far. The value is inert unless the app serves MCP (`App::mcp`, feature
+/// `mcp`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum McpExpose {
+    /// An MCP tool; `name` overrides the default (the handler's name).
+    Tool {
+        /// Explicit tool name.
+        name: Option<String>,
+    },
+}
+
+impl McpExpose {
+    /// A tool named after the handler (`mcp = "tool"`).
+    pub fn tool() -> Self {
+        McpExpose::Tool { name: None }
+    }
+
+    /// A tool with an explicit name (`mcp(tool, name = "..")`).
+    pub fn tool_named(name: impl Into<String>) -> Self {
+        McpExpose::Tool {
+            name: Some(name.into()),
+        }
+    }
 }
 
 impl RouteMeta {
@@ -66,6 +96,7 @@ impl RouteMeta {
             error_statuses: Vec::new(),
             security: Vec::new(),
             public: false,
+            mcp: None,
         }
     }
 
@@ -131,10 +162,16 @@ impl RouteMeta {
         self
     }
 
+    /// Expose the operation over MCP (see [`McpExpose`]).
+    pub fn mcp(mut self, expose: McpExpose) -> Self {
+        self.mcp = Some(expose);
+        self
+    }
+
     /// `operation_id`, or FastAPI's default: `{name}_{path}_{method}` with every non-word
     /// character replaced by `_` (`get_user_users__id__get`). `path` is the final path, so two
     /// handlers with the same name in different modules or nested apps get different ids.
-    fn default_operation_id(&self, path: &str) -> String {
+    pub(crate) fn default_operation_id(&self, path: &str) -> String {
         if let Some(id) = &self.operation_id {
             return id.clone();
         }

@@ -57,6 +57,9 @@ pub struct App<S = ()> {
     /// [`App::protect`]: applied to this app's routes when it is nested or served.
     #[cfg(feature = "oidc")]
     protect: Option<crate::oidc::Protect>,
+    /// [`App::mcp`]: the MCP endpoint, added when the router is built.
+    #[cfg(feature = "mcp")]
+    mcp: Option<crate::mcp::Mcp>,
 }
 
 /// Default of [`App::shutdown_timeout`]: Kubernetes' own termination grace period.
@@ -117,6 +120,8 @@ where
             oidc: None,
             #[cfg(feature = "oidc")]
             protect: None,
+            #[cfg(feature = "mcp")]
+            mcp: None,
         }
     }
 
@@ -291,6 +296,19 @@ where
     /// and copy it to the response, so a log line, a trace and a client report can be matched.
     pub fn request_id(mut self) -> Self {
         self.request_id = true;
+        self
+    }
+
+    /// Serve the routes marked `mcp = "tool"` to agents over the Model Context Protocol, at
+    /// `/mcp` unless [`Mcp::path`](crate::mcp::Mcp::path) says otherwise. See [`crate::mcp`].
+    ///
+    /// Only the app that is served (or turned into a router) serves MCP: the tools of nested
+    /// apps are included, their own `mcp` configuration is ignored. The endpoint sits behind
+    /// every layer of the app, [`App::protect`] included, and is not part of the OpenAPI
+    /// document.
+    #[cfg(feature = "mcp")]
+    pub fn mcp(mut self, mcp: crate::mcp::Mcp) -> Self {
+        self.mcp = Some(mcp);
         self
     }
 
@@ -474,6 +492,8 @@ where
             oidc: self.oidc,
             #[cfg(feature = "oidc")]
             protect: self.protect,
+            #[cfg(feature = "mcp")]
+            mcp: self.mcp,
         }
     }
 
@@ -526,12 +546,44 @@ where
     /// problem (unless [`App::fallback`] was called), a known route with the wrong method a
     /// `405`, and a handler that panics a `500` with the panic message kept out of the response.
     pub fn into_router(self) -> Router<S> {
-        let spec = self.openapi_url.as_ref().map(|_| self.openapi());
+        #[cfg(feature = "mcp")]
+        let serves_mcp = self.mcp.is_some();
+        #[cfg(not(feature = "mcp"))]
+        let serves_mcp = false;
+        let spec = (self.openapi_url.is_some() || serves_mcp).then(|| self.openapi());
+
+        // The MCP route is added once the router is complete, since tool calls go through it;
+        // being added last, it receives the same layers here, one by one.
+        #[cfg(feature = "mcp")]
+        let mcp = match (self.mcp, &spec) {
+            (Some(config), Some(spec)) => {
+                #[cfg(feature = "oidc")]
+                let protected = self.protect.is_some();
+                #[cfg(not(feature = "oidc"))]
+                let protected = false;
+                let endpoint = crate::mcp::Endpoint::new(config, &self.operations, spec, protected);
+                let route = endpoint.method_router();
+                Some((endpoint, route))
+            }
+            _ => None,
+        };
+        #[cfg(feature = "mcp")]
+        let mut mcp = mcp;
+        macro_rules! mcp_layer {
+            ($layer:expr) => {
+                #[cfg(feature = "mcp")]
+                {
+                    mcp = mcp.map(|(endpoint, route)| (endpoint, route.layer($layer)));
+                }
+            };
+        }
+
         let mut router = self.router;
         // Before the documentation routes are added: those stay public.
         #[cfg(feature = "oidc")]
         if let Some(protect) = &self.protect {
             router = router.layer(protect.layer());
+            mcp_layer!(protect.layer());
         }
 
         if let (Some(openapi_url), Some(spec)) = (self.openapi_url.clone(), spec) {
@@ -569,12 +621,15 @@ where
         // answer still goes through the problem layer.
         if let Some(limit) = self.timeout {
             router = router.layer(crate::layers::TimeoutLayer::new(limit));
+            mcp_layer!(crate::layers::TimeoutLayer::new(limit));
         }
         if let Some(body_limit) = self.body_limit {
             router = router.layer(body_limit);
+            mcp_layer!(body_limit);
         }
         #[cfg(feature = "oidc")]
         if let Some(oidc) = self.oidc {
+            mcp_layer!(axum::Extension(oidc.clone()));
             router = router.layer(axum::Extension(oidc));
         }
 
@@ -587,7 +642,14 @@ where
             // routing, which is what makes `MatchedPath` (and so `http.route`) available.
             crate::layers::RequestSpanLayer::with(self.trace),
         );
+        mcp_layer!(layers.clone());
         router = router.layer(layers);
+
+        #[cfg(feature = "mcp")]
+        if let Some((endpoint, route)) = mcp {
+            endpoint.set_router(router.clone());
+            router = router.route(&endpoint.path(), route);
+        }
 
         // Outside the shared stack, opt-in: CORS headers and compression apply to every
         // response, problems included, and the request span sees the request id.
