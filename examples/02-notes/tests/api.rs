@@ -239,7 +239,11 @@ async fn mcp(
         .header(header::CONTENT_TYPE, "application/json")
         .header("mcp-protocol-version", "2026-07-28")
         .header("mcp-method", method);
-    if let Some(name) = params.get("name").and_then(Value::as_str) {
+    if let Some(name) = params
+        .get("name")
+        .or_else(|| params.get("uri"))
+        .and_then(Value::as_str)
+    {
         req = req.header("mcp-name", name);
     }
     if let Some(t) = token {
@@ -294,4 +298,25 @@ async fn agents_use_the_same_routes_over_mcp() {
 
     let (_, list) = call(&r, Method::GET, "/notes", None, None).await;
     assert_eq!(list[0]["text"], "from an agent");
+
+    // The note's text is a resource; its URI is the route's path under `lesto://notes`.
+    let (_, reply) = mcp(&r, "resources/templates/list", json!({}), None).await;
+    assert_eq!(
+        reply["result"]["resourceTemplates"][0]["uriTemplate"],
+        "lesto://notes/notes/{id}/text"
+    );
+    let read = json!({"uri": format!("lesto://notes/notes/{id}/text")});
+    let (_, reply) = mcp(&r, "resources/read", read, None).await;
+    assert_eq!(reply["result"]["contents"][0]["text"], "from an agent");
+
+    let tidy =
+        json!({"name": "tidy_note", "arguments": {"id": id.to_string(), "audience": "the team"}});
+    let (_, reply) = mcp(&r, "prompts/get", tidy, None).await;
+    let text = reply["result"]["messages"][0]["content"]["text"]
+        .as_str()
+        .unwrap();
+    assert!(
+        text.contains("the team") && text.contains("from an agent"),
+        "{text}"
+    );
 }

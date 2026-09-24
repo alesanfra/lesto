@@ -5,6 +5,8 @@
 #
 #   - tools/list --strict: the four tools, no portability warning;
 #   - tools/call create_note with a token: the note, as structured content;
+#   - resources/templates/list and resources/read: the note's text, read through its URI;
+#   - prompts/list and prompts/get: the tidy_note prompt, with the note's text in it;
 #   - tools/call update_note with an empty text: a tool error (the 422);
 #   - tools/call create_note without a token: the 401 reaches the client, which asks for OAuth.
 #
@@ -85,7 +87,30 @@ for era in legacy modern; do
         fail "create_note failed" "$work/create.out" "$work/create.err"
     author=$(head -n 1 "$work/create.out" | jq -r '.result.structuredContent.author')
     [ "$author" = "bob" ] || fail "create_note returned author '$author'" "$work/create.out"
+    id=$(head -n 1 "$work/create.out" | jq -r '.result.structuredContent.id')
     pass "create_note with bob's token creates the note"
+
+    inspector templates --method resources/templates/list ||
+        fail "resources/templates/list failed" "$work/templates.out" "$work/templates.err"
+    template=$(head -n 1 "$work/templates.out" | jq -r '.result.resourceTemplates[0].uriTemplate')
+    [ "$template" = "lesto://notes/notes/{id}/text" ] ||
+        fail "unexpected resource template: $template" "$work/templates.out"
+    inspector read --method resources/read --uri "lesto://notes/notes/$id/text" ||
+        fail "resources/read failed" "$work/read.out" "$work/read.err"
+    text=$(head -n 1 "$work/read.out" | jq -r '.result.contents[0].text')
+    [ "$text" = "from the $era inspector" ] || fail "resources/read returned '$text'" "$work/read.out"
+    pass "resources/read of the note_text template returns the note's text"
+
+    inspector prompts --method prompts/list ||
+        fail "prompts/list failed" "$work/prompts.out" "$work/prompts.err"
+    prompt=$(head -n 1 "$work/prompts.out" | jq -r '[.result.prompts[].name] | join(",")')
+    [ "$prompt" = "tidy_note" ] || fail "unexpected prompts: $prompt" "$work/prompts.out"
+    inspector prompt --method prompts/get --prompt-name tidy_note \
+        --prompt-args "id=$id" "audience=the team" ||
+        fail "prompts/get failed" "$work/prompt.out" "$work/prompt.err"
+    head -n 1 "$work/prompt.out" | jq -r '.result.messages[0].content.text' | grep -q "from the $era inspector" ||
+        fail "prompts/get does not carry the note" "$work/prompt.out"
+    pass "prompts/get tidy_note returns a message with the note in it"
 
     inspector invalid --header "Authorization: Bearer bob-token" \
         --method tools/call --tool-name update_note --tool-args-json '{"id": 1, "text": ""}' || true

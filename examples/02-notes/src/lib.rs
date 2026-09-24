@@ -19,7 +19,7 @@ pub fn build_app() -> App<AppState> {
         .version("0.1.0")
         .description("Public reads, authenticated writes, permission-checked deletes")
         .routes(notes::routes())
-        // The routes marked `mcp(tool, ..)` are served to agents at /mcp.
+        // The routes marked `mcp(..)` are served to agents at /mcp.
         .mcp(Mcp::new().instructions(
             "Short notes. Anyone can read; writing needs a bearer token with notes:write.",
         ))

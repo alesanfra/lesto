@@ -1,10 +1,13 @@
 //! HTTP handlers. The store in the signature says who may call and whether it writes.
 //!
-//! Every route but `delete` is also an MCP tool: agents may read, create and edit notes, and
-//! deleting stays a decision for a human with an HTTP client (tutorial chapter 16).
+//! Every route but `delete` is also served over MCP (tutorial chapter 16): the JSON routes as
+//! tools, so agents may read, create and edit notes; a note's text as a resource an agent can
+//! attach as context; a prompt to rewrite a note. Deleting stays a decision for a human with an
+//! HTTP client.
 
 use lesto::RouteSet;
 use lesto::db::{Error, Public, ReadOnly, ReadWrite};
+use lesto::mcp::Prompt;
 use lesto::prelude::*;
 
 use super::model::{Note, NoteCreate, NoteUpdate};
@@ -43,6 +46,34 @@ async fn update(
     Ok(Json(store.update(id, body).await?))
 }
 
+/// A note's text.
+#[lesto::get("/notes/{id}/text", tag = "notes", mcp(resource, name = "note_text"))]
+async fn text(store: NoteStore<ReadOnly, Public>, Path(id): Path<i64>) -> Result<String, Error> {
+    Ok(store.get(id).await?.text)
+}
+
+#[lesto::model]
+struct Tidy {
+    /// Who will read the note, e.g. `the team`.
+    #[garde(length(min = 1))]
+    audience: Option<String>,
+}
+
+/// Rewrite a note more clearly.
+#[lesto::get("/prompts/tidy/{id}", tag = "prompts", mcp(prompt, name = "tidy_note"))]
+async fn tidy(
+    store: NoteStore<ReadOnly, Public>,
+    Path(id): Path<i64>,
+    Query(tidy): Query<Tidy>,
+) -> Result<Prompt, Error> {
+    let note = store.get(id).await?;
+    let audience = tidy.audience.unwrap_or_else(|| "its author".into());
+    Ok(Prompt::new().user(format!(
+        "Rewrite this note so that {audience} understands it at a glance. Keep every fact.\n\n{}",
+        note.text
+    )))
+}
+
 /// Delete a note (needs `notes:delete`).
 #[lesto::delete("/notes/{id}", status = 204, tag = "notes")]
 async fn delete(store: NoteStore<ReadWrite, User>, Path(id): Path<i64>) -> Result<(), Error> {
@@ -50,5 +81,5 @@ async fn delete(store: NoteStore<ReadWrite, User>, Path(id): Path<i64>) -> Resul
 }
 
 pub fn routes() -> RouteSet<AppState> {
-    routes![list, get, create, update, delete]
+    routes![list, get, create, update, text, tidy, delete]
 }
