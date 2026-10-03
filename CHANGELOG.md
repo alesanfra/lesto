@@ -6,6 +6,8 @@ All notable changes to lesto are listed here. The format follows
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-03
+
 ### Added
 
 - The tutorial is published at <https://alesanfra.github.io/lesto/>, and the crates' `homepage`
