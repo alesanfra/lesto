@@ -190,6 +190,9 @@ impl Parse for SecurityItem {
     }
 }
 
+/// Every route option, for the error on one that is not.
+const UNKNOWN_OPTION: &str = "unknown route option; expected one of: status, tag, tags(..), summary, description, operation_id, deprecated, public, responses(..), security(..), state = T, mcp = \"tool\" | \"resource\" | \"prompt\", mcp(tool, name = \"..\")";
+
 impl Parse for RouteArgs {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let path: LitStr = input.parse().map_err(|e| {
@@ -248,10 +251,7 @@ impl Parse for RouteArgs {
                             args.deprecated = matches!(&nv.value, Expr::Lit(ExprLit { lit: Lit::Bool(b), .. }) if b.value)
                         }
                         _ => {
-                            return Err(syn::Error::new_spanned(
-                                nv.path,
-                                "unknown route option; expected one of: status, tag, tags(..), summary, description, operation_id, deprecated, public, responses(..), security(..), state = T, mcp = \"tool\" | \"resource\" | \"prompt\", mcp(tool, name = \"..\")",
-                            ));
+                            return Err(syn::Error::new_spanned(nv.path, UNKNOWN_OPTION));
                         }
                     }
                 }
@@ -283,10 +283,7 @@ impl Parse for RouteArgs {
                         }
                         "mcp" => args.mcp = Some(McpArg::from_list(&list)?),
                         _ => {
-                            return Err(syn::Error::new_spanned(
-                                list.path,
-                                "unknown route option; expected one of: status, tag, tags(..), summary, description, operation_id, deprecated, public, responses(..), security(..), state = T, mcp = \"tool\" | \"resource\" | \"prompt\", mcp(tool, name = \"..\")",
-                            ));
+                            return Err(syn::Error::new_spanned(list.path, UNKNOWN_OPTION));
                         }
                     }
                 }
@@ -1215,25 +1212,34 @@ fn expand_store(input: syn::DeriveInput) -> syn::Result<TokenStream2> {
         let connection = quote! {
             <#db as ::lesto::db::sqlx::Database>::Connection
         };
-        let read = permissions.read.map(|permission| {
+        // `read` + `read_with`, or `write` + `write_with`: the same pair of methods with the
+        // permission filled in, behind the bound the store method itself needs.
+        let methods = |kind: &str, bound: TokenStream2, permission: syn::LitStr| {
+            let method = format_ident!("{kind}");
+            let method_with = format_ident!("{kind}_with");
+            let transaction = if kind == "read" {
+                "read-only"
+            } else {
+                "read-write"
+            };
             let doc = format!(
-                "Run `f` in a read-only transaction, requiring `{}`.",
+                "Run `f` in a {transaction} transaction, requiring `{}`.",
                 permission.value()
             );
             let doc_with = format!(
-                "[`read`](Self::read) at `isolation`, requiring `{}`.",
+                "[`{kind}`](Self::{kind}) at `isolation`, requiring `{}`.",
                 permission.value()
             );
             quote! {
                 impl #impl_generics #name #ty_generics
                 where
-                    #mode: ::lesto::db::Mode,
+                    #mode: #bound,
                     #principal: ::lesto::db::Authenticated,
                     #db: ::lesto::db::Dialect,
                     #predicates
                 {
                     #[doc = #doc]
-                    pub async fn read<__T, __E, __F>(
+                    pub async fn #method<__T, __E, __F>(
                         &self,
                         f: __F,
                     ) -> ::core::result::Result<__T, ::lesto::db::Error>
@@ -1242,11 +1248,11 @@ fn expand_store(input: syn::DeriveInput) -> syn::Result<TokenStream2> {
                         __F: for<'__c> ::core::ops::AsyncFnOnce(&'__c mut #connection)
                             -> ::core::result::Result<__T, __E>,
                     {
-                        self.0.read(#permission, f).await
+                        self.0.#method(#permission, f).await
                     }
 
                     #[doc = #doc_with]
-                    pub async fn read_with<__T, __E, __F>(
+                    pub async fn #method_with<__T, __E, __F>(
                         &self,
                         isolation: ::lesto::db::Isolation,
                         f: __F,
@@ -1256,57 +1262,17 @@ fn expand_store(input: syn::DeriveInput) -> syn::Result<TokenStream2> {
                         __F: for<'__c> ::core::ops::AsyncFn(&'__c mut #connection)
                             -> ::core::result::Result<__T, __E>,
                     {
-                        self.0.read_with(#permission, isolation, f).await
+                        self.0.#method_with(#permission, isolation, f).await
                     }
                 }
             }
-        });
-        let write = permissions.write.map(|permission| {
-            let doc = format!(
-                "Run `f` in a read-write transaction, requiring `{}`.",
-                permission.value()
-            );
-            let doc_with = format!(
-                "[`write`](Self::write) at `isolation`, requiring `{}`.",
-                permission.value()
-            );
-            quote! {
-                impl #impl_generics #name #ty_generics
-                where
-                    #mode: ::lesto::db::Writable,
-                    #principal: ::lesto::db::Authenticated,
-                    #db: ::lesto::db::Dialect,
-                    #predicates
-                {
-                    #[doc = #doc]
-                    pub async fn write<__T, __E, __F>(
-                        &self,
-                        f: __F,
-                    ) -> ::core::result::Result<__T, ::lesto::db::Error>
-                    where
-                        __E: ::core::convert::Into<::lesto::db::Error>,
-                        __F: for<'__c> ::core::ops::AsyncFnOnce(&'__c mut #connection)
-                            -> ::core::result::Result<__T, __E>,
-                    {
-                        self.0.write(#permission, f).await
-                    }
-
-                    #[doc = #doc_with]
-                    pub async fn write_with<__T, __E, __F>(
-                        &self,
-                        isolation: ::lesto::db::Isolation,
-                        f: __F,
-                    ) -> ::core::result::Result<__T, ::lesto::db::Error>
-                    where
-                        __E: ::core::convert::Into<::lesto::db::Error>,
-                        __F: for<'__c> ::core::ops::AsyncFn(&'__c mut #connection)
-                            -> ::core::result::Result<__T, __E>,
-                    {
-                        self.0.write_with(#permission, isolation, f).await
-                    }
-                }
-            }
-        });
+        };
+        let read = permissions
+            .read
+            .map(|permission| methods("read", quote! { ::lesto::db::Mode }, permission));
+        let write = permissions
+            .write
+            .map(|permission| methods("write", quote! { ::lesto::db::Writable }, permission));
         quote! { #read #write }
     } else {
         TokenStream2::new()

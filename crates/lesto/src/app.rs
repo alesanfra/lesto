@@ -299,10 +299,11 @@ where
         self
     }
 
-    /// Serve the routes marked `mcp = "tool"` to agents over the Model Context Protocol, at
-    /// `/mcp` unless [`Mcp::path`](crate::mcp::Mcp::path) says otherwise. See [`crate::mcp`].
+    /// Serve the routes marked `mcp = "tool"`, `"resource"` or `"prompt"` to agents over the
+    /// Model Context Protocol, at `/mcp` unless [`Mcp::path`](crate::mcp::Mcp::path) says
+    /// otherwise. See [`crate::mcp`].
     ///
-    /// Only the app that is served (or turned into a router) serves MCP: the tools of nested
+    /// Only the app that is served (or turned into a router) serves MCP: the routes of nested
     /// apps are included, their own `mcp` configuration is ignored. The endpoint sits behind
     /// every layer of the app, [`App::protect`] included, and is not part of the OpenAPI
     /// document.
@@ -555,7 +556,7 @@ where
         // The MCP route is added once the router is complete, since tool calls go through it;
         // being added last, it receives the same layers here, one by one.
         #[cfg(feature = "mcp")]
-        let mcp = match (self.mcp, &spec) {
+        let mut mcp = match (self.mcp, &spec) {
             (Some(config), Some(spec)) => {
                 #[cfg(feature = "oidc")]
                 let protected = self.protect.is_some();
@@ -567,8 +568,6 @@ where
             }
             _ => None,
         };
-        #[cfg(feature = "mcp")]
-        let mut mcp = mcp;
         macro_rules! mcp_layer {
             ($layer:expr) => {
                 #[cfg(feature = "mcp")]
@@ -754,12 +753,12 @@ impl App<()> {
         listener: tokio::net::TcpListener,
         shutdown: impl Future<Output = ()> + Send + 'static,
     ) -> std::io::Result<()> {
-        // Held until the server is done, so the last spans are flushed after the in-flight
-        // requests finish. Does nothing unless the `otel` feature is on, the environment names
-        // a collector, and the application installed no subscriber of its own.
         if self.write_openapi_if_asked()? {
             return Ok(());
         }
+        // Held until the server is done, so the last spans are flushed after the in-flight
+        // requests finish. Does nothing unless the `otel` feature is on, the environment names
+        // a collector, and the application installed no subscriber of its own.
         #[cfg(feature = "otel")]
         let _telemetry = crate::otel::auto_init(&self.spec.info.title);
         let timeout = self.shutdown_timeout;
@@ -792,9 +791,7 @@ impl App<()> {
             }
         }
     }
-}
 
-impl App<()> {
     /// `LESTO_OPENAPI_PATH` set: write the document there instead of serving.
     fn write_openapi_if_asked(&self) -> std::io::Result<bool> {
         self.write_openapi_to(std::env::var_os(OPENAPI_PATH_VAR))
@@ -839,18 +836,22 @@ pub async fn shutdown_signal() {
 /// (default `8000`). `PORT` is honored when `LESTO_PORT` is absent, for platforms that set it
 /// (Heroku, Cloud Run). A port that is not a number is an `InvalidInput` error.
 pub fn bind_address() -> std::io::Result<(String, u16)> {
-    let host = std::env::var("LESTO_HOST")
-        .ok()
+    bind_address_from(|name| std::env::var(name).ok())
+}
+
+/// [`bind_address`] against any source of variables, so tests never write the environment.
+fn bind_address_from(get: impl Fn(&str) -> Option<String>) -> std::io::Result<(String, u16)> {
+    let host = get("LESTO_HOST")
         .filter(|h| !h.trim().is_empty())
         .unwrap_or_else(|| "127.0.0.1".to_string());
-    let port = match std::env::var("LESTO_PORT").or_else(|_| std::env::var("PORT")) {
-        Ok(raw) => raw.trim().parse::<u16>().map_err(|_| {
+    let port = match get("LESTO_PORT").or_else(|| get("PORT")) {
+        Some(raw) => raw.trim().parse::<u16>().map_err(|_| {
             std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 format!("LESTO_PORT/PORT must be a port number, got `{raw}`"),
             )
         })?,
-        Err(_) => 8000,
+        None => 8000,
     };
     Ok((host, port))
 }
@@ -969,7 +970,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{App, bind_address};
+    use super::{App, bind_address_from};
 
     #[test]
     fn openapi_is_written_only_when_asked() {
@@ -982,27 +983,32 @@ mod tests {
         assert_eq!(written, app.openapi_json());
     }
 
+    fn bind_address(vars: &[(&str, &str)]) -> std::io::Result<(String, u16)> {
+        bind_address_from(|name| {
+            vars.iter()
+                .find(|(key, _)| *key == name)
+                .map(|(_, value)| (*value).to_string())
+        })
+    }
+
     #[test]
     fn bind_address_from_env() {
-        // One test, sequential: environment variables are process-wide.
-        // SAFETY: this is the only test in the binary that touches the environment, and the
-        // unit-test harness runs it on a thread of its own with no other reader.
-        unsafe {
-            for v in ["LESTO_HOST", "LESTO_PORT", "PORT"] {
-                std::env::remove_var(v);
-            }
-            assert_eq!(bind_address().unwrap(), ("127.0.0.1".to_string(), 8000));
-            std::env::set_var("PORT", "9000");
-            assert_eq!(bind_address().unwrap().1, 9000, "PORT is the fallback");
-            std::env::set_var("LESTO_PORT", "8765");
-            std::env::set_var("LESTO_HOST", "0.0.0.0");
-            assert_eq!(bind_address().unwrap(), ("0.0.0.0".to_string(), 8765));
-            std::env::set_var("LESTO_PORT", "nope");
-            let err = bind_address().unwrap_err();
-            assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
-            for v in ["LESTO_HOST", "LESTO_PORT", "PORT"] {
-                std::env::remove_var(v);
-            }
-        }
+        assert_eq!(bind_address(&[]).unwrap(), ("127.0.0.1".to_string(), 8000));
+        assert_eq!(
+            bind_address(&[("PORT", "9000")]).unwrap().1,
+            9000,
+            "PORT is the fallback"
+        );
+        assert_eq!(
+            bind_address(&[
+                ("PORT", "9000"),
+                ("LESTO_PORT", "8765"),
+                ("LESTO_HOST", "0.0.0.0")
+            ])
+            .unwrap(),
+            ("0.0.0.0".to_string(), 8765)
+        );
+        let err = bind_address(&[("LESTO_PORT", "nope")]).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
     }
 }

@@ -19,7 +19,7 @@ pub(super) fn read(get: impl Fn(&str) -> Option<String>) -> Result<Option<Discov
     let Some(url) = get(DISCOVERY_URL) else {
         return Ok(None);
     };
-    let list = |name| {
+    let list = |name| -> Vec<String> {
         get(name)
             .map(|value| {
                 value
@@ -29,7 +29,7 @@ pub(super) fn read(get: impl Fn(&str) -> Option<String>) -> Result<Option<Discov
                     .map(String::from)
                     .collect()
             })
-            .unwrap_or_else(Vec::<String>::new)
+            .unwrap_or_default()
     };
     let mut discover = Oidc::discover(url.trim())
         .audiences(list(AUDIENCES))

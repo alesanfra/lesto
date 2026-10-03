@@ -41,10 +41,7 @@ pub trait Dialect: sqlx::Database + sealed::Sealed {
         isolation: Isolation,
         settings: &TransactionSettings,
     ) -> Result<Cow<'static, str>, Error> {
-        let entries = settings.entries()?;
-        if !entries.is_empty() {
-            return Err(Error::internal(Unsupported(std::any::type_name::<Self>())));
-        }
+        no_settings::<Self>(settings)?;
         Ok(begin(
             Self::begin_keyword(read_only),
             isolation_of::<Self>(isolation),
@@ -58,6 +55,15 @@ pub trait Dialect: sqlx::Database + sealed::Sealed {
         } else {
             Self::BEGIN
         }
+    }
+}
+
+/// `Ok` when `settings` is empty: the check of every database without transaction-local settings.
+fn no_settings<DB: Dialect>(settings: &TransactionSettings) -> Result<(), Error> {
+    if settings.entries()?.is_empty() {
+        Ok(())
+    } else {
+        Err(Error::internal(Unsupported(std::any::type_name::<DB>())))
     }
 }
 
@@ -185,10 +191,7 @@ impl Dialect for sqlx::MySql {
         isolation: Isolation,
         settings: &TransactionSettings,
     ) -> Result<Cow<'static, str>, Error> {
-        let entries = settings.entries()?;
-        if !entries.is_empty() {
-            return Err(Error::internal(Unsupported(std::any::type_name::<Self>())));
-        }
+        no_settings::<Self>(settings)?;
         let keyword = Self::begin_keyword(read_only);
         Ok(match Self::isolation_clause(isolation) {
             None => Cow::Borrowed(keyword),
@@ -221,10 +224,7 @@ impl Dialect for sqlx::Sqlite {
         isolation: Isolation,
         settings: &TransactionSettings,
     ) -> Result<Cow<'static, str>, Error> {
-        let entries = settings.entries()?;
-        if !entries.is_empty() {
-            return Err(Error::internal(Unsupported(std::any::type_name::<Self>())));
-        }
+        no_settings::<Self>(settings)?;
         Ok(Cow::Borrowed(match (read_only, isolation) {
             (false, Isolation::Serializable) => "BEGIN IMMEDIATE",
             (true, _) => Self::BEGIN_READ_ONLY,

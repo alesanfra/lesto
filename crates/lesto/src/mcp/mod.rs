@@ -33,12 +33,11 @@
 //! are the tool's arguments, side by side. Reading a resource is a `GET` of the path in its URI
 //! (`lesto://notes/notes/7` → `GET /notes/7`), and getting a prompt a `GET` with the prompt's
 //! arguments as path and query parameters; the route returns a [`Prompt`]. So a call runs the
-//! same extractors, validation,
-//! authentication, layers and tracing as the route does over HTTP: a validation failure comes
-//! back to the agent as the `422` problem (`isError: true`), and a `401` from the route becomes
-//! the `401` of the MCP request, which is what starts an MCP client's OAuth flow. The headers of
-//! the MCP request (`Authorization`, API keys, cookies, `traceparent`) are forwarded; the inner
-//! request carries an [`McpCall`] extension.
+//! same extractors, validation, authentication, layers and tracing as the route does over HTTP:
+//! a validation failure comes back to the agent as the `422` problem (`isError: true`), and a
+//! `401` from the route becomes the `401` of the MCP request, which is what starts an MCP
+//! client's OAuth flow. The headers of the MCP request (`Authorization`, API keys, cookies,
+//! `traceparent`) are forwarded; the inner request carries an [`McpCall`] extension.
 //!
 //! A resource's route can set `Cache-Control` to let clients cache what they read: `max-age`
 //! and `public`/`private` become 2026-07-28's `ttlMs` and `cacheScope`.
@@ -207,7 +206,8 @@ impl<S> Endpoint<S>
 where
     S: Clone + Send + Sync + 'static,
 {
-    /// The tools of `operations`, described from `spec`. `protected`: the endpoint is behind
+    /// The tools, resources and prompts of `operations`, described from `spec`. `protected`: the
+    /// endpoint is behind
     /// `App::protect`, so what it lists is private to the caller.
     pub(crate) fn new(
         config: Mcp,
@@ -626,13 +626,10 @@ async fn send(
     name: &str,
 ) -> Result<Collected, Outcome> {
     let mut router = router.clone();
-    std::future::poll_fn(|cx| Service::<axum::extract::Request>::poll_ready(&mut router, cx))
-        .await
-        .unwrap_or_else(|never| match never {});
-    let response = match router.call(request).await {
-        Ok(response) => response,
-        Err(never) => match never {},
-    };
+    let Ok(()) =
+        std::future::poll_fn(|cx| Service::<axum::extract::Request>::poll_ready(&mut router, cx))
+            .await;
+    let Ok(response) = router.call(request).await;
     if dispatch::is_auth_challenge(&response) {
         return Err(Outcome::Response(Box::new(response)));
     }

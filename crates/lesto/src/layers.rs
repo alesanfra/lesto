@@ -423,9 +423,10 @@ where
         let measured = crate::metrics::start(&req, self.trace);
         #[cfg(not(feature = "otel"))]
         let measured = ();
-        let span = match self.trace.enabled {
-            true => crate::trace::request_span(&req, self.trace),
-            false => tracing::Span::none(),
+        let span = if self.trace.enabled {
+            crate::trace::request_span(&req, self.trace)
+        } else {
+            tracing::Span::none()
         };
         if span.is_disabled() {
             return RequestSpanFuture::Disabled {

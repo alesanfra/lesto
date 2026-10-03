@@ -19,7 +19,8 @@
 //! async fn delete_user(key: ApiKey<AdminKey>, Path(id): Path<u64>) { .. }
 //! ```
 //!
-//! Extractors only *extract*: verifying the token is the handler's (or a middleware's) job.
+//! Extractors only *extract*: verifying the token is the handler's (or a middleware's) job,
+//! except for OpenID Connect JWTs, which `lesto::oidc::Jwt` (feature `oidc`) verifies.
 
 use std::marker::PhantomData;
 
@@ -98,7 +99,9 @@ fn unauthorized(detail: &str, challenge: &'static str) -> Rejection {
         .into()
 }
 
-fn authorization<'a>(parts: &'a Parts, scheme: &str) -> Option<&'a str> {
+/// The credential of `Authorization: <scheme> <credential>`, trimmed; the scheme is matched
+/// case-insensitively.
+pub(crate) fn authorization<'a>(parts: &'a Parts, scheme: &str) -> Option<&'a str> {
     let value = parts.headers.get(header::AUTHORIZATION)?.to_str().ok()?;
     let (found, rest) = value.split_once(' ')?;
     found.eq_ignore_ascii_case(scheme).then(|| rest.trim())

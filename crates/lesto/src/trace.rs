@@ -272,10 +272,7 @@ fn server_address<B>(req: &http::Request<B>, config: Trace) -> Option<(&str, Opt
         .forwarded
         .then(|| first_forwarded(req.headers(), "x-forwarded-host"))
         .flatten();
-    let authority = req.uri().host().map(|host| match req.uri().port_u16() {
-        Some(port) => (host, Some(port)),
-        None => (host, None),
-    });
+    let authority = req.uri().host().map(|host| (host, req.uri().port_u16()));
     match (forwarded, authority) {
         (Some(host), _) => Some(split_host_port(host)),
         (None, Some(found)) => Some(found),

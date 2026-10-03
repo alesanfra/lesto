@@ -232,7 +232,7 @@ pub fn enable_metrics() {
 }
 
 /// Install the console subscriber and, when the environment points at a collector, the OTLP
-/// export of spans and logs plus the W3C trace context propagator.
+/// export of spans, logs and metrics plus the W3C trace context propagator.
 ///
 /// The service name is `OTEL_SERVICE_NAME`, or `unknown_service` — the name the conventions
 /// ask for when nobody said. [`init_named`] takes a better default.

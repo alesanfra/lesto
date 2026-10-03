@@ -1,7 +1,7 @@
 //! Run a lesto application on AWS Lambda (feature `lambda`).
 //!
 //! ```ignore
-//! #[tokio::main]
+//! #[lesto::main]
 //! async fn main() -> Result<(), lesto::lambda::Error> {
 //!     lesto::lambda::serve(build_app().with_state(state)).await
 //! }
@@ -9,10 +9,9 @@
 //!
 //! [`serve`] starts the Lambda runtime when the process runs inside Lambda (the
 //! `AWS_LAMBDA_RUNTIME_API` variable is set) and otherwise behaves like `App::serve` (address
-//! from `LESTO_HOST`/`LESTO_PORT`), so
-//! the same binary works in production, under `lesto dev`, and in tests. Events from API
-//! Gateway REST APIs (payload v1), HTTP APIs and Function URLs (payload v2) and Application
-//! Load Balancers are all accepted.
+//! from `LESTO_HOST`/`LESTO_PORT`), so the same binary works in production, under `lesto dev`,
+//! and in tests. Events from API Gateway REST APIs (payload v1), HTTP APIs and Function URLs
+//! (payload v2) and Application Load Balancers are all accepted.
 //!
 //! With a REST API the stage name is part of the path (`/prod/notes`); by default it is
 //! removed so routes stay `/notes`. See [`Options::keep_stage`].

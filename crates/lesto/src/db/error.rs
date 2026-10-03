@@ -16,12 +16,13 @@ type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 /// |---|---|
 /// | `Forbidden` | 403, extension `required_permission` |
 /// | `Sqlx(Database)` unique / foreign key violation | 409 |
+/// | `Sqlx(Database)` transient conflict ([`is_transient_conflict`](Self::is_transient_conflict)) | 409, `Retry-After: 0` |
 /// | other `Sqlx` (including `RowNotFound`), `Internal` | 500, cause logged with `tracing`, detail hidden |
+/// | `Http(e)` | `e`'s own response |
 ///
 /// A `RowNotFound` is a 500 on purpose: a `fetch_one` that finds nothing on a secondary lookup is
 /// a bug, and a 404 would hide it. Say which lookups mean "not found" with
 /// [`NotFoundExt::or_not_found`].
-/// | `Http(e)` | `e`'s own response |
 #[non_exhaustive]
 pub enum Error {
     /// The principal lacks `permission`.

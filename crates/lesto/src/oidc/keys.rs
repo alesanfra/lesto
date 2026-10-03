@@ -170,6 +170,11 @@ impl Keys {
         }
     }
 
+    /// No key at all: nothing could be verified with this set.
+    fn is_empty(&self) -> bool {
+        self.by_kid.is_empty() && self.anonymous.is_empty()
+    }
+
     fn stale(&self) -> bool {
         self.max_age
             .is_some_and(|max_age| self.fetched.elapsed() >= max_age)
@@ -261,7 +266,7 @@ impl KeyCache {
         let started = Instant::now();
         let (set, max_age) = fetch_json(&client, url.clone()).await?;
         let keys = parse(set, started, max_age);
-        if keys.by_kid.is_empty() && keys.anonymous.is_empty() {
+        if keys.is_empty() {
             return Err(Error::NoKeys {
                 url: url.to_string(),
             });
@@ -314,7 +319,7 @@ impl KeyCache {
         match fetch_json::<RawSet>(&self.client, self.url.clone()).await {
             Ok((set, max_age)) => {
                 let keys = parse(set, *last, max_age);
-                if keys.by_kid.is_empty() && keys.anonymous.is_empty() {
+                if keys.is_empty() {
                     tracing::warn!(url = %self.url, "the key set holds no signing key; keeping the previous keys");
                     return;
                 }

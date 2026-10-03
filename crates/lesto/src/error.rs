@@ -132,8 +132,7 @@ tokio::task_local! {
     pub(crate) static RENDER: RenderContext;
 }
 
-/// Marker extension on a response whose body is final: `instance` is filled in and the format
-/// is the one the application asked for.
+/// Marker extension on a response whose body is final: `instance` is filled in.
 ///
 /// [`ProblemLayer`](crate::layers::ProblemLayer) leaves such a response alone. A
 /// `problem+json` response without it — built by hand, or built where the layer's context
@@ -343,6 +342,16 @@ impl IntoResponse for HttpError {
     }
 }
 
+/// With the `anyhow` feature: any `anyhow::Error` becomes a 500 with the detail hidden and the
+/// cause logged through `tracing`.
+#[cfg(feature = "anyhow")]
+impl From<anyhow::Error> for HttpError {
+    fn from(e: anyhow::Error) -> Self {
+        tracing::error!(error = &*e as &dyn std::error::Error, "handler failed");
+        HttpError::internal("Internal Server Error")
+    }
+}
+
 // ---- ValidationError ----------------------------------------------------------------------
 
 /// One failed check, location-first (`["body", "addresses", 1, "city"]`).
@@ -360,23 +369,12 @@ pub struct ValidationErrorItem {
 impl ValidationErrorItem {
     /// Split the location into the source (`body`, `query`, `path`) and an RFC 6901 pointer.
     pub fn location_and_pointer(&self) -> (String, String) {
+        // A string segment without its JSON quotes, an index as its digits.
+        let text = |v: &Value| v.as_str().map_or_else(|| v.to_string(), String::from);
         let mut parts = self.loc.iter();
-        let location = parts
-            .next()
-            .map(|v| {
-                v.as_str()
-                    .map(String::from)
-                    .unwrap_or_else(|| v.to_string())
-            })
-            .unwrap_or_default();
+        let location = parts.next().map(text).unwrap_or_default();
         let pointer = parts
-            .map(|v| {
-                let s = v
-                    .as_str()
-                    .map(String::from)
-                    .unwrap_or_else(|| v.to_string());
-                format!("/{}", s.replace('~', "~0").replace('/', "~1"))
-            })
+            .map(|v| format!("/{}", text(v).replace('~', "~0").replace('/', "~1")))
             .collect::<String>();
         (location, pointer)
     }
@@ -560,16 +558,6 @@ impl IntoResponse for Rejection {
 }
 
 // ---- OpenAPI ------------------------------------------------------------------------------
-
-/// With the `anyhow` feature: any `anyhow::Error` becomes a 500 with the detail hidden and the
-/// cause logged through `tracing`.
-#[cfg(feature = "anyhow")]
-impl From<anyhow::Error> for HttpError {
-    fn from(e: anyhow::Error) -> Self {
-        tracing::error!(error = &*e as &dyn std::error::Error, "handler failed");
-        HttpError::internal("Internal Server Error")
-    }
-}
 
 impl crate::operation::OperationOutput for HttpError {
     fn describe(builder: &mut crate::operation::OperationBuilder<'_>, _status: u16) {

@@ -45,11 +45,10 @@ fn is_json_content_type(headers: &http::HeaderMap) -> bool {
         .get(header::CONTENT_TYPE)
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.parse::<mime::Mime>().ok())
-        .map(|m| {
+        .is_some_and(|m| {
             m.type_() == "application"
                 && (m.subtype() == "json" || m.suffix().is_some_and(|s| s == "json"))
         })
-        .unwrap_or(false)
 }
 
 impl<T, S> FromRequest<S> for Json<T>

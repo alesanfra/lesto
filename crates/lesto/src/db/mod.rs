@@ -23,7 +23,7 @@
 //!     }
 //! }
 //!
-//! #[crate::get("/notes")]
+//! #[lesto::get("/notes")]
 //! async fn list_notes(store: NoteStore<ReadOnly, Public>) -> Result<Json<Vec<Note>>, Error> {
 //!     Ok(Json(store.list().await?))
 //! }
@@ -38,7 +38,6 @@
 //!   transaction the principal opens (`SET LOCAL` on Postgres), for row level security.
 //! - `read_with` / `write_with` take an [`Isolation`]: `Serializable` is what a check-then-act
 //!   needs, and a conflict answers 409 with `Retry-After`, not 500.
-//!
 
 pub mod dialect;
 pub mod error;

@@ -130,20 +130,13 @@ impl OperationBuilder<'_> {
     }
 
     fn response_entry(&mut self, status: impl ResponseKey, description: &str) -> &mut Response {
-        let key = status.key();
-        if !self.operation.responses.contains_key(&key) {
-            self.operation.responses.insert(
-                key.clone(),
-                Response {
-                    description: description.to_string(),
-                    content: IndexMap::new(),
-                },
-            );
-        }
         self.operation
             .responses
-            .get_mut(&key)
-            .expect("just inserted")
+            .entry(status.key())
+            .or_insert_with(|| Response {
+                description: description.to_string(),
+                content: IndexMap::new(),
+            })
     }
 
     /// Add one parameter per property of `T`'s object schema.
@@ -201,11 +194,9 @@ impl OperationBuilder<'_> {
                 (None, None) if names.len() == 1 => Some(schema.clone().to_value()),
                 _ => None,
             };
-            let mut prop_schema =
-                prop.and_then(|p| Schema::try_from(p).ok())
-                    .unwrap_or_else(|| {
-                        Schema::try_from(serde_json::json!({"type": "string"})).unwrap()
-                    });
+            let mut prop_schema = prop
+                .and_then(|p| Schema::try_from(p).ok())
+                .unwrap_or_else(|| schemars::json_schema!({"type": "string"}));
             let description = prop_schema
                 .remove("description")
                 .and_then(|d| d.as_str().map(String::from));

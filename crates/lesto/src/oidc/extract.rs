@@ -102,14 +102,7 @@ impl<C: Claims> std::ops::Deref for Jwt<C> {
 
 /// The token of `Authorization: Bearer <token>`.
 pub(super) fn bearer(parts: &Parts) -> Option<&str> {
-    let value = parts
-        .headers
-        .get(http::header::AUTHORIZATION)?
-        .to_str()
-        .ok()?;
-    let (scheme, token) = value.split_once(' ')?;
-    let token = token.trim();
-    (scheme.eq_ignore_ascii_case("Bearer") && !token.is_empty()).then_some(token)
+    crate::security::authorization(parts, "Bearer").filter(|token| !token.is_empty())
 }
 
 /// Verify the request's token once: later calls read the claims the first one stored.

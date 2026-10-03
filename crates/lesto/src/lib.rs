@@ -44,7 +44,7 @@
 //!     Err(HttpError::not_found(format!("user {id} not found")))
 //! }
 //!
-//! #[tokio::main]
+//! #[lesto::main]
 //! async fn main() -> std::io::Result<()> {
 //!     App::new()
 //!         .title("Users API")

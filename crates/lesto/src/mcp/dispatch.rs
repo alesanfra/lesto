@@ -156,12 +156,14 @@ fn fill_path(target: &Target, arguments: &Map<String, Value>) -> Result<String, 
 /// Percent-encode everything but RFC 3986's unreserved characters (and `/` for a wildcard,
 /// which spans segments).
 fn percent_encode(value: &str, keep_slash: bool, out: &mut String) {
+    use std::fmt::Write as _;
     for byte in value.bytes() {
         let unreserved = byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~');
         if unreserved || (keep_slash && byte == b'/') {
             out.push(byte as char);
         } else {
-            out.push_str(&format!("%{byte:02X}"));
+            // Writing into a `String` cannot fail.
+            let _ = write!(out, "%{byte:02X}");
         }
     }
 }
