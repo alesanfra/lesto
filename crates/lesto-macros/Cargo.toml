@@ -32,3 +32,7 @@ regex = ["dep:regex"]
 # The vendored garde derive tests features lesto never turns on (see src/garde/NOTICE.md).
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("js-sys", "credit-card", "phone-number"))'] }
+
+# One tag per release, `vX.Y.Z`, carried by the lesto package (release.toml).
+[package.metadata.release]
+tag = false

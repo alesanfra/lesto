@@ -24,3 +24,7 @@ serde_json.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+# One tag per release, `vX.Y.Z`, carried by the lesto package (release.toml).
+[package.metadata.release]
+tag = false

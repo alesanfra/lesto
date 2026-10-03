@@ -1,0 +1,13 @@
+# cargo-release (`cargo install cargo-release`): `cargo release patch` (or minor, or X.Y.Z) shows
+# what would happen, `--execute` does it. The three crates share one version, released together
+# as one commit and one tag `vX.Y.Z`; pushing the tag runs .github/workflows/release.yml, which
+# publishes to crates.io and creates the GitHub release. cargo-release itself publishes nothing:
+# its "Publishing lesto-macros, ..." line lists the release, but with `publish = false` it runs no
+# `cargo publish`.
+allow-branch = ["main"]
+consolidate-commits = true
+pre-release-commit-message = "chore: release v{{version}}"
+publish = false
+push = true
+tag-name = "v{{version}}"
+tag-message = "lesto {{version}}"

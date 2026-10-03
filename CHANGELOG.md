@@ -6,7 +6,15 @@ All notable changes to lesto are listed here. The format follows
 
 ## [Unreleased]
 
-First release, 0.1.0: `lesto`, `lesto-macros`, `lesto-cli`.
+### Added
+
+- The tutorial is published at <https://alesanfra.github.io/lesto/>, and the crates' `homepage`
+  points there.
+- A `NOTICE` file naming the copyright holder, shipped in every crate.
+
+## [0.1.0] - 2026-10-03
+
+First release: `lesto`, `lesto-macros`, `lesto-cli`.
 
 ### Added
 
