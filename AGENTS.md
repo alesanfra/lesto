@@ -8,7 +8,9 @@ Guidance for coding agents (and humans) contributing to this repository. The tut
 lesto is a FastAPI-style web framework for Rust on top of axum 0.8: `#[lesto::get("/path")]`
 on an `async fn`, `Json<T>`/`Query<T>`/`Path<T>` extractors that validate with garde, OpenAPI
 3.1 derived from handler argument and return types, RFC 9457 errors, Scalar at `/docs` and
-Swagger UI at `/swagger`. The `db` feature adds sqlx stores with principals and permissions,
+Swagger UI at `/swagger`. The `log` feature (on by default) prints events and one line per
+request on stdout, as text or JSON.
+The `db` feature adds sqlx stores with principals and permissions,
 the `lambda` feature runs the app on AWS Lambda, the `oidc` feature verifies bearer JWTs against an
 OpenID Connect provider, the `mcp` feature serves routes marked `mcp = "tool"`, `"resource"` or
 `"prompt"` to AI agents over the Model Context Protocol; `lesto-cli` adds `lesto dev`. One library crate
@@ -32,7 +34,10 @@ crates/lesto/             library
                           RFC 9457 through a task-local request context), CatchPanicLayer,
                           RequestSpanLayer, TimeoutLayer (opt-in, `App::timeout`). Hand-written
                           services, pin-projected futures
-  src/trace.rs            request span (HTTP semconv), Trace config, feature `otel`: propagation
+  src/trace.rs            request span (HTTP semconv), Trace config, the access-log event
+                          (`lesto::access`), feature `otel`: propagation
+  src/log.rs              feature `log` (default): Console, the tracing Layer printing text or
+                          JSON on stdout (LESTO_LOG), init called by App::serve and lambda::serve
   src/otel.rs             feature `otel`: Config from the OTEL_* variables, init/init_named,
                           Telemetry guard (tracer + logger + meter providers), auto_init called by
                           App::serve_until, the tracing→OTLP logs bridge and its feedback filter
@@ -77,6 +82,7 @@ crates/lesto/             library
                           examples/02-notes cannot host (it is SQLite)
   src/metrics.rs          feature `otel`: http.server.request.duration, gated on an AtomicBool
   tests/trace.rs          the span fields, through a hand-rolled capturing tracing::Subscriber
+  tests/log.rs            what Console prints, both formats, into a buffer (thread-local default)
   tests/metrics.rs        the duration histogram through the SDK's in-memory exporter
   tests/lambda.rs         API Gateway v1/v2, Function URL and ALB event fixtures
   tests/oidc.rs           a provider on 127.0.0.1:0, tokens signed with tests/fixtures/oidc/*.pem
@@ -128,6 +134,7 @@ cargo clippy --workspace --all-targets --all-features   # must be warning-free
 cargo fmt --all
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features   # intra-doc links must resolve
 cargo deny check                              # licenses and advisories (deny.toml)
+cargo check -p lesto --no-default-features                 # no `log`: no tracing-subscriber
 cargo check -p lesto --no-default-features --features db   # each feature alone must compile too
 cargo check -p lesto --no-default-features --features otel
 cargo check -p lesto --no-default-features --features oidc
@@ -138,6 +145,7 @@ cargo bench -p lesto                          # overhead vs axum; LESTO_BENCH_IT
 sh scripts/bench-http.sh                      # throughput over a socket (needs `oha`)
 sh scripts/mcp-inspector.sh                   # MCP endpoint vs MCP Inspector CLI, both eras (Node 22.19+, jq)
 LESTO_PORT=8765 cargo run -p notes            # port 8000 may be taken on dev machines
+LESTO_LOG=json LESTO_PORT=8765 cargo run -p notes   # the console as JSON (`off` silences it)
 docker run --rm -e POSTGRES_PASSWORD=lesto -p 5432:5432 postgres:18   # for tests/db_postgres.rs
 (cd examples/04-opentelemetry && docker compose up -d openobserve && sh verify.sh)  # OTLP end to end
 (cd examples/04-opentelemetry && docker compose up -d jaeger)        # traces only: OTEL_LOGS_EXPORTER=none OTEL_METRICS_EXPORTER=none
@@ -273,6 +281,26 @@ Recorded here because they are not derivable from the code. Do not undo them cas
   carries `Measured`, which is `()` without the feature. The meter provider becomes the global
   one so application instruments are exported too. `tests/metrics.rs` is its own binary: the
   provider is global.
+- **Logs on stdout by default, through a hand-written layer** (decided 2026-10-03). A lesto app
+  without a subscriber printed nothing, and `tracing_subscriber::fmt` printed every field of the
+  request span on every line. `App::serve` (and `lambda::serve`) now call `log::init`, which
+  installs `log::Console` unless `dispatcher::has_been_set` — the same refusal as `otel`, and the
+  escape hatch. `LESTO_LOG=text|json|off` picks the format, `RUST_LOG` filters, and
+  `AWS_LAMBDA_LOG_FORMAT=JSON` makes JSON the default. `Console` is a `Layer` of its own, not a
+  `FormatEvent` for `fmt`: a formatter only gets the span fields as one preformatted string,
+  and both formats need them one by one (text shows the request as `GET /notes/7` and a store
+  transaction as `NoteStore::list`; JSON copies method, route and path, not the user agent or
+  the peer). One line per request is an *event*, target `lesto::access`, written by
+  `RequestSpanLayer` after the response: a span says nothing until it closes, and an event
+  can be filtered (`lesto::access=off`) and is exported as an OTLP log record inside the trace.
+  Its message repeats method, path and status, because the body of an OTLP log record is the
+  message and a record without one is an empty row in a backend (text prints its own line). It is
+  `ERROR` for a `5xx` (asked with `enabled!` at `ERROR`, so a `warn` filter still gets
+  it), shows the path and never the query, and is independent of `Trace::off`. Without an
+  interested subscriber it costs a callsite check and no clock read (bench: within noise). The
+  feature exists so `default-features = false` drops `tracing-subscriber`; `otel` enables it and
+  prints through the same `Console`. Tests that `serve_until` install `NoSubscriber` first: the
+  harness does not capture writes to stdout.
 - **Telemetry is configured by the environment, not by an API.** `App::serve_until` calls
   `otel::auto_init` (feature `otel`): with `OTEL_EXPORTER_OTLP_ENDPOINT` set and no subscriber
   installed (`tracing::dispatcher::has_been_set`), lesto installs console + OTLP (traces and

@@ -6,6 +6,24 @@ All notable changes to lesto are listed here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Feature `log`, on by default: `App::serve` and `lesto::lambda::serve` print on stdout when the
+  application installed no `tracing` subscriber — a line when the server starts listening, one
+  per request (`GET /notes/7 200 412µs`, target `lesto::access`, the message `GET /notes/7 200`
+  so a log backend shows it) and every event at `info` and above. `LESTO_LOG=text|json|off`
+  picks the format (JSON by default when `AWS_LAMBDA_LOG_FORMAT=JSON`), `RUST_LOG` filters.
+  `lesto::log::Console` is the layer, for a subscriber built by hand; `lesto::log::init()`
+  installs it where `serve` is not the entry point.
+
+### Changed
+
+- An application with no `tracing` subscriber of its own now prints logs; `LESTO_LOG=off` or a
+  subscriber installed before `serve` restores the silence. Applications with their own
+  subscriber now also receive the `lesto::access` event once per request.
+- With `otel`, the console next to the OTLP export uses the same format (it was
+  `tracing_subscriber::fmt`'s), and the access log is exported as a log record per request.
+
 ## [0.1.1] - 2026-10-03
 
 ### Added

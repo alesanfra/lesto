@@ -81,6 +81,9 @@ pub async fn run(router: Router) -> Result<(), Error> {
 
 /// [`run`] with [`Options`].
 pub async fn run_with(router: Router, options: Options) -> Result<(), Error> {
+    // Lambda sends stdout to CloudWatch; `AWS_LAMBDA_LOG_FORMAT=JSON` makes it JSON.
+    #[cfg(feature = "log")]
+    crate::log::init();
     lambda_http::run(with_options(router, options)).await
 }
 

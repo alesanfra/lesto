@@ -5,6 +5,12 @@ use std::time::Duration;
 use lesto::prelude::*;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
+/// `serve_until` prints on stdout when no subscriber is installed, and the test harness does not
+/// capture that: an empty one keeps the output of `cargo test` readable.
+fn quiet() {
+    let _ = tracing::subscriber::set_global_default(tracing::subscriber::NoSubscriber::default());
+}
+
 #[lesto::get("/slow")]
 async fn slow() -> &'static str {
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -17,6 +23,7 @@ async fn in_flight_requests_finish_before_serve_returns() {
     let addr = listener.local_addr().unwrap();
     let (tx, rx) = tokio::sync::oneshot::channel::<()>();
     let app = App::<()>::new().routes(routes![slow]);
+    quiet();
     let server = tokio::spawn(app.serve_until(listener, async {
         rx.await.ok();
     }));
@@ -60,6 +67,7 @@ async fn a_hung_handler_does_not_outlive_the_shutdown_deadline() {
     let app = App::<()>::new()
         .routes(routes![hang])
         .shutdown_timeout(Duration::from_millis(200));
+    quiet();
     let server = tokio::spawn(app.serve_until(listener, async {
         rx.await.ok();
     }));
@@ -87,6 +95,7 @@ async fn without_a_deadline_shutdown_waits_for_the_handler() {
     let app = App::<()>::new()
         .routes(routes![hang])
         .shutdown_timeout(None);
+    quiet();
     let server = tokio::spawn(app.serve_until(listener, async {
         rx.await.ok();
     }));

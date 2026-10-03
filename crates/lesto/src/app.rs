@@ -720,6 +720,10 @@ impl App<()> {
     /// file and this returns `Ok(())`. That is how `lesto openapi` reads the document of an
     /// application without a flag in its `main`.
     ///
+    /// This is also where logging is set up (feature `log`, on by default): unless a `tracing`
+    /// subscriber is already installed, events and one line per request are printed on stdout,
+    /// as text or JSON (`LESTO_LOG`). See [`crate::log`].
+    ///
     /// With the `otel` feature, this is also where telemetry is set up: if
     /// `OTEL_EXPORTER_OTLP_ENDPOINT` is set and no `tracing` subscriber has been installed,
     /// spans go to the console and to the collector, and are flushed before this returns. See
@@ -761,10 +765,18 @@ impl App<()> {
         // a collector, and the application installed no subscriber of its own.
         #[cfg(feature = "otel")]
         let _telemetry = crate::otel::auto_init(&self.spec.info.title);
+        // The console alone, when `otel` did not install one (no endpoint) and neither did the
+        // application.
+        #[cfg(feature = "log")]
+        crate::log::init();
+        if let Ok(addr) = listener.local_addr() {
+            tracing::info!("listening on http://{addr}");
+        }
         let timeout = self.shutdown_timeout;
         let (started, shutdown_started) = tokio::sync::oneshot::channel::<()>();
         let shutdown = async move {
             shutdown.await;
+            tracing::info!("shutting down, finishing the requests in flight");
             let _ = started.send(());
         };
         let server = axum::serve(listener, self.into_router())

@@ -82,6 +82,7 @@ lesto dev                  # rebuild and restart on save, the port stays open
 - **Databases** with `db`: sqlx stores, one transaction per method, permissions checked before
   the query, Postgres row level security.
 - **MCP** with `mcp`: routes served to AI agents as tools, resources and prompts.
+- **Logs** on stdout out of the box, one line per request, text or JSON (`LESTO_LOG=json`).
 - **OpenTelemetry** with `otel`: traces, logs and metrics, configured by the `OTEL_*` variables.
 - **AWS Lambda** with `lambda`: the same app behind API Gateway, Function URLs or ALB.
 - **Production defaults**: graceful shutdown, timeouts, body limits, CORS, compression, request

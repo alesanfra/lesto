@@ -13,7 +13,9 @@
 //!   and permissions ([`db`]); `lambda` runs the app on AWS Lambda ([`lambda`]); `oidc`
 //!   verifies bearer JWTs against an OpenID Connect provider ([`oidc`]); `mcp` exposes selected
 //!   operations to agents over the Model Context Protocol ([`mcp`]); `anyhow` converts
-//!   `anyhow::Error` into a `500`.
+//!   `anyhow::Error` into a `500`;
+//! * logs on stdout, text or JSON, with a line per request: `App::serve` sets them up when the
+//!   application has no `tracing` subscriber of its own ([`log`], a default feature).
 //!
 //! New here? Start with the [tutorial](https://alesanfra.github.io/lesto/); this reference
 //! documents each item.
@@ -64,6 +66,8 @@ pub mod extract;
 #[cfg(feature = "lambda")]
 pub mod lambda;
 pub mod layers;
+#[cfg(feature = "log")]
+pub mod log;
 #[cfg(feature = "mcp")]
 pub mod mcp;
 #[cfg(feature = "otel")]

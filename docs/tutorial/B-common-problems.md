@@ -123,8 +123,7 @@ The provider puts in `aud` (or `iss`) something other than what lesto expects. D
 (the middle segment is base64 JSON) and compare: `audiences([..])` must list a value of its `aud`;
 `iss` must equal the `issuer` of the discovery document, which is why the discovery URL has to be
 the provider's own (behind a proxy, the provider must announce the public URL). The reason is
-logged at `debug` by `lesto`: `RUST_LOG=lesto=debug` shows it when a subscriber is installed
-(chapter 15).
+logged at `debug` by `lesto`: `RUST_LOG=info,lesto=debug` shows it (chapter 11).
 
 ## `an MCP resource must be a GET route` (or prompt)
 

@@ -363,13 +363,16 @@ where
 
 // ---- request span -------------------------------------------------------------------------
 
-/// Opens the request span described in [`crate::trace`] and records the response on it.
+/// Opens the request span described in [`crate::trace`], records the response on it, and
+/// writes the line per request (the access log: a `tracing` event with the target
+/// `lesto::access`; the `log` module prints it).
 ///
 /// Named `RequestSpanLayer` rather than `TraceLayer` so it can live next to
 /// `tower_http::trace::TraceLayer` in one `use` list.
 ///
-/// With no subscriber interested in the span the cost is the callsite check `tracing` does and
-/// nothing else: the future is the inner one, not wrapped.
+/// With no subscriber interested in the span or the line, the cost is the callsite checks
+/// `tracing` does and nothing else: the future is the inner one, not wrapped, and the clock is
+/// not read.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct RequestSpanLayer {
     trace: Trace,
@@ -423,6 +426,7 @@ where
         let measured = crate::metrics::start(&req, self.trace);
         #[cfg(not(feature = "otel"))]
         let measured = ();
+        let access = crate::trace::access_start(&req);
         let span = if self.trace.enabled {
             crate::trace::request_span(&req, self.trace)
         } else {
@@ -432,6 +436,7 @@ where
             return RequestSpanFuture::Disabled {
                 future: self.inner.call(req),
                 measured,
+                access,
             };
         }
         let future = {
@@ -442,6 +447,7 @@ where
             future,
             span,
             measured,
+            access,
         }
     }
 }
@@ -463,6 +469,12 @@ fn finish_measure<E>(measured: &mut Measured, polled: &Result<Response, E>) {
 #[cfg(not(feature = "otel"))]
 fn finish_measure<E>(_: &mut Measured, _: &Result<Response, E>) {}
 
+fn finish_access<E>(access: &mut Option<crate::trace::Access>, polled: &Result<Response, E>) {
+    if let (Some(access), Ok(response)) = (access.take(), polled) {
+        crate::trace::access_finish(access, response.status());
+    }
+}
+
 pin_project! {
     /// The future of [`RequestSpan`].
     #[project = RequestSpanFutureProj]
@@ -470,9 +482,14 @@ pin_project! {
     #[allow(missing_docs)]
     pub enum RequestSpanFuture<F> {
         /// Nobody is listening: the inner future, polled as if the layer were not there.
-        Disabled { #[pin] future: F, measured: Measured },
+        Disabled { #[pin] future: F, measured: Measured, access: Option<crate::trace::Access> },
         /// The inner future, polled inside the request span.
-        Recording { #[pin] future: F, span: tracing::Span, measured: Measured },
+        Recording {
+            #[pin] future: F,
+            span: tracing::Span,
+            measured: Measured,
+            access: Option<crate::trace::Access>,
+        },
     }
 }
 
@@ -484,15 +501,21 @@ where
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match self.project() {
-            RequestSpanFutureProj::Disabled { future, measured } => {
+            RequestSpanFutureProj::Disabled {
+                future,
+                measured,
+                access,
+            } => {
                 let polled = std::task::ready!(future.poll(cx));
                 finish_measure(measured, &polled);
+                finish_access(access, &polled);
                 Poll::Ready(polled)
             }
             RequestSpanFutureProj::Recording {
                 future,
                 span,
                 measured,
+                access,
             } => {
                 let _entered = span.enter();
                 let polled = std::task::ready!(future.poll(cx));
@@ -500,6 +523,8 @@ where
                     crate::trace::record_response(span, response);
                 }
                 finish_measure(measured, &polled);
+                // Inside the span, so an exported log record carries the request's trace.
+                finish_access(access, &polled);
                 Poll::Ready(polled)
             }
         }

@@ -33,6 +33,7 @@
 
 use std::borrow::Cow;
 use std::net::SocketAddr;
+use std::time::Instant;
 
 use axum::extract::{ConnectInfo, MatchedPath};
 use axum::response::Response;
@@ -210,6 +211,76 @@ pub(crate) fn record_response(span: &Span, response: &Response) {
     if status.is_server_error() {
         span.record("error.type", status.as_str());
         span.record("otel.status_code", "ERROR");
+    }
+}
+
+/// What the line written per request needs, captured before the request is handed down.
+///
+/// The line is a `tracing` event with the target `lesto::access`, not part of the span: it is
+/// what a console shows, and a span shows nothing until it closes (if the subscriber prints
+/// spans at all).
+#[derive(Debug)]
+pub(crate) struct Access {
+    start: Instant,
+    method: Method,
+    uri: http::Uri,
+    route: Option<MatchedPath>,
+}
+
+/// `None` (and no clock read) when no subscriber wants the line.
+///
+/// Asked at `ERROR`, the level of a `5xx` line: a filter at `warn` still gets those.
+pub(crate) fn access_start<B>(req: &http::Request<B>) -> Option<Access> {
+    if !tracing::enabled!(target: "lesto::access", tracing::Level::ERROR) {
+        return None;
+    }
+    Some(Access {
+        start: Instant::now(),
+        method: req.method().clone(),
+        uri: req.uri().clone(),
+        route: req.extensions().get::<MatchedPath>().cloned(),
+    })
+}
+
+/// Write the line: `INFO`, or `ERROR` for a `5xx`. The path without its query string, which is
+/// application data (see [`Trace::query`]).
+///
+/// The message (`GET /notes/7 200`) repeats the fields, for the readers that show the message
+/// and not the fields: the body of an OTLP log record is the message, and a record without one
+/// is an empty row in a backend's log view. The text console prints its own line instead.
+pub(crate) fn access_finish(access: Access, status: http::StatusCode) {
+    // Microseconds, so the JSON shows `3.2`, not `3.2000000000000006`.
+    let duration_ms = access.start.elapsed().as_micros() as f64 / 1000.0;
+    let route = access.route.as_ref().map(MatchedPath::as_str);
+    let method = access.method.as_str();
+    let path = access.uri.path();
+    let status = status.as_u16();
+    if status >= 500 {
+        tracing::event!(
+            target: "lesto::access",
+            tracing::Level::ERROR,
+            {
+                http.request.method = method,
+                http.route = route,
+                url.path = path,
+                http.response.status_code = status,
+                duration_ms,
+            },
+            "{method} {path} {status}"
+        );
+    } else {
+        tracing::event!(
+            target: "lesto::access",
+            tracing::Level::INFO,
+            {
+                http.request.method = method,
+                http.route = route,
+                url.path = path,
+                http.response.status_code = status,
+                duration_ms,
+            },
+            "{method} {path} {status}"
+        );
     }
 }
 

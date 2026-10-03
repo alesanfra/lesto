@@ -55,6 +55,13 @@ file**, like `fastapi dev`. It also keeps the port open while the code compiles,
 during a rebuild waits for the new version instead of failing. Plain `cargo run` works too, without
 the reload.
 
+The terminal shows one line per request as it arrives (chapter 11 has the rest: JSON, filters):
+
+```text
+2026-10-03T09:15:00.120456Z  INFO lesto::app: listening on http://127.0.0.1:8000
+2026-10-03T09:15:04.551027Z  INFO GET /hello 200 87µs
+```
+
 `lesto openapi` prints the OpenAPI document instead of serving it (`lesto openapi -o api.json`
 writes a file), for client generators and CI checks. It runs your `main` up to `App::serve`, which
 writes the document and returns.

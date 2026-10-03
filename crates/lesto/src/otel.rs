@@ -32,6 +32,7 @@
 //! | `OTEL_METRICS_EXPORTER=none` | stop exporting metrics (`http.server.request.duration`) |
 //! | `OTEL_SDK_DISABLED` | `true` turns every signal off and leaves the console |
 //! | `RUST_LOG` | the console and export filter, `info` by default |
+//! | `LESTO_LOG` | the console's format, `text`, `json` or `off` ([`crate::log`]); not the export |
 //!
 //! Metrics: every request records `http.server.request.duration` (a histogram in seconds, with
 //! method, route, status, scheme and protocol version), and the meter provider becomes the
@@ -231,8 +232,8 @@ pub fn enable_metrics() {
     crate::metrics::enable();
 }
 
-/// Install the console subscriber and, when the environment points at a collector, the OTLP
-/// export of spans, logs and metrics plus the W3C trace context propagator.
+/// Install the console subscriber ([`crate::log`]) and, when the environment points at a
+/// collector, the OTLP export of spans, logs and metrics plus the W3C trace context propagator.
 ///
 /// The service name is `OTEL_SERVICE_NAME`, or `unknown_service` — the name the conventions
 /// ask for when nobody said. [`init_named`] takes a better default.
@@ -276,10 +277,12 @@ fn install(config: Config) -> Telemetry {
         .then(|| meter_provider(&resource))
         .and_then(|built| unwrap_provider(built, "metrics", &mut problems));
 
+    // The console of `lesto::log`, in the format `LESTO_LOG` asks for (none for `off`).
+    let log = crate::log::Config::from_env();
     let console =
         tracing_subscriber::registry()
             .with(tracing_subscriber::EnvFilter::new(config.filter.clone()))
-            .with(tracing_subscriber::fmt::layer())
+            .with(log.console())
             .with(traces.as_ref().map(|provider| {
                 tracing_opentelemetry::layer()
                     .with_tracer(provider.tracer("lesto"))
@@ -307,6 +310,7 @@ fn install(config: Config) -> Telemetry {
         enable_metrics();
     }
 
+    log.report();
     if let Some(protocol) = &config.unsupported_protocol {
         tracing::warn!(
             %protocol,

@@ -45,9 +45,10 @@ export OTEL_LOGS_EXPORTER=none
 export OTEL_METRICS_EXPORTER=none
 ```
 
-`App::serve` sees the endpoint, installs a subscriber that prints to the console **and** exports
-over OTLP — spans as traces, `tracing` events as log records, the duration histogram as metrics
-(every 60 s, or `OTEL_METRIC_EXPORT_INTERVAL` milliseconds) — and flushes what is buffered when
+`App::serve` sees the endpoint, installs a subscriber that prints to the console (the logs of
+chapter 11, in the format `LESTO_LOG` picks) **and** exports over OTLP — spans as traces,
+`tracing` events as log records, the duration histogram as metrics (every 60 s, or
+`OTEL_METRIC_EXPORT_INTERVAL` milliseconds) — and flushes what is buffered when
 the server shuts down. Without the endpoint nothing is exported, which is what you want in tests
 and under `lesto dev`.
 
@@ -62,6 +63,7 @@ and under `lesto dev`.
 | `OTEL_METRICS_EXPORTER=none` | stop exporting metrics |
 | `OTEL_SDK_DISABLED=true` | keep the console, stop every export |
 | `RUST_LOG` | console and export filter, `info` by default |
+| `LESTO_LOG` | the console only: `text`, `json` or `off` (chapter 11); the export is the same |
 
 ## Logs, next to the trace they belong to
 
@@ -79,7 +81,9 @@ trace_id  c4278fbb…      span_id  b1a587ce…      author "ada"
 ```
 
 Errors lesto logs itself (`store method failed`, `handler panicked`) arrive the same way, with
-the cause as an attribute — the response body still says nothing about it.
+the cause as an attribute — the response body still says nothing about it. So does the line per
+request (`lesto::access`), one log record per request: `RUST_LOG=info,lesto::access=off` keeps it
+out of the backend and off the console, where the trace already says the same.
 
 The telemetry stack is kept out of its own pipeline: records from `opentelemetry*`, `reqwest`,
 `hyper` and friends are printed on the console but never exported, or an export failure would be
@@ -229,9 +233,10 @@ OpenTelemetry API in your code. To time a helper, put `#[tracing::instrument]` o
 ## In Lambda
 
 The spans are the same, and `traceparent` from API Gateway is picked up as usual, but
-`lesto::lambda::serve` sets nothing up: a Lambda instance is frozen between invocations, so a
-batching exporter loses spans. Call `lesto::otel::init()` in `main` and flush before returning,
-or send to the OpenTelemetry Lambda layer, which does that for you.
+`lesto::lambda::serve` sets up only the console of chapter 11 (stdout goes to CloudWatch Logs): a
+Lambda instance is frozen between invocations, so a batching exporter loses spans. Call
+`lesto::otel::init()` in `main` and flush before returning, or send to the OpenTelemetry Lambda
+layer, which does that for you.
 
 ## Recap
 
@@ -239,7 +244,7 @@ or send to the OpenTelemetry Lambda layer, which does that for you.
   conventions as fields; `5xx` marks the span as an error, `4xx` does not.
 - Store transactions get a client span with the database conventions, as a child of the request.
 - The `otel` feature plus `OTEL_EXPORTER_OTLP_ENDPOINT` is the whole setup: `App::serve` installs
-  the console subscriber and the OTLP export of spans and logs, and flushes on shutdown.
+  the console of chapter 11 and the OTLP export of spans and logs, and flushes on shutdown.
 - Log records carry their `trace_id` and `span_id`, so logs and traces line up in the backend.
 - An incoming `traceparent` continues the trace here.
 - `App::trace(Trace::new()...)` opts `url.query` in, trusts forwarding headers, or turns the

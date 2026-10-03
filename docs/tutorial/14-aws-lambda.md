@@ -43,6 +43,11 @@ part of your routes, use `serve_with` and `Options::default().keep_stage(true)`.
 `https://.../prod/docs` loads `https://.../prod/openapi.json` without configuration. If you set
 `App::server("https://api.example.com/prod")`, the "Try it out" button uses that base URL.
 
+**Logs.** Lambda sends stdout to CloudWatch Logs, so the logs of chapter 11 need nothing: one
+line per request and every `tracing` event. Set the function's log format to JSON and Lambda
+sets `AWS_LAMBDA_LOG_FORMAT=JSON`, which makes lesto write JSON too (`LESTO_LOG` still wins), so
+Logs Insights can query `http.route` or `http.response.status_code` directly.
+
 **State.** A Lambda instance handles one request at a time and may be frozen or discarded at
 any moment. Keep in-memory state (like the `Mutex<Vec<Note>>` of the example) for caches only;
 real data goes to a database or another service. With `lesto::db`, build the pool once in
@@ -106,6 +111,7 @@ option belongs to the router you pass, so both settings can share a test file.
   otherwise.
 - REST API stages are stripped from the path by default (`Options::keep_stage` to keep them).
 - Documentation pages work behind the stage because they link `openapi.json` relatively.
+- Logs go to CloudWatch through stdout, as JSON when the function's log format is JSON.
 - Build with `cargo lambda build --release --arm64`, deploy with `cargo lambda deploy` or your
   infrastructure tool.
 - Test the Lambda path in-process with `lesto::lambda::test::invoke` and event fixtures.

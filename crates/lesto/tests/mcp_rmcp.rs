@@ -53,6 +53,12 @@ async fn summarize(Path(id): Path<u64>) -> Prompt {
     Prompt::new().user(format!("Summarize note {id}."))
 }
 
+/// `serve_until` prints on stdout when no subscriber is installed, and the test harness does not
+/// capture that: an empty one keeps the output of `cargo test` readable.
+fn quiet() {
+    let _ = tracing::subscriber::set_global_default(tracing::subscriber::NoSubscriber::default());
+}
+
 /// Serve the app on an ephemeral port; the server stops when the returned sender is dropped.
 async fn serve() -> (String, tokio::sync::oneshot::Sender<()>) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -62,6 +68,7 @@ async fn serve() -> (String, tokio::sync::oneshot::Sender<()>) {
         .title("Notes")
         .routes(routes![create_note, get_note, view_note, summarize])
         .mcp(Mcp::new());
+    quiet();
     tokio::spawn(app.serve_until(listener, async {
         let _ = stopped.await;
     }));

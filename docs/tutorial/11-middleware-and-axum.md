@@ -6,24 +6,25 @@ particular the middleware of the **tower** ecosystem, works here too.
 ## Adding a layer
 
 The most common layers are built in (next section). Anything else from the tower ecosystem goes
-through `layer`, here tower-http's `TraceLayer`:
+through `layer`, here tower-http's `SetResponseHeaderLayer`:
 
 ```toml
-tower-http = { version = "0.6", features = ["trace"] }
-tracing-subscriber = "0.3"
+tower-http = { version = "0.6", features = ["set-header"] }
 ```
 
 ```rust
+use lesto::http::{HeaderValue, header};
 use lesto::prelude::*;
-use tower_http::trace::TraceLayer;
+use tower_http::set_header::SetResponseHeaderLayer;
 
 #[lesto::main]
 async fn main() -> std::io::Result<()> {
-    tracing_subscriber::fmt().init();
-
     App::new()
         .routes(routes![root])
-        .layer(TraceLayer::new_for_http())               // log every request
+        .layer(SetResponseHeaderLayer::if_not_present(   // unless the handler set one
+            header::CACHE_CONTROL,
+            HeaderValue::from_static("no-store"),
+        ))
         .serve()
         .await
 }
@@ -202,12 +203,48 @@ A handler that panics answers `500` as problem+json instead of dropping the conn
 panic message is printed by the panic hook and recorded with `tracing::error!`, never sent to
 the client.
 
-## Logging and request ids
+## Logging
 
-lesto emits `tracing` events for what it handles itself (`500`s, panics, failed
-serializations) and nothing per request: pick the access log you want. `TraceLayer` above logs
-every request; `.request_id()` adds and echoes an `x-request-id`, and `tracing_subscriber` with
-the `json` feature writes one JSON line per event for your log collector.
+`App::serve` prints on stdout with nothing to set up: a line when it starts listening, one per
+request (the access log), and every `tracing` event at `info` and above — yours and the ones
+lesto writes for what it handles itself (`500`s, panics, timeouts, failed transactions):
+
+```text
+2026-10-03T09:15:00.120456Z  INFO lesto::app: listening on http://127.0.0.1:8000
+2026-10-03T09:15:01.004311Z  INFO POST /notes 201 8.9ms
+2026-10-03T09:15:01.200118Z  WARN GET /notes/7 notes::handlers: slow lookup user=7
+2026-10-03T09:15:01.200540Z  INFO GET /notes/7 200 412µs
+2026-10-03T09:15:02.381090Z ERROR GET /boom lesto::layers: handler panicked panic=boom
+2026-10-03T09:15:02.381233Z ERROR GET /boom 500 71µs
+```
+
+An event that happens during a request starts with the request's method and path, and inside
+a store transaction (chapter 13) with the store method too. A log collector wants JSON instead:
+`LESTO_LOG=json` writes one flat object per line, the request's fields next to the event's.
+
+```json
+{"timestamp":"2026-10-03T09:15:01.200118Z","level":"WARN","target":"notes::handlers","message":"slow lookup","http.request.method":"GET","http.route":"/notes/{id}","url.path":"/notes/7","user":7}
+{"timestamp":"2026-10-03T09:15:01.200540Z","level":"INFO","target":"lesto::access","message":"GET /notes/7 200","http.request.method":"GET","http.route":"/notes/{id}","url.path":"/notes/7","http.response.status_code":200,"duration_ms":0.412}
+```
+
+| variable | meaning |
+|---|---|
+| `LESTO_LOG` | `text` (the default), `json` or `off` |
+| `RUST_LOG` | what is printed, `info` by default: `RUST_LOG=info,lesto=debug`, `RUST_LOG=warn` |
+| `NO_COLOR` | no colors, even on a terminal (there are none when stdout is not one) |
+
+The access log is an event with the target `lesto::access`, at `INFO` (`ERROR` for a `5xx`), so
+`RUST_LOG=info,lesto::access=off` turns it off and keeps the rest. It shows the path, never the
+query string, which is application data.
+
+**Your own subscriber wins.** Install one before `serve` (a file, another format, a filter
+reloaded at runtime) and lesto installs nothing. `lesto::log::Console` is the layer lesto
+installs, so a subscriber of your own can keep its format. The `log` feature is on by default;
+`default-features = false` leaves it out, and with it `tracing-subscriber`. Where `serve` is
+not the entry point (a worker, a command-line tool), `lesto::log::init()` does the same thing.
+
+`.request_id()` adds and echoes an `x-request-id`; chapter 15 sends the same events, with their
+trace, to an OpenTelemetry backend.
 
 ## Using axum's extractors
 
@@ -227,6 +264,8 @@ For an axum or third-party extractor lesto does not know, implement `OperationIn
 
 - `.layer(...)` for tower middleware, after registering the routes.
 - Graceful shutdown and panic-to-500 are built in; `serve_until` for a custom shutdown trigger.
+- Logs on stdout out of the box, one line per request: `LESTO_LOG=json` for a collector,
+  `RUST_LOG` to filter, a subscriber of your own to replace them.
 - `middleware::from_fn` for ad hoc middleware; they can return `HttpError`.
 - `map_router` and `into_router` for everything that is pure axum.
 - `lesto::layers` if you leave lesto but want the problems, the panic catcher or the span.
