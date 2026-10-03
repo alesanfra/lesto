@@ -16,6 +16,7 @@ instrument of your own on `opentelemetry::global::meter(..)`.
 The runnable version of this chapter is `examples/04-opentelemetry`: an API plus, in Docker,
 either [Jaeger](https://www.jaegertracing.io/) (traces, no configuration at all) or
 [OpenObserve](https://openobserve.ai/) (traces **and** logs), where you can watch them arrive.
+`./start.sh` (or `./start.sh jaeger`) in that folder starts the backend and the API wired to it.
 
 ## Sending traces and logs, in two lines of configuration
 

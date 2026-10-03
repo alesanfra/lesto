@@ -107,16 +107,21 @@ crates/lesto-cli/         the `lesto` binary: dev (watch + rebuild + restart, so
   src/cargo.rs            cargo metadata; cargo build --message-format=json → executable path
   src/process.rs          spawn with the socket on fd 3 (LISTEN_FDS), stop (SIGTERM, grace, SIGKILL)
   src/watch.rs            notify watcher, ignore filters, debounce
+examples/README.md        index of the examples: how to run and test each (keep in sync)
 examples/01-hello/        package `hello`: one route, the smallest app
 examples/02-notes/        package `notes`: full CRUD on SQLite with lesto::db (and MCP tools, a
                           resource and a prompt; not delete), split into lib.rs / state.rs / auth.rs / notes/{model,store,handlers}.rs, tests/api.rs
+                          and verify.sh (every route and MCP with curl; starts the server if none)
 examples/03-lambda/       package `lambda`: chapter 14 (lesto::lambda), in-memory notes, event-fixture test
 examples/04-opentelemetry/ package `opentelemetry-example` (not `opentelemetry`: that is the API
                           crate): chapter 15 end to end — compose.yaml with Jaeger (traces) and
-                          OpenObserve (traces + logs), an unauthenticated SQLite API, verify.sh
+                          OpenObserve (traces + logs), an unauthenticated SQLite API, start.sh
+                          (backend + example wired to it, `./start.sh [openobserve|jaeger]`),
+                          stop.sh (example + backends, `--clean` drops the volume), verify.sh
                           (requests + a trace and a log search). Not run in CI: needs Docker
 examples/06-oidc/         package `oidc-example`: chapter 9's OpenID Connect against a real provider
-                          (mock-oauth2-server in compose.yaml), verify.sh. Not run in CI: needs Docker
+                          (mock-oauth2-server in compose.yaml), start.sh / stop.sh (provider +
+                          example), verify.sh. Not run in CI: needs Docker
 examples/05-routers/      package `routers`: chapter 10 as a running app, two APIs (`/api/app/v1`,
                           `/api/analytics/v1`) as FastAPI-style routers mounted with `nest`, tests/api.rs
 examples/99-tutorial/     package `tutorial`: every tutorial snippet, compiled and tested (keep in sync;
@@ -146,10 +151,13 @@ sh scripts/bench-http.sh                      # throughput over a socket (needs 
 sh scripts/mcp-inspector.sh                   # MCP endpoint vs MCP Inspector CLI, both eras (Node 22.19+, jq)
 LESTO_PORT=8765 cargo run -p notes            # port 8000 may be taken on dev machines
 LESTO_LOG=json LESTO_PORT=8765 cargo run -p notes   # the console as JSON (`off` silences it)
+bash examples/02-notes/verify.sh              # the notes example end to end with curl
 docker run --rm -e POSTGRES_PASSWORD=lesto -p 5432:5432 postgres:18   # for tests/db_postgres.rs
+examples/04-opentelemetry/start.sh            # OpenObserve + the example; `jaeger` for Jaeger
+examples/04-opentelemetry/stop.sh             # stops both; --clean also removes the volume
 (cd examples/04-opentelemetry && docker compose up -d openobserve && sh verify.sh)  # OTLP end to end
 (cd examples/04-opentelemetry && docker compose up -d jaeger)        # traces only: OTEL_LOGS_EXPORTER=none OTEL_METRICS_EXPORTER=none
-(cd examples/06-oidc && docker compose up -d)   # then the variables of its README, cargo run -p oidc-example, sh verify.sh
+examples/06-oidc/start.sh                     # provider + example; then verify.sh, stop.sh
 LESTO_TEST_POSTGRES_URL=postgres://postgres:lesto@127.0.0.1:5432/postgres cargo test -p lesto --test db_postgres
 LESTO_TEST_OIDC_URL=http://localhost:8089/default cargo test -p lesto --test oidc_provider   # after the 06-oidc compose
 cargo run -p lesto-cli -- dev -p notes --port 8765      # lesto dev from this checkout

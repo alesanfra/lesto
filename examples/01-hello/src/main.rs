@@ -2,7 +2,7 @@
 //!
 //! ```sh
 //! LESTO_PORT=8765 cargo run -p hello      # or: lesto dev -p hello --port 8765
-//! curl http://127.0.0.1:8765/
+//! curl http://127.0.0.1:8765/hello
 //! ```
 
 use lesto::prelude::*;

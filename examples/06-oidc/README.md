@@ -9,6 +9,22 @@ a real OpenID Connect server (discovery document, JWKS, signed tokens) that acce
 `compose.yaml` makes its client-credentials tokens carry `aud: api://notes`, `azp: notes-cli`,
 and the `admin` scope only when the client asks for it.
 
+## Quick start
+
+```sh
+cd examples/06-oidc
+./start.sh            # the provider in Docker, then the example on port 8765
+./verify.sh           # in another terminal
+./stop.sh             # the example and the provider
+```
+
+`start.sh` waits until the provider serves its discovery document (the example reads it at
+startup and refuses to start without it), sets the variables below and runs the example in the
+foreground; Ctrl-C stops the example, `./stop.sh` the provider too. Any variable can be overridden
+from the environment (`LESTO_PORT=9000 ./start.sh`).
+
+## By hand
+
 ```sh
 cd examples/06-oidc
 docker compose up -d
@@ -60,4 +76,4 @@ LESTO_TEST_OIDC_URL=http://localhost:8089/default cargo test -p lesto --test oid
 
 `crates/lesto/tests/oidc.rs` covers every check with no network at all.
 
-`docker compose down` when done.
+`./stop.sh` (or `docker compose down`) when done.

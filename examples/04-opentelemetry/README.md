@@ -16,6 +16,21 @@ OTLP export, a flush on shutdown. `main` only builds the app and calls `serve()`
 
 Both can run at the same time; their ports do not overlap.
 
+## Quick start
+
+```sh
+cd examples/04-opentelemetry
+./start.sh            # OpenObserve: traces, logs and metrics
+./start.sh jaeger     # or Jaeger: traces only
+```
+
+`start.sh` starts the backend in Docker, waits until it answers, sets the variables of the
+option you picked (below) and runs the example on port 8000 in the foreground. Ctrl-C stops the
+example and leaves the backend running; `./stop.sh` stops everything (the example too, if it
+still runs), `./stop.sh --clean` also deletes what OpenObserve collected. Any variable it sets
+can be overridden from the environment (`LESTO_PORT=9000 ./start.sh`). The two sections below
+are the same steps by hand.
+
 ## Option A — Jaeger (traces, zero configuration)
 
 ```sh
@@ -102,8 +117,11 @@ event, each carrying the `trace_id` and `span_id` of the request it happened in:
 ## Stop
 
 ```sh
-docker compose down -v
+./stop.sh             # the example and the backends, data kept
+./stop.sh --clean     # and OpenObserve's volume: the next start is empty
 ```
+
+By hand: `docker compose down -v`.
 
 ## Notes
 
