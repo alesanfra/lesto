@@ -87,7 +87,7 @@ on axum.
   `App::request_id` are one call each; credentials
   are redacted from `Debug` output, internal errors never leak their cause to the client.
 - axum stays underneath: `State`, `Extension`, tower layers and `into_router()` work as always.
-  Nobody is locked in: [appendix D](docs/tutorial/D-leaving-lesto.md) shows the way out, step by
+  Nobody is locked in: [appendix D](https://github.com/alesanfra/lesto/blob/main/docs/tutorial/D-leaving-lesto.md) shows the way out, step by
   step, and `App::merge` the way in from an existing axum router.
 
 **Getting started**: install the CLI (`cargo install lesto-cli`, or `cargo install --path
@@ -96,7 +96,7 @@ builds, runs, and rebuilds + restarts on every save, keeping the port open while
 (like `fastapi dev`). `lesto run` does it once; `lesto openapi` prints the OpenAPI document without serving
 (`-o api.json` writes it to a file).
 
-**New here?** Start with the [tutorial](docs/tutorial/README.md): sixteen short chapters, from
+**New here?** Start with the [tutorial](https://github.com/alesanfra/lesto/blob/main/docs/tutorial/README.md): sixteen short chapters, from
 "Hello" to security, testing, databases, AWS Lambda, OpenTelemetry and MCP, with full code and `curl`
 commands for every step.
 The crates are not on crates.io yet: depend on them by `path` as the tutorial shows.
@@ -193,7 +193,7 @@ resource at `lesto://{title}{path}`, `mcp = "prompt"` (a `GET` route returning
 `lesto::mcp::Prompt`) as a prompt whose arguments are the path and query parameters; both take
 `name = ".."` too. It takes effect once the app calls `App::mcp`; see the tutorial, chapter 16.
 
-Contributing or driving an agent? Read [AGENTS.md](AGENTS.md).
+Contributing or driving an agent? Read [AGENTS.md](https://github.com/alesanfra/lesto/blob/main/AGENTS.md).
 
 ### Views of a model
 
@@ -268,7 +268,7 @@ overridden with `with_type` / `with_title`. `with_extension` adds extension memb
 The extractors in `lesto::security` extract credentials **and** register the OpenAPI scheme. Token
 verification stays with the handler or a middleware, except for OpenID Connect JWTs, which
 `lesto::oidc::Jwt` (feature `oidc`) verifies. Missing or malformed credentials → `401` problem+json
-with a `WWW-Authenticate` header. See the tutorial's [Security](docs/tutorial/09-security.md) chapter.
+with a `WWW-Authenticate` header. See the tutorial's [Security](https://github.com/alesanfra/lesto/blob/main/docs/tutorial/09-security.md) chapter.
 
 ## Layout
 
@@ -292,7 +292,7 @@ with a `WWW-Authenticate` header. See the tutorial's [Security](docs/tutorial/09
   `examples/99-tutorial/` — every tutorial snippet, compiled and tested.
 - `docs/tutorial/` — the tutorial; `docs/build.sh` builds it as an mdBook site.
 
-Design decisions, internals and the roadmap are in [AGENTS.md](AGENTS.md).
+Design decisions, internals and the roadmap are in [AGENTS.md](https://github.com/alesanfra/lesto/blob/main/AGENTS.md).
 
 ## Performance
 
@@ -346,7 +346,7 @@ can never disagree.
 
 MSRV: Rust 1.94, set by `sqlx` 0.9. Raising it is a minor release.
 
-Changes are listed in [CHANGELOG.md](CHANGELOG.md).
+Changes are listed in [CHANGELOG.md](https://github.com/alesanfra/lesto/blob/main/CHANGELOG.md).
 
 ## Development
 
@@ -376,7 +376,7 @@ Bigger items, easiest first:
    as a native binary, MIT) in CI, and call it over HTTP instead of only replaying event fixtures.
 2. **MCP protected resource metadata**: RFC 9728's `/.well-known/oauth-protected-resource` with
    `oidc`, so MCP clients find the authorization server on their own. Tools, resources and
-   prompts are done; this is phase 3 of [docs/design/mcp.md](docs/design/mcp.md).
+   prompts are done; this is phase 3 of [docs/design/mcp.md](https://github.com/alesanfra/lesto/blob/main/docs/design/mcp.md).
 
 Smaller items: crates.io publication, `lesto new`, `AnyOf`/`AllOf` permission requirements, per-operation
 permissions as OpenAPI scopes, `--watch`/`--ignore` for `lesto dev`, exporting the OpenAPI document as
@@ -387,7 +387,7 @@ an ORM, hot patching without a restart.
 
 ## License
 
-Licensed under the [Apache License, Version 2.0](LICENSE).
+Licensed under the [Apache License, Version 2.0](https://github.com/alesanfra/lesto/blob/main/LICENSE).
 
 Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in
 lesto by you, as defined in the Apache-2.0 license, shall be licensed as above, without any

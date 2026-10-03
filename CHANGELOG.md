@@ -22,6 +22,10 @@ First release, 0.1.0: `lesto`, `lesto-macros`, `lesto-cli`.
 - Feature `oidc`: bearer JWTs verified against an OpenID Connect provider (`Oidc::discover`,
   `Oidc::from_env`, `Jwt<C>`, `StandardClaims`), `App::oidc` and `App::protect` for a group of
   routes, with the `openIdConnect` security scheme in the OpenAPI document.
+- Feature `mcp`: routes marked `mcp = "tool"`, `"resource"` or `"prompt"` served to AI agents
+  over the Model Context Protocol at `/mcp` (`App::mcp`), 2026-07-28 and the 2025 legacy
+  versions, stateless. A tool call is an in-process request to the route, so validation, auth
+  and layers are the route's own; `lesto::mcp::Prompt` is the response of a prompt route.
 - Features `email` and `url` (default on) for the garde rules of the same name.
 - JSON keys keep declaration order in the OpenAPI document and in response bodies.
 - `Created<T>`, `Accepted<T>`, `NoContent`: the success status in the return type.
