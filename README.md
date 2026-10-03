@@ -389,7 +389,8 @@ an ORM, hot patching without a restart.
 
 ## License
 
-Licensed under the [Apache License, Version 2.0](https://github.com/alesanfra/lesto/blob/main/LICENSE).
+Copyright 2026 Alessio Sanfratello. Licensed under the
+[Apache License, Version 2.0](https://github.com/alesanfra/lesto/blob/main/LICENSE).
 
 Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in
 lesto by you, as defined in the Apache-2.0 license, shall be licensed as above, without any

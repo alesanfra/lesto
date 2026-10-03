@@ -1,7 +1,7 @@
 [book]
 title = "lesto"
 description = "A Rust web framework with FastAPI's ergonomics: garde validation, OpenAPI from types."
-authors = ["lesto contributors"]
+authors = ["Alessio Sanfratello"]
 language = "en"
 src = "tutorial"
 
