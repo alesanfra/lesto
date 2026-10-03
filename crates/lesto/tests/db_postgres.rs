@@ -389,7 +389,9 @@ async fn a_conflict_is_retried_until_it_succeeds() {
     let barrier = std::sync::Arc::new(tokio::sync::Barrier::new(2));
     // Every entry into a closure, retries included. Two conflicting transactions plus one
     // retry is three, at least: when the winner has not committed yet by the time the retry
-    // reads, the two conflict again and one more retry follows (seen on CI runners).
+    // reads, the two conflict again and one more retry follows (seen on CI runners), and on a
+    // loaded runner that can happen twice. The budget of five keeps it from failing the test;
+    // what is under test is that the retry happens, not how many it takes.
     let attempts = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
 
     let contend = |pool: Pool<Postgres>,
@@ -398,7 +400,7 @@ async fn a_conflict_is_retried_until_it_succeeds() {
         // Only the first attempt waits: a retried closure has nobody left to meet at the
         // barrier, and waiting again would hang.
         let waited = std::sync::atomic::AtomicBool::new(false);
-        store_retrying::<ReadWrite>(&pool, 2)
+        store_retrying::<ReadWrite>(&pool, 5)
             .write_with(Anyone, Isolation::Serializable, async |conn| {
                 attempts.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 let counted: i64 =
