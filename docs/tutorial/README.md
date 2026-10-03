@@ -14,7 +14,7 @@ Prerequisites: stable Rust (`rustup`), `curl` and a browser.
 | 4 | [Request body](04-request-body.md) | `Json<T>`, deserialization and validation with garde |
 | 5 | [Validation](05-validation.md) | garde rules, nested structures, custom rules |
 | 6 | [Responses](06-responses.md) | Return types, status codes, `Result`, empty responses |
-| 7 | [Error handling](07-errors.md) | `HttpError`, RFC 9457, documented errors, FastAPI format |
+| 7 | [Error handling](07-errors.md) | `HttpError`, RFC 9457, documented errors |
 | 8 | [State and dependencies](08-state-and-dependencies.md) | `State<S>`, `Extension`, custom extractors (lesto's `Depends`) |
 | 9 | [Security](09-security.md) | Bearer, API keys, Basic, OAuth2, verifying tokens |
 | 10 | [Bigger projects](10-bigger-projects.md) | Modules, `nest`, tags, route order |

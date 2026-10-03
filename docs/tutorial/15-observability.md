@@ -21,7 +21,7 @@ either [Jaeger](https://www.jaegertracing.io/) (traces, no configuration at all)
 
 ```toml
 [dependencies]
-lesto = { path = "../lesto/crates/lesto", features = ["otel"] }
+lesto = { version = "0.1", features = ["otel"] }
 ```
 
 ```rust

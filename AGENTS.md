@@ -154,15 +154,11 @@ done; `.github/workflows/ci.yml` runs the same on every push and pull request, i
 raising `rust-version`, change the MSRV job too. Do not claim success without running them. Gate commits on the test result, never on "it
 should pass". Run `git grep -i presto` before committing: the old name must not come back.
 
-Releasing: write the changes under `[Unreleased]` in `CHANGELOG.md` as they land, then run
-`cargo release patch` (or `minor`, or `X.Y.Z`; needs `cargo install cargo-release`) to see the
-plan and add `--execute` to do it. Configured by `release.toml` and the crates'
-`[package.metadata.release]`: one shared version, the changelog section dated, one commit
-`chore: release vX.Y.Z` and one tag `vX.Y.Z`, pushed from `main`; cargo-release publishes
-nothing. The tag runs `.github/workflows/release.yml`: it refuses a tag that differs from the
-workspace version or a version with no changelog section, publishes the three crates through
-crates.io Trusted Publishing (no token in the repository) and creates the GitHub release with
-that section as its notes.
+Releasing: note changes under `[Unreleased]` in `CHANGELOG.md` as they land. `cargo release patch`
+(or `minor`, `X.Y.Z`; `cargo install cargo-release`) shows the plan, `--execute` bumps the shared
+version, dates the changelog section, commits, tags `vX.Y.Z` and pushes (`release.toml`). The tag
+runs `.github/workflows/release.yml`, which publishes through crates.io Trusted Publishing and
+creates the GitHub release with that section as notes.
 
 ## Conventions
 
@@ -405,8 +401,8 @@ Recorded here because they are not derivable from the code. Do not undo them cas
   `where` clauses of the generated `__lesto_check<S>` are the per-argument extractor checks, so
   the state `S` is inferred from the `App<S>` the set is added to (no `state = ..` needed). With
   a `State<T>` argument or `state = T` the checks run immediately, on the argument's span. A
-  missing attribute yields `E0573` (`expected type, found function`; from rustc 1.99
-  `cannot find type .. in this scope`).
+  missing attribute yields `E0573` (`cannot find type f in this scope`; before rustc 1.99
+  `expected type, found function f`).
 - The route macro warns about `axum::Json<T>`/`axum::extract::Query<T>` with `T: Validate`
   through autoref specialization: `(&ValidationProbe::<Arg>::new()).__lesto_validation()` picks
   the `#[deprecated]` trait method when the impl for `ValidationProbe<axum::Json<T: Validate>>`
@@ -544,7 +540,7 @@ Recorded here because they are not derivable from the code. Do not undo them cas
 | `lesto cannot document X as a handler response` | return `Json<T>` (T: Serialize + JsonSchema), or `impl OperationOutput for X {}` |
 | `X cannot be a handler argument in this position` | body extractor must be the last argument |
 | `X is not an extractor` | payload type lacks `Deserialize`/`JsonSchema`/`Validate`, or the extractor expects a state other than the `App<S>` it is registered on (`state = AppState` pins it) |
-| `expected type, found function f` (rustc 1.99+: `cannot find type f in this scope`) in `routes![f]` | the handler is missing `#[lesto::get(...)]` |
+| `cannot find type f in this scope` in `routes![f]` (before rustc 1.99: `expected type, found function f`) | the handler is missing `#[lesto::get(...)]` |
 | `cannot find garde/schemars in the crate root` | use `#[lesto::model]` instead of the plain derives, or add the crates as direct dependencies |
 | `type annotations needed for App<_>` | write `App::<()>::new()` / `App::<AppState>::new()` |
 | `this store is read-only: ReadOnly does not allow write` | declare `YourStore<ReadWrite, _>` or bound the impl with `M: Writable` |
@@ -568,12 +564,10 @@ Bigger items, easiest first (the README links here instead of keeping a copy):
 2. RFC 9728 protected resource metadata for MCP with `oidc`: phase 3 of `docs/design/mcp.md`.
    Tools, resources and prompts (phases 1 and 2) are done.
 
-Smaller items, in rough priority order: crates.io publication (publish order: `lesto-macros`,
-`lesto`, `lesto-cli`; the manifests are ready); `lesto new`
-(scaffold); `AnyOf`/`AllOf` requirements; documenting per-operation
-permissions as OpenAPI scopes; `--watch`/`--ignore` for `lesto dev`; exporting the OpenAPI document as 3.0 with
-`x-amazon-apigateway-integration` extensions so an API Gateway can be created from it (API
-Gateway imports 3.0 only).
+Smaller items, in rough priority order: `lesto new` (scaffold); `AnyOf`/`AllOf` requirements;
+documenting per-operation permissions as OpenAPI scopes; `--watch`/`--ignore` for `lesto dev`;
+exporting the OpenAPI document as 3.0 with `x-amazon-apigateway-integration` extensions so an
+API Gateway can be created from it (API Gateway imports 3.0 only).
 
 Out of scope unless asked: actix-web backend, websockets, multipart, typed header/cookie
 parameters beyond API keys, an ORM or query builder, role hierarchies or permission wildcards

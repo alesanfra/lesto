@@ -1,11 +1,9 @@
 name: Release
 
-# Pushing a tag `vX.Y.Z` (`cargo release`, see release.toml) publishes lesto-macros, lesto and
-# lesto-cli to crates.io, then creates the GitHub release with the version's CHANGELOG section as
-# its notes. No API token is stored: crates.io trusts this file of this repository (Trusted
-# Publishing, configured on each crate's settings page with workflow `release.yml` and environment
-# `release`) and hands out a short-lived token in exchange for the job's OIDC token. A crate's
-# first version cannot be published this way; 0.1.0 was published by hand.
+# A tag `vX.Y.Z` (pushed by `cargo release`, see release.toml) publishes the three crates and
+# creates the GitHub release, with the version's CHANGELOG section as notes. No token is stored:
+# crates.io Trusted Publishing (each crate's settings: workflow `release.yml`, environment
+# `release`) trades the job's OIDC token for a short-lived one.
 on:
   push:
     tags: ["v*"]
@@ -27,9 +25,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
-      # Both checks run before anything is published: a tag that does not match
-      # `[workspace.package] version` would publish the wrong version (or fail halfway on one that
-      # already exists), and a version without a CHANGELOG section would have no release notes.
+      # Before anything is published: a tag that differs from the workspace version, or a version
+      # with no CHANGELOG section, stops the release here.
       - name: Check the tag against the workspace version and the changelog
         run: |
           version=$(cargo metadata --no-deps --format-version 1 \

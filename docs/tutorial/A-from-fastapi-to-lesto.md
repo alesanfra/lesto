@@ -74,5 +74,5 @@ Every option of the route attributes (`get`, `post`, `put`, `patch`, `delete`, `
 - **Dependencies are not cached per request** as in FastAPI: if two extractors derive the same
   thing, it is computed twice. If that is expensive, compute it once in a middleware and pass the
   result with `Extension<T>`.
-- **Credential verification is always yours.** Security extractors extract and document; they do
-  not validate tokens.
+- **Credential verification is yours**, except for OpenID Connect JWTs: security extractors
+  extract and document, `Jwt<C>` (feature `oidc`, chapter 9) also verifies.

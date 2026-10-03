@@ -68,9 +68,9 @@ held across an `.await`).
 The state type cannot be inferred (for instance an `App` with no `State` handlers, on which
 `.openapi()` is called before `with_state`). Write `App::<()>::new()` or `App::<AppState>::new()`.
 
-## `cannot find type `list` in this scope` (or `expected type, found function `list``) in `routes![list]`
+## `routes![list]`: cannot find type `list` in this scope
 
-The handler is missing its `#[lesto::get(...)]` attribute: `routes!` looks for the metadata
+Older compilers say "expected type, found function `list`". The handler is missing its `#[lesto::get(...)]` attribute: `routes!` looks for the metadata
 type the attribute generates, and finds only the function. Add the attribute.
 
 ## `routes![users::list]` cannot find the function

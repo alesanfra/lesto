@@ -11,7 +11,7 @@ Open `Cargo.toml` and add lesto. That is the whole list:
 
 ```toml
 [dependencies]
-lesto = { path = "../lesto/crates/lesto" }   # or the published version
+lesto = "0.1"
 ```
 
 Serialization (serde), JSON schemas (schemars), validation (garde), the async runtime (tokio)
@@ -44,8 +44,7 @@ async fn main() -> std::io::Result<()> {
 }
 ```
 
-Run it with the lesto CLI (once: `cargo install lesto-cli`, or from a checkout of this repository
-`cargo install --path crates/lesto-cli` until it is published):
+Run it with the lesto CLI (install it once with `cargo install lesto-cli`):
 
 ```sh
 lesto dev
