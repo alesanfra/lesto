@@ -27,3 +27,4 @@
 - [Common problems](B-common-problems.md)
 - [Why axum and not actix-web](C-why-axum.md)
 - [Leaving lesto](D-leaving-lesto.md)
+- [Performance](E-performance.md)

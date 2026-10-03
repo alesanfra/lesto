@@ -28,6 +28,7 @@ Prerequisites: stable Rust (`rustup`), `curl` and a browser.
 | B | [Common problems](B-common-problems.md) | Compile errors and how to fix them |
 | C | [Why axum and not actix-web](C-why-axum.md) | The reasons behind the choice of core |
 | D | [Leaving lesto](D-leaving-lesto.md) | The way out, step by step: nobody is locked in |
+| E | [Performance](E-performance.md) | What lesto costs per request and at build time |
 
 Every snippet in this tutorial is compiled and tested in `examples/99-tutorial` (`cargo test -p tutorial`),
 so the documentation cannot drift from the API. The other examples grow with the chapters:

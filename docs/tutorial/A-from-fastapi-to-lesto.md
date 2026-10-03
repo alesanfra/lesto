@@ -38,6 +38,31 @@
 | `uvicorn.run(app, host="0.0.0.0", port=8000)` | `.serve().await` with `LESTO_HOST=0.0.0.0 LESTO_PORT=8000` (or `.serve_at("0.0.0.0:8000")`) |
 | `{"detail": ...}` errors | RFC 9457 `application/problem+json` |
 
+## Attribute options
+
+Every option of the route attributes (`get`, `post`, `put`, `patch`, `delete`, `head`,
+`options`):
+
+```text
+#[lesto::get("/path", status = 200, tag = "x", tags("a", "b"), summary = "...",
+             description = "...", operation_id = "...", deprecated, responses(404, 409),
+             security("bearerAuth"), public, state = AppState,
+             mcp = "tool" | "resource" | "prompt")]
+```
+
+- `status = N` rewrites every `200` of the handler; to put the status in the type instead, return
+  `Created<T>` (201), `Accepted<T>` (202) or `NoContent` (204), documented under that status.
+- `state = T` only affects the compile-time checks the macro emits; otherwise the state comes
+  from a `State<T>` argument or from the `App<S>` the `routes![]` set is added to (see
+  [Common problems](B-common-problems.md)).
+- The default `operation_id` is `{function}_{path}_{method}` (`get_user_users__id__get`), unique
+  per route as in FastAPI.
+- `mcp = "tool"` (feature `mcp`) exposes the operation as an MCP tool named after the function;
+  `mcp(tool, name = "search_notes")` names it. `mcp = "resource"` (a `GET` route) serves it as a
+  resource at `lesto://{title}{path}`, `mcp = "prompt"` (a `GET` route returning
+  `lesto::mcp::Prompt`) as a prompt whose arguments are the path and query parameters; both take
+  `name = ".."` too. It takes effect once the app calls `App::mcp` ([chapter 16](16-mcp.md)).
+
 ## Differences to keep in mind
 
 - **Types are checked at compile time.** A `State<Db>` without `with_state(Db)`, a body without

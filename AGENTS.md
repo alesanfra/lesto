@@ -170,7 +170,7 @@ that section as its notes.
   tutorial and one README; do not add translations.
 - **Docs and code stay in lockstep**: any snippet added to the tutorial goes into
   `examples/99-tutorial` (with a test if it makes a runtime claim). Any behavior change updates the
-  tutorial chapter and `README.md`.
+  tutorial chapter, and `README.md` when it changes something the README claims.
 - **Dependencies** are declared once in `[workspace.dependencies]` and referenced with
   `.workspace = true`. Prefer no new dependencies. Anything heavy or niche goes behind a feature
   of `lesto` (`db`, `lambda`), not into a new crate; `lesto`'s dev-dependency on itself turns
@@ -180,7 +180,8 @@ that section as its notes.
 - **Everything documented from types**: a new extractor implements `FromRequestParts` +
   `OperationInput`; a new response type implements `IntoResponse` + `OperationOutput`. A new
   macro option is parsed in `lesto-macros` (`RouteArgs`), stored on `RouteMeta`, applied in
-  `PendingOperation::operation`, documented in `README.md` "Attribute options" and in the tutorial.
+  `PendingOperation::operation`, documented in the tutorial: appendix A ("Attribute options") and
+  the chapter of the feature.
 - **Diagnostics are a feature**: traits that users can fail to implement carry
   `#[diagnostic::on_unimplemented]`; the macro emits per-argument checks (`__private`). When you
   change a message, update the `tests/ui/*.expected` fragments and read the output: the message
@@ -559,7 +560,7 @@ Recorded here because they are not derivable from the code. Do not undo them cas
 
 ## Roadmap and non-goals
 
-Bigger items, easiest first (mirrored in `README.md`, keep the two lists in sync):
+Bigger items, easiest first (the README links here instead of keeping a copy):
 
 1. Lambda adapter tested end to end on floci (<https://floci.io/>: local AWS emulator, Lambda +
    API Gateway, LocalStack drop-in on port 4566, native binary or Docker, MIT) in CI, on top of
