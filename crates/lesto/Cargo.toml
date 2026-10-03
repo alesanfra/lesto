@@ -9,6 +9,9 @@ readme = "../../README.md"
 keywords.workspace = true
 categories.workspace = true
 description = "FastAPI-like web framework on top of axum: garde validation, OpenAPI from types, optional sqlx stores and AWS Lambda"
+# Tests and benches run from the repository: they need the workspace (examples, fixtures, the
+# self dev-dependency), and the OIDC fixtures are private keys that scanners flag in a tarball.
+exclude = ["tests/", "benches/"]
 
 [dependencies]
 lesto-macros.workspace = true
