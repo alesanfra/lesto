@@ -12,6 +12,19 @@ All notable changes to lesto are listed here. The format follows
   points there.
 - A `NOTICE` file naming the copyright holder, shipped in every crate.
 
+### Changed
+
+- A shorter README; the route attribute options moved to the tutorial's appendix A, the
+  performance measurements to a new appendix E.
+- The tutorial depends on the published crates (`lesto = "0.1"`, `cargo install lesto-cli`).
+- The crate documentation links the tutorial.
+
+### Fixed
+
+- Documentation that described what lesto no longer does: a FastAPI error format (removed before
+  0.1.0), security extractors that never verify a token (`Jwt` verifies OpenID Connect tokens),
+  MCP serving tools only, examples with `#[tokio::main]` and `#[crate::get]`.
+
 ## [0.1.0] - 2026-10-03
 
 First release: `lesto`, `lesto-macros`, `lesto-cli`.

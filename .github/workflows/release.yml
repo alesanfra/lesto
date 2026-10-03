@@ -3,7 +3,7 @@ name: Release
 # A tag `vX.Y.Z` (pushed by `cargo release`, see release.toml) publishes the three crates and
 # creates the GitHub release, with the version's CHANGELOG section as notes. No token is stored:
 # crates.io Trusted Publishing (each crate's settings: workflow `release.yml`, environment
-# `release`) trades the job's OIDC token for a short-lived one.
+# `crates-io`) trades the job's OIDC token for a short-lived one.
 on:
   push:
     tags: ["v*"]
@@ -18,7 +18,7 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     # Restrict the environment to `v*` tags in the repository settings: crates.io checks it too.
-    environment: release
+    environment: crates-io
     permissions:
       contents: write # the GitHub release
       id-token: write # the crates.io token

@@ -157,8 +157,9 @@ should pass". Run `git grep -i presto` before committing: the old name must not 
 Releasing: note changes under `[Unreleased]` in `CHANGELOG.md` as they land. `cargo release patch`
 (or `minor`, `X.Y.Z`; `cargo install cargo-release`) shows the plan, `--execute` bumps the shared
 version, dates the changelog section, commits, tags `vX.Y.Z` and pushes (`release.toml`). The tag
-runs `.github/workflows/release.yml`, which publishes through crates.io Trusted Publishing and
-creates the GitHub release with that section as notes.
+runs `.github/workflows/release.yml`, which publishes through crates.io Trusted Publishing (job
+environment `crates-io`, restricted to `v*` tags) and creates the GitHub release with that section
+as notes.
 
 ## Conventions
 
