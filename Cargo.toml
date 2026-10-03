@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/*", "examples/*"]
 
 [workspace.package]
-version = "0.1.1"
+version = "0.2.0"
 authors = ["Alessio Sanfratello"]
 edition = "2024"
 rust-version = "1.94"
@@ -73,7 +73,7 @@ uuid = { version = "1.12.1", default-features = false }
 rmcp = { version = "3.4", default-features = false, features = ["client", "transport-streamable-http-client-reqwest"] }
 
 # Intra-workspace dependency: `version` is required to publish, `path` to build from a checkout.
-lesto-macros = { path = "crates/lesto-macros", version = "0.1.1" }
+lesto-macros = { path = "crates/lesto-macros", version = "0.2.0" }
 
 # Dependencies are compiled once, optimized; `lesto dev` rebuilds only touch workspace crates.
 # No debug info for them: a quarter of a fresh `cargo test --workspace` build (3.5 GB → 2.6 GB),

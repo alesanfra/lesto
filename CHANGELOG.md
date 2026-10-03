@@ -6,6 +6,8 @@ All notable changes to lesto are listed here. The format follows
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-03
+
 ### Added
 
 - Feature `log`, on by default: `App::serve` and `lesto::lambda::serve` print on stdout when the

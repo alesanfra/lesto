@@ -952,7 +952,7 @@ checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
 name = "hello"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "lesto",
 ]
@@ -1402,7 +1402,7 @@ dependencies = [
 
 [[package]]
 name = "lambda"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "lesto",
  "serde_json",
@@ -1483,7 +1483,7 @@ checksum = "20870f649af7073d53e38067b2a84312175d56ea15217e1b15bc83506ec50afb"
 
 [[package]]
 name = "lesto"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -1525,7 +1525,7 @@ dependencies = [
 
 [[package]]
 name = "lesto-cli"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "clap",
  "libc",
@@ -1536,7 +1536,7 @@ dependencies = [
 
 [[package]]
 name = "lesto-macros"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1655,7 +1655,7 @@ checksum = "743fb55ba31b18fb1ecef6bdc9aa2743314978ac084044301a7eee33fb99a20d"
 
 [[package]]
 name = "notes"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "http-body-util",
  "lesto",
@@ -1736,7 +1736,7 @@ dependencies = [
 
 [[package]]
 name = "oidc-example"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "lesto",
 ]
@@ -1786,7 +1786,7 @@ dependencies = [
 
 [[package]]
 name = "opentelemetry-example"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "lesto",
  "sqlx",
@@ -2282,7 +2282,7 @@ dependencies = [
 
 [[package]]
 name = "routers"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "http-body-util",
  "lesto",
@@ -3232,7 +3232,7 @@ checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
 name = "tutorial"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "http-body-util",
  "jsonwebtoken",
