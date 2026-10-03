@@ -393,7 +393,8 @@ Recorded here because they are not derivable from the code. Do not undo them cas
   `where` clauses of the generated `__lesto_check<S>` are the per-argument extractor checks, so
   the state `S` is inferred from the `App<S>` the set is added to (no `state = ..` needed). With
   a `State<T>` argument or `state = T` the checks run immediately, on the argument's span. A
-  missing attribute yields `expected type, found function`.
+  missing attribute yields `E0573` (`expected type, found function`; from rustc 1.99
+  `cannot find type .. in this scope`).
 - The route macro warns about `axum::Json<T>`/`axum::extract::Query<T>` with `T: Validate`
   through autoref specialization: `(&ValidationProbe::<Arg>::new()).__lesto_validation()` picks
   the `#[deprecated]` trait method when the impl for `ValidationProbe<axum::Json<T: Validate>>`
@@ -531,7 +532,7 @@ Recorded here because they are not derivable from the code. Do not undo them cas
 | `lesto cannot document X as a handler response` | return `Json<T>` (T: Serialize + JsonSchema), or `impl OperationOutput for X {}` |
 | `X cannot be a handler argument in this position` | body extractor must be the last argument |
 | `X is not an extractor` | payload type lacks `Deserialize`/`JsonSchema`/`Validate`, or the extractor expects a state other than the `App<S>` it is registered on (`state = AppState` pins it) |
-| `expected type, found function f` in `routes![f]` | the handler is missing `#[lesto::get(...)]` |
+| `expected type, found function f` (rustc 1.99+: `cannot find type f in this scope`) in `routes![f]` | the handler is missing `#[lesto::get(...)]` |
 | `cannot find garde/schemars in the crate root` | use `#[lesto::model]` instead of the plain derives, or add the crates as direct dependencies |
 | `type annotations needed for App<_>` | write `App::<()>::new()` / `App::<AppState>::new()` |
 | `this store is read-only: ReadOnly does not allow write` | declare `YourStore<ReadWrite, _>` or bound the impl with `M: Writable` |

@@ -1,2 +1,5 @@
-error[E0573]: expected type, found function `health`
+# rustc's wording is not pinned: "expected type, found function `health`" up to 1.98,
+# "cannot find type `health` in this scope" from 1.99. The code and the span are stable.
+error[E0573]
+`health`
 --> missing_route_attribute.rs:9
