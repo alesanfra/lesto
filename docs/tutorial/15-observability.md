@@ -22,7 +22,7 @@ either [Jaeger](https://www.jaegertracing.io/) (traces, no configuration at all)
 
 ```toml
 [dependencies]
-lesto = { version = "0.1", features = ["otel"] }
+lesto = { version = "0.2", features = ["otel"] }
 ```
 
 ```rust

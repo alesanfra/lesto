@@ -111,7 +111,7 @@ When the tokens come from an identity provider (Keycloak, Auth0, Okta, Entra ID,
 Google...), lesto can verify them before the handler runs. Turn on the `oidc` feature:
 
 ```toml
-lesto = { version = "0.1", features = ["oidc"] }
+lesto = { version = "0.2", features = ["oidc"] }
 ```
 
 and point lesto at the provider's discovery document. `discover` fetches it and the provider's

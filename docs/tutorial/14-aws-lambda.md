@@ -8,7 +8,7 @@ tests. The code of this chapter is `examples/03-lambda`.
 
 ```toml
 [dependencies]
-lesto = { version = "0.1", features = ["lambda"] }
+lesto = { version = "0.2", features = ["lambda"] }
 ```
 
 Change one line in `main`:

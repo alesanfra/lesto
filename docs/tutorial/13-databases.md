@@ -32,7 +32,7 @@ with end-to-end tests in `tests/api.rs`. It also has a `PATCH` route built on a 
 
 ```toml
 [dependencies]
-lesto = { version = "0.1", features = ["sqlite"] }   # or "postgres", "mysql"
+lesto = { version = "0.2", features = ["sqlite"] }   # or "postgres", "mysql"
 sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "sqlite", "derive"] }
 ```
 
