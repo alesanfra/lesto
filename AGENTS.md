@@ -153,6 +153,11 @@ done; `.github/workflows/ci.yml` runs the same on every push and pull request, i
 raising `rust-version`, change the MSRV job too. Do not claim success without running them. Gate commits on the test result, never on "it
 should pass". Run `git grep -i presto` before committing: the old name must not come back.
 
+Releasing: raise `[workspace.package] version` and the `version` of `lesto-macros` in
+`[workspace.dependencies]`, date the `[Unreleased]` section of `CHANGELOG.md`, then push a tag
+`vX.Y.Z`. `.github/workflows/release.yml` publishes the three crates through crates.io Trusted
+Publishing (no token in the repository); it refuses a tag that differs from the workspace version.
+
 ## Conventions
 
 - **Language**: American English everywhere (code, comments, docs, commits). There is one

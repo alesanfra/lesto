@@ -1,0 +1,44 @@
+name: Release
+
+# Pushing a tag `vX.Y.Z` publishes lesto-macros, lesto and lesto-cli to crates.io. No API token is
+# stored: crates.io trusts this file of this repository (Trusted Publishing, configured on each
+# crate's settings page with workflow `release.yml` and environment `release`) and hands out a
+# short-lived token in exchange for the job's OIDC token. A crate's first version cannot be
+# published this way; it was published by hand.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    # Restrict the environment to `v*` tags in the repository settings: crates.io checks it too.
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      # A tag that does not match `[workspace.package] version` would publish the wrong version,
+      # or fail halfway on one that already exists.
+      - name: Check the tag against the workspace version
+        run: |
+          version=$(cargo metadata --no-deps --format-version 1 \
+            | jq -r '.packages[] | select(.name == "lesto") | .version')
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match the workspace version $version"
+            exit 1
+          fi
+      - uses: rust-lang/crates-io-auth-action@v1
+        id: auth
+      # Publishes in dependency order (lesto-macros before lesto) and verifies each package.
+      - run: cargo publish --workspace
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
