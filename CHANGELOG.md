@@ -21,6 +21,12 @@ All notable changes to lesto are listed here. The format follows
 - An application with no `tracing` subscriber of its own now prints logs; `LESTO_LOG=off` or a
   subscriber installed before `serve` restores the silence. Applications with their own
   subscriber now also receive the `lesto::access` event once per request.
+- Feature `otel` on OpenTelemetry 0.33 (`tracing-opentelemetry` 0.34): OTLP/HTTP exports are
+  retried on `429`/`502`/`503`/`504` (3 retries, `Retry-After` honored), and a span or log record
+  queued right before shutdown is no longer dropped by the final flush. No API change in lesto.
+- The `OTEL_*` values lesto reads itself ignore case, as the specification says: `NONE` in
+  `OTEL_LOGS_EXPORTER`, `TRUE` in `OTEL_SDK_DISABLED`, `HTTP/PROTOBUF` in
+  `OTEL_EXPORTER_OTLP_PROTOCOL` (which was reported as unsupported).
 - Dependency lower bounds raised to versions lesto actually builds with (`tokio` 1.46, `tracing`
   0.1.43, `serde` 1.0.228, `tower-http` 0.6.8, `axum` 0.8.2, ...), checked with
   `-Z direct-minimal-versions`; the old ones (`tokio = "1"`, `tracing = "0.1"`) let Cargo pick

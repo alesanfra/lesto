@@ -100,7 +100,10 @@ impl Config {
         let value = |name: &str| get(name).filter(|v| !v.trim().is_empty());
         let protocol = value("OTEL_EXPORTER_OTLP_TRACES_PROTOCOL")
             .or_else(|| value("OTEL_EXPORTER_OTLP_PROTOCOL"));
-        let wanted = |name: &str| value(name).is_none_or(|v| v.trim() != "none");
+        // Enum and boolean values are case-insensitive (the specification's rule, which the OTLP
+        // exporters follow too): `NONE`, `True` and `HTTP/PROTOBUF` mean what they say.
+        let wanted =
+            |name: &str| value(name).is_none_or(|v| !v.trim().eq_ignore_ascii_case("none"));
         Config {
             service_name: value("OTEL_SERVICE_NAME")
                 .unwrap_or_else(|| default_service_name.to_string()),
@@ -109,12 +112,14 @@ impl Config {
                 .or_else(|| value("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT"))
                 .or_else(|| value("OTEL_EXPORTER_OTLP_ENDPOINT"))
                 .is_some(),
-            disabled: value("OTEL_SDK_DISABLED").is_some_and(|v| v.trim() == "true"),
+            disabled: value("OTEL_SDK_DISABLED")
+                .is_some_and(|v| v.trim().eq_ignore_ascii_case("true")),
             traces: wanted("OTEL_TRACES_EXPORTER"),
             logs: wanted("OTEL_LOGS_EXPORTER"),
             metrics: wanted("OTEL_METRICS_EXPORTER"),
             filter: value("RUST_LOG").unwrap_or_else(|| "info".to_string()),
-            unsupported_protocol: protocol.filter(|p| !p.starts_with("http/protobuf")),
+            unsupported_protocol: protocol
+                .filter(|p| !p.trim().to_ascii_lowercase().starts_with("http/protobuf")),
         }
     }
 
@@ -534,6 +539,22 @@ mod tests {
         assert_eq!(grpc.unsupported_protocol.as_deref(), Some("grpc"));
         let http = config(&[("OTEL_EXPORTER_OTLP_PROTOCOL", "http/protobuf")]);
         assert_eq!(http.unsupported_protocol, None);
+        let upper = config(&[("OTEL_EXPORTER_OTLP_PROTOCOL", "HTTP/PROTOBUF")]);
+        assert_eq!(
+            upper.unsupported_protocol, None,
+            "the exporters read it case-insensitively"
+        );
+    }
+
+    #[test]
+    fn enum_and_boolean_values_ignore_case() {
+        let config = config(&[
+            ("OTEL_EXPORTER_OTLP_ENDPOINT", "http://collector:4318"),
+            ("OTEL_LOGS_EXPORTER", "None"),
+            ("OTEL_SDK_DISABLED", "TRUE"),
+        ]);
+        assert!(!config.logs);
+        assert!(config.disabled);
     }
 
     #[test]
