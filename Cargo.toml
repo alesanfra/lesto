@@ -13,38 +13,45 @@ homepage = "https://alesanfra.github.io/lesto/"
 keywords = ["web", "framework", "openapi", "axum", "fastapi"]
 categories = ["web-programming::http-server"]
 
+# A version is a lower bound, not a pin (Cargo.lock pins): the oldest release lesto builds and
+# passes its tests with. Applications resolve against their own lock, so a bound below what the
+# code needs breaks them, not us. Checked with every direct dependency at its minimum:
+#   cargo +nightly update -Z direct-minimal-versions && cargo test --workspace && git checkout Cargo.lock
+# CI's MSRV job does the same on Rust 1.94. Raise a bound when that fails; `lambda_http`,
+# `tower-layer`, `tower-service` (crates/lesto) and `libc` (crates/lesto, crates/lesto-cli) are
+# declared outside this table.
 [workspace.dependencies]
-axum = "0.8"
+axum = "0.8.2"
 # `email` and `url` are features of `lesto` (default on), so an application can drop regex/idna.
 garde = { version = "0.23", features = ["derive"] }
 # `preserve_order` on both is a guarantee, not a convenience: JSON keys keep declaration order in
 # the OpenAPI document and in response bodies. It is a unified feature (every `serde_json::Map`
 # in the graph becomes an `IndexMap`); see AGENTS.md, "Design decisions".
 schemars = { version = "1.2", features = ["derive", "preserve_order"] }
-serde = { version = "1", features = ["derive"] }
-serde_json = { version = "1", features = ["preserve_order"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = { version = "1.0.142", features = ["preserve_order"] }
 serde_html_form = "0.2"
-serde_path_to_error = "0.1"
-mime = "0.3"
-form_urlencoded = "1"
-base64 = "0.22"
+serde_path_to_error = "0.1.11"
+mime = "0.3.16"
+form_urlencoded = "1.2.2"
+base64 = "0.22.1"
 # No features here: `lesto` lists the ones it uses, examples inherit them through unification.
-tokio = "1"
-tower = { version = "0.5", features = ["util"] }
+tokio = "1.46"
+tower = { version = "0.5.2", features = ["util"] }
 # `App::cors`, `App::request_id` and (feature `compression`) `App::compression`.
-tower-http = { version = "0.6", default-features = false }
-http = "1"
-http-body-util = "0.1"
-indexmap = { version = "2", features = ["serde"] }
+tower-http = { version = "0.6.8", default-features = false }
+http = "1.1"
+http-body-util = "0.1.2"
+indexmap = { version = "2.2.3", features = ["serde"] }
 # Safe pin projection for the hand-written layer futures in `lesto::layers`. Macro-only crate,
 # already in the tree through tokio and hyper.
-pin-project-lite = "0.2"
-syn = { version = "2", features = ["full", "extra-traits"] }
-regex = { version = "1", default-features = false, features = ["std"] }
-quote = "1"
-proc-macro2 = "1"
+pin-project-lite = "0.2.12"
+syn = { version = "2.0.87", features = ["full", "extra-traits"] }
+regex = { version = "1.3", default-features = false, features = ["std"] }
+quote = "1.0.35"
+proc-macro2 = "1.0.83"
 sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio"] }
-tracing = "0.1"
+tracing = "0.1.43"
 # feature `otel` of `lesto`: the API crate, the SDK, OTLP exporters over HTTP/protobuf (no TLS
 # stack, no gRPC), the bridges that turn a `tracing` span into an OpenTelemetry span and a
 # `tracing` event into an OpenTelemetry log record, and the subscriber `lesto::otel::init`
@@ -54,14 +61,14 @@ opentelemetry_sdk = { version = "0.32", default-features = false, features = ["t
 opentelemetry-otlp = { version = "0.32", default-features = false, features = ["trace", "logs", "metrics", "http-proto", "reqwest-blocking-client"] }
 opentelemetry-appender-tracing = { version = "0.32", default-features = false }
 tracing-opentelemetry = { version = "0.33", default-features = false }
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
 # feature `oidc` of `lesto`: the async client that fetches the discovery document and the JWKS
 # (the same reqwest major `otel` uses, so the graph holds one), and the JWT verification. Both on
 # aws-lc-rs, so a build has one crypto library; no OpenSSL.
-reqwest = { version = "0.13", default-features = false }
+reqwest = { version = "0.13.2", default-features = false }
 jsonwebtoken = { version = "11", default-features = false }
-anyhow = "1"
-uuid = { version = "1", default-features = false }
+anyhow = "1.0.5"
+uuid = { version = "1.12.1", default-features = false }
 # Dev-only: the MCP client of `crates/lesto/tests/mcp_rmcp.rs`. Plain HTTP on loopback, no TLS.
 rmcp = { version = "3.4", default-features = false, features = ["client", "transport-streamable-http-client-reqwest"] }
 

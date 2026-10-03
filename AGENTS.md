@@ -139,6 +139,7 @@ cargo clippy --workspace --all-targets --all-features   # must be warning-free
 cargo fmt --all
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features   # intra-doc links must resolve
 cargo deny check                              # licenses and advisories (deny.toml)
+cargo +nightly update -Z direct-minimal-versions && cargo test --workspace; git checkout Cargo.lock   # lower bounds hold
 cargo check -p lesto --no-default-features                 # no `log`: no tracing-subscriber
 cargo check -p lesto --no-default-features --features db   # each feature alone must compile too
 cargo check -p lesto --no-default-features --features otel
@@ -166,7 +167,8 @@ cargo run -p lesto-cli -- dev -p notes --port 8765      # lesto dev from this ch
 Test, clippy, fmt, rustdoc and (if docs changed) the mdBook build must pass before a change is
 done; `.github/workflows/ci.yml` runs the same on every push and pull request, in three jobs
 (lint, test with a Postgres service for `db_postgres`, a mock-oauth2-server one for `oidc_provider` and `scripts/mcp-inspector.sh`, `cargo check` on the MSRV 1.94, which
-`sqlx` 0.9 dictates) built with `--profile ci` (unoptimized dependencies, no debug info). When
+`sqlx` 0.9 dictates, with the lock and again with `-Z direct-minimal-versions`) built with
+`--profile ci` (unoptimized dependencies, no debug info). When
 raising `rust-version`, change the MSRV job too. Do not claim success without running them. Gate commits on the test result, never on "it
 should pass". Run `git grep -i presto` before committing: the old name must not come back.
 
@@ -185,7 +187,11 @@ as notes.
   `examples/99-tutorial` (with a test if it makes a runtime claim). Any behavior change updates the
   tutorial chapter, and `README.md` when it changes something the README claims.
 - **Dependencies** are declared once in `[workspace.dependencies]` and referenced with
-  `.workspace = true`. Prefer no new dependencies. Anything heavy or niche goes behind a feature
+  `.workspace = true`. A version there is the *lowest* one lesto works with (major plus the
+  minimum needed, e.g. `tokio = "1.46"`), never a pin: users resolve against their own lock.
+  After adding a dependency or using a newer API, run the `direct-minimal-versions` check of
+  "Commands" and raise the bound it reports; CI's MSRV job runs the same check.
+  Prefer no new dependencies. Anything heavy or niche goes behind a feature
   of `lesto` (`db`, `lambda`), not into a new crate; `lesto`'s dev-dependency on itself turns
   every feature on for tests, so `cargo test --workspace` covers them all.
 - **Errors are RFC 9457** by default; never add an ad hoc error JSON shape. New error responses

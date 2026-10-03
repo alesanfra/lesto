@@ -21,6 +21,10 @@ All notable changes to lesto are listed here. The format follows
 - An application with no `tracing` subscriber of its own now prints logs; `LESTO_LOG=off` or a
   subscriber installed before `serve` restores the silence. Applications with their own
   subscriber now also receive the `lesto::access` event once per request.
+- Dependency lower bounds raised to versions lesto actually builds with (`tokio` 1.46, `tracing`
+  0.1.43, `serde` 1.0.228, `tower-http` 0.6.8, `axum` 0.8.2, ...), checked with
+  `-Z direct-minimal-versions`; the old ones (`tokio = "1"`, `tracing = "0.1"`) let Cargo pick
+  releases lesto cannot compile against. CI's MSRV job now runs the same check.
 - With `otel`, the console next to the OTLP export uses the same format (it was
   `tracing_subscriber::fmt`'s), and the access log is exported as a log record per request.
 
