@@ -15,6 +15,10 @@
 //!   operations to agents over the Model Context Protocol ([`mcp`]); `anyhow` converts
 //!   `anyhow::Error` into a `500`.
 //!
+//! New here? The [tutorial](https://alesanfra.github.io/lesto/) builds an application step by
+//! step, from the first route to databases, security, AWS Lambda and MCP; this reference
+//! documents each item.
+//!
 //! ```no_run
 //! use lesto::prelude::*;
 //!

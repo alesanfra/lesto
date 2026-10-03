@@ -8,6 +8,7 @@ edition = "2024"
 rust-version = "1.94"
 license = "Apache-2.0"
 repository = "https://github.com/alesanfra/lesto"
+homepage = "https://alesanfra.github.io/lesto/"
 keywords = ["web", "framework", "openapi", "axum", "fastapi"]
 categories = ["web-programming::http-server"]
 

@@ -96,7 +96,7 @@ builds, runs, and rebuilds + restarts on every save, keeping the port open while
 (like `fastapi dev`). `lesto run` does it once; `lesto openapi` prints the OpenAPI document without serving
 (`-o api.json` writes it to a file).
 
-**New here?** Start with the [tutorial](https://github.com/alesanfra/lesto/blob/main/docs/tutorial/README.md): sixteen short chapters, from
+**New here?** Start with the [tutorial](https://alesanfra.github.io/lesto/): sixteen short chapters, from
 "Hello" to security, testing, databases, AWS Lambda, OpenTelemetry and MCP, with full code and `curl`
 commands for every step.
 The crates are not on crates.io yet: depend on them by `path` as the tutorial shows.
@@ -290,7 +290,8 @@ with a `WWW-Authenticate` header. See the tutorial's [Security](https://github.c
   `examples/05-routers/` — two APIs in one service (`/api/app/v1`, `/api/analytics/v1`), mounted with `nest`.
   `examples/06-oidc/` — bearer JWTs from a real OpenID Connect provider in Docker, `App::protect` included.
   `examples/99-tutorial/` — every tutorial snippet, compiled and tested.
-- `docs/tutorial/` — the tutorial; `docs/build.sh` builds it as an mdBook site.
+- `docs/tutorial/` — the tutorial; `docs/build.sh` builds it as an mdBook site, published to
+  <https://alesanfra.github.io/lesto/> on every change to `main` (`.github/workflows/pages.yml`).
 
 Design decisions, internals and the roadmap are in [AGENTS.md](https://github.com/alesanfra/lesto/blob/main/AGENTS.md).
 

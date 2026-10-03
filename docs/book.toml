@@ -9,10 +9,11 @@ src = "tutorial"
 build-dir = "book"
 
 [output.html]
+site-url = "/lesto/"
 default-theme = "light"
 preferred-dark-theme = "navy"
-git-repository-url = "https://github.com/OWNER/lesto"
-edit-url-template = "https://github.com/OWNER/lesto/edit/main/docs/tutorial/{path}"
+git-repository-url = "https://github.com/alesanfra/lesto"
+edit-url-template = "https://github.com/alesanfra/lesto/edit/main/docs/tutorial/{path}"
 no-section-label = true
 
 [output.html.playground]

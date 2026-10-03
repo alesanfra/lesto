@@ -116,6 +116,7 @@ examples/05-routers/      package `routers`: chapter 10 as a running app, two AP
 examples/99-tutorial/     package `tutorial`: every tutorial snippet, compiled and tested (keep in sync;
                           appendix D's plain axum router too)
 docs/tutorial/            the tutorial, mdBook (docs/book.toml, docs/build.sh → docs/book, gitignored)
+                          published to GitHub Pages by .github/workflows/pages.yml on push to main
 docs/design/              written designs of bigger features (mcp.md), not part of the book
 ```
 
