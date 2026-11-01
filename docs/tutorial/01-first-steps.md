@@ -11,7 +11,7 @@ Open `Cargo.toml` and add lesto. That is the whole list:
 
 ```toml
 [dependencies]
-lesto = "0.2"
+lesto = "0.3"
 ```
 
 Serialization (serde), JSON schemas (schemars), validation (garde), the async runtime (tokio)

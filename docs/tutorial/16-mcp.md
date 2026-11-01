@@ -18,7 +18,7 @@ runs the route itself. The code of this chapter is in `examples/99-tutorial/src/
 
 ```toml
 [dependencies]
-lesto = { version = "0.2", features = ["mcp"] }
+lesto = { version = "0.3", features = ["mcp"] }
 ```
 
 Mark the operations agents may call, then turn the endpoint on:

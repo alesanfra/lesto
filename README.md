@@ -110,7 +110,7 @@ on axum.
 
 ## Project
 
-Semver; lesto 0.1 tracks axum 0.8, and the crates it re-exports are part of its API. MSRV: Rust
+Semver; lesto 0.3 tracks axum 0.8, and the crates it re-exports are part of its API. MSRV: Rust
 1.94. Contributing, design decisions and the roadmap:
 [AGENTS.md](https://github.com/alesanfra/lesto/blob/main/AGENTS.md).
 
