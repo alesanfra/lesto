@@ -1734,6 +1734,134 @@ async fn request_id_is_generated_or_kept() {
     assert_eq!(response.headers()["x-request-id"], "abc-123");
 }
 
+// ---- security headers ----------------------------------------------------------------------
+
+/// A route answering with a policy of its own (plain axum, merged: lesto cannot document an
+/// `impl IntoResponse`).
+fn framed() -> lesto::axum::Router {
+    lesto::axum::Router::new().route(
+        "/framed",
+        lesto::axum::routing::get(|| async {
+            (
+                [(
+                    header::CONTENT_SECURITY_POLICY,
+                    "frame-ancestors https://portal.example",
+                )],
+                "mine",
+            )
+        }),
+    )
+}
+
+#[tokio::test]
+async fn security_headers_are_opt_in() {
+    let response = App::new()
+        .routes(routes![quick])
+        .into_router()
+        .oneshot(get("/quick"))
+        .await
+        .unwrap();
+    for name in [
+        header::X_CONTENT_TYPE_OPTIONS,
+        header::X_FRAME_OPTIONS,
+        header::REFERRER_POLICY,
+        header::STRICT_TRANSPORT_SECURITY,
+        header::CONTENT_SECURITY_POLICY,
+    ] {
+        assert!(response.headers().get(&name).is_none(), "{name}");
+    }
+}
+
+#[tokio::test]
+async fn security_headers_cover_routes_problems_and_docs() {
+    let app = || {
+        App::new()
+            .routes(routes![quick])
+            .merge(framed())
+            .security_headers(lesto::SecurityHeaders::new())
+            .into_router()
+    };
+    let expected = [
+        (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
+        (header::X_FRAME_OPTIONS, "DENY"),
+        (header::REFERRER_POLICY, "no-referrer"),
+        (header::STRICT_TRANSPORT_SECURITY, "max-age=31536000"),
+    ];
+    for uri in ["/quick", "/missing", "/docs", "/swagger", "/openapi.json"] {
+        let response = app().oneshot(get(uri)).await.unwrap();
+        for (name, value) in &expected {
+            assert_eq!(response.headers()[name], *value, "{name} on {uri}");
+        }
+        let csp = &response.headers()[header::CONTENT_SECURITY_POLICY];
+        if uri == "/docs" || uri == "/swagger" {
+            assert_eq!(csp, "frame-ancestors 'none'", "{uri}: a page loads scripts");
+        } else {
+            assert_eq!(csp, "default-src 'none'; frame-ancestors 'none'", "{uri}");
+        }
+    }
+
+    // A header the handler set wins.
+    let response = app().oneshot(get("/framed")).await.unwrap();
+    assert_eq!(
+        response.headers()[header::CONTENT_SECURITY_POLICY],
+        "frame-ancestors https://portal.example"
+    );
+    assert_eq!(response.headers()[header::X_FRAME_OPTIONS], "DENY");
+}
+
+#[tokio::test]
+async fn security_headers_can_be_changed() {
+    let headers = lesto::SecurityHeaders::new()
+        .hsts(None)
+        .remove(header::X_FRAME_OPTIONS)
+        .insert(
+            header::CONTENT_SECURITY_POLICY,
+            lesto::http::HeaderValue::from_static("default-src 'self'"),
+        )
+        .insert(
+            lesto::http::HeaderName::from_static("cross-origin-resource-policy"),
+            lesto::http::HeaderValue::from_static("same-origin"),
+        );
+    let app = || {
+        App::new()
+            .routes(routes![quick])
+            .security_headers(headers.clone())
+            .into_router()
+    };
+    for uri in ["/quick", "/docs"] {
+        let response = app().oneshot(get(uri)).await.unwrap();
+        let headers = response.headers();
+        assert!(
+            headers.get(header::STRICT_TRANSPORT_SECURITY).is_none(),
+            "{uri}"
+        );
+        assert!(headers.get(header::X_FRAME_OPTIONS).is_none(), "{uri}");
+        assert_eq!(headers[header::X_CONTENT_TYPE_OPTIONS], "nosniff", "{uri}");
+        // An inserted policy applies to pages too.
+        assert_eq!(
+            headers[header::CONTENT_SECURITY_POLICY],
+            "default-src 'self'",
+            "{uri}"
+        );
+        assert_eq!(
+            headers["cross-origin-resource-policy"], "same-origin",
+            "{uri}"
+        );
+    }
+
+    let response = App::new()
+        .routes(routes![quick])
+        .security_headers(lesto::SecurityHeaders::new().hsts(std::time::Duration::from_secs(600)))
+        .into_router()
+        .oneshot(get("/quick"))
+        .await
+        .unwrap();
+    assert_eq!(
+        response.headers()[header::STRICT_TRANSPORT_SECURITY],
+        "max-age=600"
+    );
+}
+
 /// The axum-extractor warning (a deprecation, see `tests/ui/axum_json_skips_validation.rs`)
 /// fires only for `axum::Json<T>` with `T: Validate`: none of these may trigger it.
 #[deny(deprecated)]

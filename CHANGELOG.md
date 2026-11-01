@@ -6,6 +6,15 @@ All notable changes to lesto are listed here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `App::security_headers(SecurityHeaders::new())`: `X-Content-Type-Options: nosniff`,
+  `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, `Strict-Transport-Security:
+  max-age=31536000` and a `Content-Security-Policy` (`default-src 'none'; frame-ancestors
+  'none'`, only `frame-ancestors 'none'` on HTML pages) on every response that does not set
+  them, problems and docs pages included. `SecurityHeaders::hsts`, `insert` and `remove` change
+  the set; `lesto::layers::SecurityHeaders` is the same layer for a plain router.
+
 ### Fixed
 
 - Feature `otel` exports to `https://` endpoints: the exporter's HTTP client is now built with

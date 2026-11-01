@@ -504,6 +504,41 @@ async fn main() -> std::io::Result<()> {
     build_app(AppState::default()).serve().await
 }
 
+/// The built-in layers, all of them, as the chapter lists them.
+pub fn production_app() -> Result<App<()>, Box<dyn std::error::Error>> {
+    use std::time::Duration;
+
+    use lesto::SecurityHeaders;
+    use lesto::cors::{Any, CorsLayer};
+
+    Ok(App::new()
+        .routes(routes![root])
+        .timeout(Duration::from_secs(10))
+        .body_limit(64 * 1024)
+        .cors(
+            CorsLayer::new()
+                .allow_origin(["https://app.example".parse()?])
+                .allow_headers(Any),
+        )
+        .compression()
+        .request_id()
+        .security_headers(SecurityHeaders::new()))
+}
+
+/// The security headers, changed.
+pub fn custom_security_headers() -> lesto::SecurityHeaders {
+    use lesto::SecurityHeaders;
+    use lesto::http::{HeaderName, HeaderValue, header};
+
+    SecurityHeaders::new()
+        .hsts(None) // the domain also serves plain http
+        .remove(header::X_FRAME_OPTIONS) // pages meant to be framed
+        .insert(
+            HeaderName::from_static("cross-origin-resource-policy"),
+            HeaderValue::from_static("same-origin"),
+        )
+}
+
 // ---- Chapter 12 ----------------------------------------------------------------------------
 
 #[cfg(test)]
@@ -540,6 +575,48 @@ mod tests {
         let (status, body) = call(app, req).await;
         assert_eq!(status, StatusCode::OK, "{body}");
         assert_eq!(body, "Hello, lesto!");
+    }
+
+    /// Chapter 11: the built-in layers, security headers on a response and on a problem.
+    #[lesto::test]
+    async fn production_layers_add_security_headers() {
+        for uri in ["/", "/missing"] {
+            let req = Request::get(uri).body(Body::empty()).unwrap();
+            let response = production_app()
+                .unwrap()
+                .into_router()
+                .oneshot(req)
+                .await
+                .unwrap();
+            let headers = response.headers();
+            assert_eq!(headers[header::X_CONTENT_TYPE_OPTIONS], "nosniff", "{uri}");
+            assert_eq!(headers[header::X_FRAME_OPTIONS], "DENY", "{uri}");
+            assert_eq!(headers[header::REFERRER_POLICY], "no-referrer", "{uri}");
+            assert_eq!(
+                headers[header::STRICT_TRANSPORT_SECURITY],
+                "max-age=31536000",
+                "{uri}"
+            );
+            assert_eq!(
+                headers[header::CONTENT_SECURITY_POLICY],
+                "default-src 'none'; frame-ancestors 'none'",
+                "{uri}"
+            );
+            assert!(headers.contains_key("x-request-id"), "{uri}");
+        }
+
+        let req = Request::get("/").body(Body::empty()).unwrap();
+        let response = App::new()
+            .routes(routes![root])
+            .security_headers(custom_security_headers())
+            .into_router()
+            .oneshot(req)
+            .await
+            .unwrap();
+        let headers = response.headers();
+        assert!(!headers.contains_key(header::STRICT_TRANSPORT_SECURITY));
+        assert!(!headers.contains_key(header::X_FRAME_OPTIONS));
+        assert_eq!(headers["cross-origin-resource-policy"], "same-origin");
     }
 
     #[lesto::test]

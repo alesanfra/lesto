@@ -24,12 +24,13 @@ use std::any::Any;
 use std::convert::Infallible;
 use std::marker::PhantomData;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Duration;
 
 use axum::body::Body;
 use axum::response::{IntoResponse, Response};
-use http::{Request, header};
+use http::{HeaderName, HeaderValue, Request, header};
 use pin_project_lite::pin_project;
 use tokio::task::futures::TaskLocalFuture;
 use tower_layer::Layer;
@@ -358,6 +359,216 @@ where
             }
             Poll::Pending => Poll::Pending,
         }
+    }
+}
+
+// ---- security headers ---------------------------------------------------------------------
+
+/// The `Content-Security-Policy` of a response that is not an HTML page: it loads nothing and
+/// may not be framed.
+const API_CSP: HeaderValue = HeaderValue::from_static("default-src 'none'; frame-ancestors 'none'");
+/// The `Content-Security-Policy` of an HTML page (the docs pages, or one of yours): only the
+/// framing rule, because what a page may load depends on the page.
+const HTML_CSP: HeaderValue = HeaderValue::from_static("frame-ancestors 'none'");
+/// One year, the value browsers and the HSTS preload list expect.
+const HSTS_DEFAULT: Duration = Duration::from_secs(365 * 24 * 60 * 60);
+
+/// Adds the response headers a browser uses to protect the users of an API, to every response
+/// that does not set them itself.
+///
+/// [`App::security_headers`](crate::App::security_headers) installs it, outside the problem
+/// rendering, so a `404` or a caught panic carries the headers too. [`SecurityHeaders::new`]
+/// sets:
+///
+/// | header | value |
+/// |---|---|
+/// | `X-Content-Type-Options` | `nosniff` |
+/// | `X-Frame-Options` | `DENY` |
+/// | `Referrer-Policy` | `no-referrer` |
+/// | `Strict-Transport-Security` | `max-age=31536000` |
+/// | `Content-Security-Policy` | `default-src 'none'; frame-ancestors 'none'`, and only `frame-ancestors 'none'` on `text/html` responses |
+///
+/// A header the handler already set is left alone, so one route can answer with a policy of its
+/// own. Browsers ignore `Strict-Transport-Security` on plain `http`, so it is harmless in
+/// development; behind a proxy that terminates TLS it reaches the browser over `https` and
+/// takes effect.
+///
+/// ```
+/// use std::time::Duration;
+/// use lesto::SecurityHeaders;
+/// use lesto::http::{HeaderName, HeaderValue};
+///
+/// let headers = SecurityHeaders::new()
+///     .hsts(None) // the domain also serves plain http
+///     .insert(
+///         HeaderName::from_static("cross-origin-resource-policy"),
+///         HeaderValue::from_static("same-origin"),
+///     );
+/// ```
+#[derive(Debug, Clone)]
+pub struct SecurityHeaders {
+    inner: Arc<SecurityHeadersInner>,
+}
+
+#[derive(Debug, Clone)]
+struct SecurityHeadersInner {
+    /// Set as they are, when the response has none.
+    headers: Vec<(HeaderName, HeaderValue)>,
+    /// The two built-in policies of `Content-Security-Policy`, by content type; `false` once
+    /// [`SecurityHeaders::insert`] or [`SecurityHeaders::remove`] took that header over.
+    csp_by_content_type: bool,
+}
+
+impl SecurityHeaders {
+    /// The headers in the table above.
+    pub fn new() -> Self {
+        let hsts = hsts_value(HSTS_DEFAULT);
+        Self {
+            inner: Arc::new(SecurityHeadersInner {
+                headers: vec![
+                    (
+                        header::X_CONTENT_TYPE_OPTIONS,
+                        HeaderValue::from_static("nosniff"),
+                    ),
+                    (header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY")),
+                    (
+                        header::REFERRER_POLICY,
+                        HeaderValue::from_static("no-referrer"),
+                    ),
+                    (header::STRICT_TRANSPORT_SECURITY, hsts),
+                ],
+                csp_by_content_type: true,
+            }),
+        }
+    }
+
+    /// `Strict-Transport-Security: max-age=<seconds>`, or no such header with `None` (for a
+    /// domain that must stay reachable over plain `http`). One year by default. Neither
+    /// `includeSubDomains` nor `preload` is sent: both commit domains other than this
+    /// service's; [`insert`](Self::insert) the full value to opt in.
+    pub fn hsts(self, max_age: impl Into<Option<Duration>>) -> Self {
+        match max_age.into() {
+            Some(max_age) => self.insert(header::STRICT_TRANSPORT_SECURITY, hsts_value(max_age)),
+            None => self.remove(header::STRICT_TRANSPORT_SECURITY),
+        }
+    }
+
+    /// Set `name` to `value` on every response that does not set it, replacing the default
+    /// value if there is one. A `Content-Security-Policy` inserted here applies to HTML pages
+    /// too.
+    pub fn insert(mut self, name: HeaderName, value: HeaderValue) -> Self {
+        let inner = Arc::make_mut(&mut self.inner);
+        if name == header::CONTENT_SECURITY_POLICY {
+            inner.csp_by_content_type = false;
+        }
+        match inner.headers.iter_mut().find(|(n, _)| *n == name) {
+            Some(entry) => entry.1 = value,
+            None => inner.headers.push((name, value)),
+        }
+        self
+    }
+
+    /// Send no `name` header (for instance `X-Frame-Options`, for a service whose pages are
+    /// meant to be framed).
+    pub fn remove(mut self, name: HeaderName) -> Self {
+        let inner = Arc::make_mut(&mut self.inner);
+        if name == header::CONTENT_SECURITY_POLICY {
+            inner.csp_by_content_type = false;
+        }
+        inner.headers.retain(|(n, _)| *n != name);
+        self
+    }
+}
+
+impl Default for SecurityHeaders {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+fn hsts_value(max_age: Duration) -> HeaderValue {
+    HeaderValue::from_str(&format!("max-age={}", max_age.as_secs()))
+        .expect("max-age=<integer> is a valid header value")
+}
+
+impl SecurityHeadersInner {
+    fn apply(&self, response: &mut Response) {
+        let html = response
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .is_some_and(|v| v.trim_start().starts_with("text/html"));
+        let headers = response.headers_mut();
+        for (name, value) in &self.headers {
+            if !headers.contains_key(name) {
+                headers.insert(name.clone(), value.clone());
+            }
+        }
+        if self.csp_by_content_type && !headers.contains_key(header::CONTENT_SECURITY_POLICY) {
+            let csp = if html { HTML_CSP } else { API_CSP };
+            headers.insert(header::CONTENT_SECURITY_POLICY, csp);
+        }
+    }
+}
+
+impl<S> Layer<S> for SecurityHeaders {
+    type Service = SecurityHeadersService<S>;
+
+    fn layer(&self, inner: S) -> Self::Service {
+        SecurityHeadersService {
+            inner,
+            headers: self.inner.clone(),
+        }
+    }
+}
+
+/// The service [`SecurityHeaders`] produces.
+#[derive(Debug, Clone)]
+pub struct SecurityHeadersService<S> {
+    inner: S,
+    headers: Arc<SecurityHeadersInner>,
+}
+
+impl<S, B> Service<Request<B>> for SecurityHeadersService<S>
+where
+    S: Service<Request<B>, Response = Response>,
+{
+    type Response = Response;
+    type Error = S::Error;
+    type Future = SecurityHeadersFuture<S::Future>;
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx)
+    }
+
+    fn call(&mut self, req: Request<B>) -> Self::Future {
+        SecurityHeadersFuture {
+            future: self.inner.call(req),
+            headers: self.headers.clone(),
+        }
+    }
+}
+
+pin_project! {
+    /// The future of [`SecurityHeadersService`].
+    pub struct SecurityHeadersFuture<F> {
+        #[pin]
+        future: F,
+        headers: Arc<SecurityHeadersInner>,
+    }
+}
+
+impl<F, E> Future for SecurityHeadersFuture<F>
+where
+    F: Future<Output = Result<Response, E>>,
+{
+    type Output = Result<Response, E>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.project();
+        let mut response = std::task::ready!(this.future.poll(cx))?;
+        this.headers.apply(&mut response);
+        Poll::Ready(Ok(response))
     }
 }
 

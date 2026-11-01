@@ -90,6 +90,7 @@ pub use error::{
     ValidationErrorItem,
 };
 pub use extract::{Json, Path, Query};
+pub use layers::SecurityHeaders;
 pub use operation::{OperationBuilder, OperationHandler, OperationInput, OperationOutput};
 pub use response::{Accepted, Created, NoContent};
 pub use route::{

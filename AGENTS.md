@@ -32,7 +32,8 @@ crates/lesto/             library
   src/docs.rs             Scalar / Swagger UI HTML (relative openapi.json link)
   src/layers.rs           the tower layers into_router installs, public: ProblemLayer (renders
                           RFC 9457 through a task-local request context), CatchPanicLayer,
-                          RequestSpanLayer, TimeoutLayer (opt-in, `App::timeout`). Hand-written
+                          RequestSpanLayer, TimeoutLayer (opt-in, `App::timeout`),
+                          SecurityHeaders (opt-in, `App::security_headers`). Hand-written
                           services, pin-projected futures
   src/trace.rs            request span (HTTP semconv), Trace config, the access-log event
                           (`lesto::access`), feature `otel`: propagation
@@ -355,6 +356,18 @@ Recorded here because they are not derivable from the code. Do not undo them cas
   its `TimeoutLayer` answers an empty body, and a problem is the whole point) and answers `503`
   — `408` means the *client* was slow, `504` means an upstream gateway was. The body limit is
   axum's own `DefaultBodyLimit`; lesto's `Json` turns its rejection into a `413` problem.
+- **Security headers are opt-in, hand-written, and never overwrite** (decided 2026-11-01).
+  `App::security_headers` sits next to CORS, outside the shared stack, so problems and the docs
+  pages get them. One layer holding a list rather than tower-http's `SetResponseHeaderLayer`
+  once per header: five layers would be five types to stack and five header lookups to change
+  one setting. A header the response already has is left alone (a route can send its own CSP).
+  The CSP depends on the content type: `default-src 'none'; frame-ancestors 'none'` for API
+  responses (OWASP's REST advice), only `frame-ancestors 'none'` for `text/html`, because a
+  page's policy depends on what it loads — Scalar's "try it" client calls whatever `servers`
+  the document lists, so a strict policy on `/docs` would break it. HSTS is on, one year,
+  without `includeSubDomains`/`preload`, which bind domains the service does not own. No
+  `Cache-Control: no-store`: that is caching policy, and it would fight the docs `ETag` and the
+  MCP resources' `Cache-Control`.
 - **The trace layer is outermost but inside routing.** `Router::layer` runs after axum
   matched the request, which is what makes `MatchedPath` (`http.route`) available; being the
   outermost of the stack it still wraps the panic catcher and the problem rendering, so the span

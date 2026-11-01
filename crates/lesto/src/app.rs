@@ -51,6 +51,8 @@ pub struct App<S = ()> {
     compression: bool,
     /// [`App::request_id`].
     request_id: bool,
+    /// [`App::security_headers`].
+    security_headers: Option<crate::layers::SecurityHeaders>,
     /// [`App::oidc`]: the verifier `Jwt` arguments find in the request extensions.
     #[cfg(feature = "oidc")]
     oidc: Option<crate::oidc::Oidc>,
@@ -116,6 +118,7 @@ where
             #[cfg(feature = "compression")]
             compression: false,
             request_id: false,
+            security_headers: None,
             #[cfg(feature = "oidc")]
             oidc: None,
             #[cfg(feature = "oidc")]
@@ -296,6 +299,21 @@ where
     /// and copy it to the response, so a log line, a trace and a client report can be matched.
     pub fn request_id(mut self) -> Self {
         self.request_id = true;
+        self
+    }
+
+    /// Add `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`,
+    /// `Strict-Transport-Security` and `Content-Security-Policy` to every response that does not
+    /// set them itself, problems and the docs pages included. See [`SecurityHeaders`] for the
+    /// values and how to change them:
+    ///
+    /// ```ignore
+    /// app.security_headers(SecurityHeaders::new())
+    /// ```
+    ///
+    /// [`SecurityHeaders`]: crate::SecurityHeaders
+    pub fn security_headers(mut self, headers: crate::layers::SecurityHeaders) -> Self {
+        self.security_headers = Some(headers);
         self
     }
 
@@ -489,6 +507,7 @@ where
             #[cfg(feature = "compression")]
             compression: self.compression,
             request_id: self.request_id,
+            security_headers: self.security_headers,
             #[cfg(feature = "oidc")]
             oidc: self.oidc,
             #[cfg(feature = "oidc")]
@@ -650,8 +669,8 @@ where
             router = router.route(&endpoint.path(), route);
         }
 
-        // Outside the shared stack, opt-in: CORS headers and compression apply to every
-        // response, problems included, and the request span sees the request id.
+        // Outside the shared stack, opt-in: CORS headers, security headers and compression apply
+        // to every response, problems included, and the request span sees the request id.
         if self.request_id {
             let header = http::HeaderName::from_static("x-request-id");
             router = router.layer(tower_layer::Stack::new(
@@ -661,6 +680,9 @@ where
                     tower_http::request_id::MakeRequestUuid,
                 ),
             ));
+        }
+        if let Some(headers) = self.security_headers {
+            router = router.layer(headers);
         }
         #[cfg(feature = "compression")]
         if self.compression {

@@ -40,6 +40,7 @@ rest:
 
 ```rust
 use std::time::Duration;
+use lesto::SecurityHeaders;
 use lesto::cors::{Any, CorsLayer};
 
 App::new()
@@ -49,6 +50,7 @@ App::new()
     .cors(CorsLayer::new().allow_origin(["https://app.example".parse()?]).allow_headers(Any))
     .compression()
     .request_id()
+    .security_headers(SecurityHeaders::new())
 ```
 
 - `.timeout(Duration::from_secs(10))`: a request still running after ten seconds answers
@@ -66,6 +68,36 @@ App::new()
   on by default).
 - `.request_id()`: every request gets an `x-request-id` (a UUID v4, or the one the client or a
   proxy sent), echoed on the response.
+- `.security_headers(SecurityHeaders::new())`: every response that does not set them itself
+  gets the headers a browser uses to protect your users, problems and the docs pages included:
+
+  | header | value |
+  |---|---|
+  | `X-Content-Type-Options` | `nosniff` |
+  | `X-Frame-Options` | `DENY` |
+  | `Referrer-Policy` | `no-referrer` |
+  | `Strict-Transport-Security` | `max-age=31536000` (one year) |
+  | `Content-Security-Policy` | `default-src 'none'; frame-ancestors 'none'` |
+
+  An HTML response (the docs pages, or one of yours) gets only `frame-ancestors 'none'` as its
+  policy: what a page may load depends on the page. A header your handler sets wins, so one
+  route can answer with a policy of its own. Browsers ignore `Strict-Transport-Security` over
+  plain `http`, so it does nothing in development and takes effect behind a proxy that
+  terminates TLS. To change the set:
+
+  ```rust
+  SecurityHeaders::new()
+      .hsts(None)                              // the domain also serves plain http
+      .remove(header::X_FRAME_OPTIONS)         // pages meant to be framed
+      .insert(
+          HeaderName::from_static("cross-origin-resource-policy"),
+          HeaderValue::from_static("same-origin"),
+      )
+  ```
+
+  `.hsts(Duration::from_secs(600))` changes the `max-age`; `includeSubDomains` and `preload`
+  are never added for you, because they commit domains other than this service's. A
+  `Content-Security-Policy` you `insert` replaces both built-in policies, pages included.
 
 None of them costs anything when it is not set. Unlike `layer`, their position in the builder
 chain does not matter.

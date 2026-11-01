@@ -86,7 +86,7 @@ lesto dev                  # rebuild and restart on save, the port stays open
 - **OpenTelemetry** with `otel`: traces, logs and metrics, configured by the `OTEL_*` variables.
 - **AWS Lambda** with `lambda`: the same app behind API Gateway, Function URLs or ALB.
 - **Production defaults**: graceful shutdown, timeouts, body limits, CORS, compression, request
-  ids, panics answered as `500` problems.
+  ids, security headers, panics answered as `500` problems.
 - **Plain axum underneath**: a lesto app is an `axum::Router`, and an axum router mounts in a
   lesto app. [Leaving](https://alesanfra.github.io/lesto/D-leaving-lesto.html) is a documented
   path.
