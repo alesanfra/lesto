@@ -6,6 +6,8 @@ All notable changes to lesto are listed here. The format follows
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-01
+
 ### Added
 
 - `App::security_headers(SecurityHeaders::new())`: `X-Content-Type-Options: nosniff`,
