@@ -90,7 +90,9 @@ The telemetry stack is kept out of its own pipeline: records from `opentelemetry
 `hyper` and friends are printed on the console but never exported, or an export failure would be
 logged, exported, and fail again.
 
-The export is OTLP over HTTP/protobuf. Two things lesto deliberately does not do: it never
+The export is OTLP over HTTP/protobuf, to `http://` or `https://` endpoints alike (rustls,
+with the system's certificates), so a managed backend is one endpoint and one
+`OTEL_EXPORTER_OTLP_HEADERS` away. Two things lesto deliberately does not do: it never
 touches an application that has already installed a `tracing` subscriber, and it never exports
 without an endpoint. So a pipeline of your own (gRPC, a custom sampler, spans *and* logs) stays
 possible: build your subscriber before `serve`, and lesto stands aside.

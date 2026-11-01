@@ -49,8 +49,10 @@ opentelemetry_sdk = { workspace = true, optional = true }
 opentelemetry-otlp = { workspace = true, optional = true }
 opentelemetry-appender-tracing = { workspace = true, optional = true }
 tracing-opentelemetry = { workspace = true, optional = true }
-# feature `oidc`
+# features `oidc` and `otel`: rustls on aws-lc-rs, so `https` endpoints work (`otel`'s exporter
+# uses this same reqwest)
 reqwest = { workspace = true, optional = true, features = ["rustls"] }
+# feature `oidc`
 jsonwebtoken = { workspace = true, optional = true, features = ["aws_lc_rs"] }
 # feature `lambda`
 lambda_http = { version = "1.3", default-features = false, features = ["apigw_rest", "apigw_http", "alb"], optional = true }
@@ -89,13 +91,15 @@ mcp = []
 log = ["dep:tracing-subscriber"]
 # `lesto::otel`: OTLP export of spans *and* log events, configured by the standard `OTEL_*`
 # variables (`App::serve` sets it up by itself), plus trace context propagation so an incoming
-# `traceparent` continues here. The spans themselves need no feature.
+# `traceparent` continues here. The spans themselves need no feature. `dep:reqwest` turns rustls on
+# for the exporter's client, so an `https` endpoint works: the same reqwest and aws-lc-rs as `oidc`.
 otel = [
     "dep:opentelemetry",
     "dep:opentelemetry_sdk",
     "dep:opentelemetry-otlp",
     "dep:opentelemetry-appender-tracing",
     "dep:tracing-opentelemetry",
+    "dep:reqwest",
     "log",
 ]
 

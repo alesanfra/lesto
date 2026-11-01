@@ -6,6 +6,12 @@ All notable changes to lesto are listed here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Feature `otel` exports to `https://` endpoints: the exporter's HTTP client is now built with
+  rustls (aws-lc-rs, the same as feature `oidc`). Before, an `https` endpoint failed with
+  "network error", which ruled out managed backends without an exporter of your own.
+
 ## [0.2.0] - 2026-10-03
 
 ### Added

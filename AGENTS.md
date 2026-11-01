@@ -330,11 +330,14 @@ Recorded here because they are not derivable from the code. Do not undo them cas
   lookup and a header walk for an answer that cannot change.
 - **OTLP over HTTP/protobuf with the *blocking* reqwest client.** The batch processor runs on a
   thread of its own with no tokio reactor, so an async client panics there with "there is no
-  reactor running" — the blocking client is what that processor is built for. No TLS feature is
-  enabled (`https` endpoints need your own exporter): `opentelemetry-http`'s rustls features do
-  not resolve against reqwest 0.12, and pulling a TLS stack into every `otel` build to reach a
-  collector that is usually a sidecar is the wrong trade. gRPC is not wired for the same reason
-  (tonic, prost-grpc); `OTEL_EXPORTER_OTLP_PROTOCOL=grpc` is reported as ignored, not silently.
+  reactor running" — the blocking client is what that processor is built for. `otel` turns on
+  `reqwest/rustls` through lesto's own optional `reqwest` (decided 2026-11-01): managed backends
+  (Grafana Cloud, Honeycomb, Datadog) take `https` only, and without a TLS stack the export
+  failed with nothing but "network error". It is the reqwest 0.13 the exporter already uses and
+  the aws-lc-rs `oidc` already brings, so there is one of each in the graph, and none of it
+  without `otel` or `oidc`. Not `opentelemetry-http`'s rustls features, which did not resolve
+  against reqwest 0.12. gRPC is not wired (tonic, prost-grpc: a second HTTP stack);
+  `OTEL_EXPORTER_OTLP_PROTOCOL=grpc` is reported as ignored, not silently.
 - **Spans are `tracing`, not OpenTelemetry.** The request span and the store span carry the
   semantic-convention field names plus the `otel.name` / `otel.kind` / `otel.status_code` fields
   `tracing-opentelemetry` reads, so the spans themselves cost no dependency and work with any

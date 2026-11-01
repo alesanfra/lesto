@@ -52,8 +52,8 @@ quote = "1.0.35"
 proc-macro2 = "1.0.83"
 sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio"] }
 tracing = "0.1.43"
-# feature `otel` of `lesto`: the API crate, the SDK, OTLP exporters over HTTP/protobuf (no TLS
-# stack, no gRPC), the bridges that turn a `tracing` span into an OpenTelemetry span and a
+# feature `otel` of `lesto`: the API crate, the SDK, OTLP exporters over HTTP/protobuf (TLS through
+# reqwest's rustls, enabled by lesto's own reqwest dependency; no gRPC), the bridges that turn a `tracing` span into an OpenTelemetry span and a
 # `tracing` event into an OpenTelemetry log record, and the subscriber `lesto::otel::init`
 # installs.
 opentelemetry = { version = "0.33", default-features = false, features = ["trace", "logs", "metrics"] }
@@ -62,8 +62,9 @@ opentelemetry-otlp = { version = "0.33", default-features = false, features = ["
 opentelemetry-appender-tracing = { version = "0.33", default-features = false }
 tracing-opentelemetry = { version = "0.34", default-features = false }
 tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
-# feature `oidc` of `lesto`: the async client that fetches the discovery document and the JWKS
-# (the same reqwest major `otel` uses, so the graph holds one), and the JWT verification. Both on
+# features `oidc` and `otel` of `lesto`: the async client that fetches the discovery document and
+# the JWKS, and the TLS stack of the OTLP exporter's blocking client (the same reqwest major
+# opentelemetry-otlp uses, so the graph holds one), and the JWT verification. Both on
 # aws-lc-rs, so a build has one crypto library; no OpenSSL.
 reqwest = { version = "0.13.2", default-features = false }
 jsonwebtoken = { version = "11", default-features = false }
