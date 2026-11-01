@@ -6,6 +6,8 @@ All notable changes to lesto are listed here. The format follows
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-11-01
+
 ### Fixed
 
 - The repository builds with the minimum supported Rust (1.94) again: `default-features = false`
