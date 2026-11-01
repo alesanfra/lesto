@@ -35,7 +35,9 @@ use std::borrow::Cow;
 use std::net::SocketAddr;
 use std::time::Instant;
 
-use axum::extract::{ConnectInfo, MatchedPath};
+#[cfg(not(target_arch = "wasm32"))]
+use axum::extract::ConnectInfo;
+use axum::extract::MatchedPath;
 use axum::response::Response;
 use http::{HeaderMap, Method, Version, header};
 use tracing::Span;
@@ -170,10 +172,14 @@ pub(crate) fn request_span<B>(req: &http::Request<B>, config: Trace) -> Span {
         }
     }
 
+    // `ConnectInfo` comes from `axum::serve`, which does not exist on wasm32 (no sockets).
+    #[cfg(not(target_arch = "wasm32"))]
     let peer = req
         .extensions()
         .get::<ConnectInfo<SocketAddr>>()
         .map(|ConnectInfo(addr)| *addr);
+    #[cfg(target_arch = "wasm32")]
+    let peer: Option<SocketAddr> = None;
     if let Some(peer) = peer {
         span.record("network.peer.address", tracing::field::display(peer.ip()));
         span.record("network.peer.port", peer.port());

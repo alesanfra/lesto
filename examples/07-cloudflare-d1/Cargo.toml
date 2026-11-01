@@ -1,0 +1,33 @@
+# Not a member of the workspace (see `exclude` in the root Cargo.toml): it builds for
+# wasm32-unknown-unknown only, so it carries its own versions and its own Cargo.lock.
+[package]
+name = "cloudflare-d1"
+version = "0.2.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+description = "lesto on Cloudflare Workers with a D1 database"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# No default features: no `log` (tracing-subscriber prints to stdout; Workers logs go through
+# `console`). The library part of lesto (`App::into_router`) is all a Worker needs.
+lesto = { path = "../../crates/lesto", default-features = false, features = ["email", "url"] }
+axum = { version = "0.8", default-features = false }
+worker = { version = "0.8", features = ["http", "axum", "d1"] }
+# `tower-http`'s request-id layer (part of lesto) generates UUIDs; on wasm32-unknown-unknown
+# they need a source of randomness, which the Workers runtime provides through the JS bindings.
+uuid = { version = "1", features = ["js"] }
+getrandom = { version = "0.3", features = ["wasm_js"] }
+tower-service = "0.3"
+console_error_panic_hook = "0.1"
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+
+# Its own workspace root, so cargo never looks for a parent one.
+[workspace]

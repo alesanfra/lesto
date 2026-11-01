@@ -83,7 +83,9 @@ pub mod route;
 pub mod security;
 pub mod trace;
 
-pub use app::{App, DEFAULT_SHUTDOWN_TIMEOUT, bind_address, listener, shutdown_signal};
+pub use app::{App, DEFAULT_SHUTDOWN_TIMEOUT};
+#[cfg(not(target_arch = "wasm32"))]
+pub use app::{bind_address, listener, shutdown_signal};
 pub use docs::DocsAssets;
 pub use error::{
     HttpError, IntoStatus, Problem, ProblemError, ProblemRendered, Rejection, ValidationError,

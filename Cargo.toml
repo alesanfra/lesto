@@ -1,6 +1,9 @@
 [workspace]
 resolver = "2"
 members = ["crates/*", "examples/*"]
+# Builds for wasm32-unknown-unknown only (Cloudflare Workers), so `cargo test --workspace` on the
+# host cannot compile it. Build it from its own directory: see examples/07-cloudflare-d1/README.md.
+exclude = ["examples/07-cloudflare-d1"]
 
 [workspace.package]
 version = "0.2.0"

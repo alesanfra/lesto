@@ -14,6 +14,11 @@ All notable changes to lesto are listed here. The format follows
   'none'`, only `frame-ancestors 'none'` on HTML pages) on every response that does not set
   them, problems and docs pages included. `SecurityHeaders::hsts`, `insert` and `remove` change
   the set; `lesto::layers::SecurityHeaders` is the same layer for a plain router.
+- `lesto` compiles for `wasm32-unknown-unknown`: the server half (`App::serve` and friends,
+  `bind_address`, `listener`, `shutdown_signal`) and the `ConnectInfo` peer in request spans are
+  native only, and axum/tokio take their socket and multi-threaded runtime features only off
+  wasm32 (native features are unchanged). `examples/07-cloudflare-d1` runs the notes API on
+  Cloudflare Workers with D1, through `App::into_router`.
 
 ### Fixed
 

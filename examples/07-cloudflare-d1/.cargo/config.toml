@@ -1,0 +1,6 @@
+[build]
+target = "wasm32-unknown-unknown"
+
+# getrandom 0.3 on wasm32-unknown-unknown has no default backend: pick the JS one.
+[target.wasm32-unknown-unknown]
+rustflags = ["--cfg", 'getrandom_backend="wasm_js"']

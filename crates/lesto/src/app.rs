@@ -728,6 +728,7 @@ fn protected(mut pending: PendingOperation, protect: &crate::oidc::Protect) -> P
     pending
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl App<()> {
     /// Serve on the address the environment says (see [`bind_address`]) or on a socket
     /// inherited from the parent process (`lesto dev`, systemd socket activation, `systemfd`;
@@ -840,10 +841,12 @@ impl App<()> {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Set by `lesto openapi`: [`App::serve`] writes the OpenAPI document to this file and returns
 /// instead of serving.
 const OPENAPI_PATH_VAR: &str = "LESTO_OPENAPI_PATH";
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Resolves on `Ctrl-C` (`SIGINT`) or, on Unix, `SIGTERM`: what an orchestrator sends first.
 pub async fn shutdown_signal() {
     let ctrl_c = async {
@@ -866,6 +869,7 @@ pub async fn shutdown_signal() {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// The address [`App::serve`] binds: `LESTO_HOST` (default `127.0.0.1`) and `LESTO_PORT`
 /// (default `8000`). `PORT` is honored when `LESTO_PORT` is absent, for platforms that set it
 /// (Heroku, Cloud Run). A port that is not a number is an `InvalidInput` error.
@@ -873,6 +877,7 @@ pub fn bind_address() -> std::io::Result<(String, u16)> {
     bind_address_from(|name| std::env::var(name).ok())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// [`bind_address`] against any source of variables, so tests never write the environment.
 fn bind_address_from(get: impl Fn(&str) -> Option<String>) -> std::io::Result<(String, u16)> {
     let host = get("LESTO_HOST")
@@ -890,6 +895,7 @@ fn bind_address_from(get: impl Fn(&str) -> Option<String>) -> std::io::Result<(S
     Ok((host, port))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// The listener [`App::serve`] uses: an inherited socket when there is one, else a fresh bind.
 ///
 /// The inherited socket follows systemd's protocol: `LISTEN_FDS=1` and, optionally,
@@ -936,7 +942,7 @@ fn inherited_listener() -> std::io::Result<Option<tokio::net::TcpListener>> {
     tokio::net::TcpListener::from_std(std_listener).map(Some)
 }
 
-#[cfg(not(unix))]
+#[cfg(all(not(unix), not(target_arch = "wasm32")))]
 fn inherited_listener() -> std::io::Result<Option<tokio::net::TcpListener>> {
     Ok(None)
 }

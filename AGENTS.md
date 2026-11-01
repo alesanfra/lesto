@@ -125,6 +125,8 @@ examples/06-oidc/         package `oidc-example`: chapter 9's OpenID Connect aga
                           example), verify.sh. Not run in CI: needs Docker
 examples/05-routers/      package `routers`: chapter 10 as a running app, two APIs (`/api/app/v1`,
                           `/api/analytics/v1`) as FastAPI-style routers mounted with `nest`, tests/api.rs
+examples/07-cloudflare-d1/ package `cloudflare-d1`: lesto on Cloudflare Workers + D1 (wasm32-unknown-unknown),
+                          excluded from the workspace (own Cargo.lock; see its README). Not run in CI
 examples/99-tutorial/     package `tutorial`: every tutorial snippet, compiled and tested (keep in sync;
                           appendix D's plain axum router too)
 docs/tutorial/            the tutorial, mdBook (docs/book.toml, docs/build.sh → docs/book, gitignored)
@@ -440,6 +442,14 @@ Recorded here because they are not derivable from the code. Do not undo them cas
   endpoint passes the body through; a `4xx` from it is `-32602` (the arguments' fault), checked
   at compile time through `__private::PromptOutput`. The methods of a kind the app does not
   expose answer `-32601`, as the capabilities announce.
+- **wasm32 is supported by gating the server half, not by a feature** (Cloudflare Workers, example
+  07). `App::serve*`, `bind_address`, `listener`, `shutdown_signal` and the `ConnectInfo` peer are
+  `#[cfg(not(target_arch = "wasm32"))]`; axum's `http1`/`tokio` and tokio's `rt-multi-thread`/
+  `net`/`signal` sit in a `cfg(not(wasm32))` dependency table, so native feature sets are the same
+  as before (axum's default features are listed explicitly minus those two). Workers call
+  `App::into_router` from their `fetch` handler. The example is excluded from the workspace
+  because it only builds for wasm32. Not supported there: `App::timeout`, `log`, `db`, `lambda`,
+  `oidc`, `otel`, `mcp`; a panic aborts the instance.
 - **`lesto::lambda` wraps `lambda_http`, it does not reimplement it.** The official runtime already
   turns API Gateway v1/v2, Function URL and ALB events into `http::Request`s and accepts any
   tower service, so the crate adds only what lesto users need: the Lambda-or-local switch on

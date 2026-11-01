@@ -1,0 +1,14 @@
+name = "lesto-notes"
+main = "build/worker/shim.mjs"
+compatibility_date = "2026-10-01"
+
+[build]
+command = "cargo install -q worker-build && worker-build --release"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "lesto-notes"
+# Replace with the id printed by `wrangler d1 create lesto-notes`. `wrangler dev` (local mode)
+# does not need a real one.
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "migrations"

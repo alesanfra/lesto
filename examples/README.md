@@ -12,6 +12,7 @@ on the `lesto` of this checkout, not on the published crate.
 | [`04-opentelemetry`](04-opentelemetry) | `opentelemetry-example` | traces, logs and metrics to Jaeger or OpenObserve, configured by `OTEL_*` only | [15](../docs/tutorial/15-observability.md) |
 | [`05-routers`](05-routers) | `routers` | two APIs in one service, mounted with `nest` like FastAPI routers | [10](../docs/tutorial/10-bigger-projects.md) |
 | [`06-oidc`](06-oidc) | `oidc-example` | bearer JWTs from a real OpenID Connect provider | [9](../docs/tutorial/09-security.md) |
+| [`07-cloudflare-d1`](07-cloudflare-d1) | `cloudflare-d1` | lesto on Cloudflare Workers (wasm32) with a D1 database; outside the workspace, see its README | - |
 | [`99-tutorial`](99-tutorial) | `tutorial` | every snippet of the tutorial, compiled and tested | all |
 
 Port 8000 (the default) is often taken on a development machine, hence `LESTO_PORT=8765` below.
