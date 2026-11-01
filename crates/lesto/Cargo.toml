@@ -17,7 +17,7 @@ exclude = ["tests/", "benches/"]
 
 [dependencies]
 lesto-macros.workspace = true
-axum = { workspace = true, default-features = false, features = ["form", "json", "matched-path", "original-uri", "query", "tower-log", "tracing"] }
+axum = { workspace = true, features = ["form", "json", "matched-path", "original-uri", "query", "tower-log", "tracing"] }
 garde.workspace = true
 schemars.workspace = true
 serde.workspace = true

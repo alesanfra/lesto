@@ -24,7 +24,7 @@ categories = ["web-programming::http-server"]
 # `tower-layer`, `tower-service` (crates/lesto) and `libc` (crates/lesto, crates/lesto-cli) are
 # declared outside this table.
 [workspace.dependencies]
-axum = "0.8.2"
+axum = { version = "0.8.2", default-features = false }
 # `email` and `url` are features of `lesto` (default on), so an application can drop regex/idna.
 garde = { version = "0.23", features = ["derive"] }
 # `preserve_order` on both is a guarantee, not a convenience: JSON keys keep declaration order in

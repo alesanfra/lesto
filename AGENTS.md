@@ -446,7 +446,9 @@ Recorded here because they are not derivable from the code. Do not undo them cas
   07). `App::serve*`, `bind_address`, `listener`, `shutdown_signal` and the `ConnectInfo` peer are
   `#[cfg(not(target_arch = "wasm32"))]`; axum's `http1`/`tokio` and tokio's `rt-multi-thread`/
   `net`/`signal` sit in a `cfg(not(wasm32))` dependency table, so native feature sets are the same
-  as before (axum's default features are listed explicitly minus those two). Workers call
+  as before (axum's default features are listed explicitly minus those two; `default-features =
+  false` sits on the workspace entry, because Cargo 1.94 refuses it on a member that inherits
+  a dependency with default features). Workers call
   `App::into_router` from their `fetch` handler. The example is excluded from the workspace
   because it only builds for wasm32. Not supported there: `App::timeout`, `log`, `db`, `lambda`,
   `oidc`, `otel`, `mcp`; a panic aborts the instance.

@@ -6,6 +6,12 @@ All notable changes to lesto are listed here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- The repository builds with the minimum supported Rust (1.94) again: `default-features = false`
+  for axum moved to the workspace entry, which Cargo 1.94 requires. The published 0.3.0 crates
+  were not affected (their manifests carry no workspace inheritance).
+
 ## [0.3.0] - 2026-11-01
 
 ### Added
