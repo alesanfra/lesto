@@ -248,12 +248,16 @@ async fn main() -> Result<(), lesto::lambda::Error> {
 }
 ```
 
-Lambda freezes the instance as soon as it has the response, and a batching exporter's timer does
-not run while it is frozen: spans would leave at the next invocation, or never. So
-`lesto::lambda` flushes the providers after every invocation, before the response goes back to
-the runtime. The invocation waits for the export, so keep the collector close: the OpenTelemetry
-Lambda layer, or another collector extension, listens on `localhost`. If what you export to
-buffers across freezes by itself, turn the flush off:
+Lambda freezes the instance as soon as the invocation is over, and a batching exporter's timer
+does not run while it is frozen: spans would leave at the next invocation, or never. So
+`lesto::lambda` flushes the providers after every invocation. It does it from an *internal
+extension*, a task in your function's process that Lambda waits for: the runtime posts the
+response, the caller has it, and the extension exports before the instance freezes. The export
+is billed as part of the invocation (`PostRuntimeExtensionsDuration` in the `REPORT` line), and
+that instance takes its next invocation once it is done, but no caller waits for it. Where there
+is no Extensions API (an emulator without it), or several invocations share the process
+(`AWS_LAMBDA_MAX_CONCURRENCY`), the flush happens before the response instead. If what you
+export to buffers across freezes by itself, turn the flush off:
 
 ```rust
 lesto::lambda::serve_with(app, Options::default().flush_telemetry(false)).await
@@ -293,9 +297,9 @@ spans are stored in the `aws/spans` log group and billed as CloudWatch Logs inge
 the function's role `AWSXrayWriteOnlyPolicy`. With `Options::xray(true)` the trace is the one
 API Gateway and Lambda started.
 
-The price is time: the flush is an HTTPS call to the regional endpoint before the response goes
-back, a few milliseconds when the connection is still open, tens when the freeze dropped it and
-TLS starts over. A collector extension on `localhost` takes that off the response.
+The price is time, though not the caller's: the flush is an HTTPS call to the regional endpoint
+after the response, a few milliseconds when the connection is still open, tens when the freeze
+dropped it and TLS starts over, billed as part of the invocation.
 
 The credentials are read from those three variables only, which covers Lambda and any process
 you hand them to; on ECS or EC2 (container or instance credentials, refreshed by the SDKs) run a

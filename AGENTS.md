@@ -596,8 +596,21 @@ Recorded here because they are not derivable from the code. Do not undo them cas
   on purpose — that is the boundary the design is built on.
 - **`lesto::lambda` flushes telemetry per invocation** (decided 2026-11-13, issue #4). Lambda
   freezes the instance once it has the response, and the batch processors' timers do not run
-  while frozen. The handler collects the body, then `otel::flush` runs on the blocking pool
-  (`force_flush` blocks on the processor threads) before the response is returned. `flush`
+  while frozen. The handler collects the body; `otel::flush` then runs on the blocking pool
+  (`force_flush` blocks on the processor threads) in an *internal extension*: `run_with`
+  registers one for `INVOKE` events (Extensions API, two calls written on `otel`'s reqwest; the
+  `lambda-extension` crate would add `chrono`, `async-stream`, `tokio-stream`), each invocation
+  signals "done" through a channel when its future ends (`DoneOnDrop`, so an error still
+  signals), and the extension flushes and only then asks for its next event, which is what
+  Lambda waits for before freezing. The caller gets the response before the export. An
+  extension that stops asking holds every invocation until its timeout, so `event/next` is
+  retried, never abandoned. After a flush it drains the dones that arrived meanwhile and flushes
+  again before asking: Lambda never runs an invocation while an extension is busy, but floci
+  does and drops the `INVOKE` events the extension missed, which left the last invocation's
+  telemetry for the next one. Checked on floci with a verifier delaying each export by 1 s:
+  0.28 s responses with the extension, 3.3 s with the flush before the response. Fallback to flushing before the response without the Extensions API
+  (warned) or with `AWS_LAMBDA_MAX_CONCURRENCY` > 1 (no freeze, no pairing), and in
+  `test::invoke`. `flush`
   reaches the providers through a registry of clones that `Telemetry` fills on creation and
   clears on drop, so it works with `init` called by hand (the documented path) without a
   `Telemetry` argument on `lambda::run`; `Telemetry::from_providers` registers an application's

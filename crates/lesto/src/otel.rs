@@ -319,6 +319,12 @@ pub fn flush() {
     );
 }
 
+/// Is there a live [`Telemetry`] for [`flush`] to flush?
+#[cfg(feature = "lambda")]
+pub(crate) fn has_telemetry() -> bool {
+    installed().is_some()
+}
+
 /// [`flush`] on the blocking pool, skipped without a live [`Telemetry`] (no thread hop then).
 #[cfg(feature = "lambda")]
 pub(crate) async fn flush_async() {

@@ -21,8 +21,8 @@ All notable changes to lesto are listed here. The format follows
 
 ### Fixed
 
-- On AWS Lambda, spans, logs and metrics are flushed after every invocation, before the response
-  is returned to the runtime (#4). Lambda freezes the instance between invocations, so the batch
+- On AWS Lambda, spans, logs and metrics are flushed after every invocation, by an internal
+  extension once the response is posted, so callers do not wait for the export (#4). Lambda freezes the instance between invocations, so the batch
   exporters exported an invocation's telemetry late, at the next invocation, or never.
 
 ## [0.3.1] - 2026-11-01

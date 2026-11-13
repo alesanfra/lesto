@@ -49,8 +49,8 @@ sets `AWS_LAMBDA_LOG_FORMAT=JSON`, which makes lesto write JSON too (`LESTO_LOG`
 Logs Insights can query `http.route` or `http.response.status_code` directly.
 
 **Traces.** With the `otel` feature, call `lesto::otel::init()` before `serve`: the spans and log
-records of an invocation are flushed before its response is returned, because a frozen instance
-exports nothing. Chapter 15 has the details, `Options::flush_telemetry` to turn it off,
+records of an invocation are exported right after its response, before Lambda freezes the
+instance (a frozen instance exports nothing). Chapter 15 has the details, `Options::flush_telemetry` to turn it off,
 `Options::xray` to join the X-Ray trace of the invocation, and how to send the spans straight to
 X-Ray (lesto signs the request with the function's role) without a layer.
 
