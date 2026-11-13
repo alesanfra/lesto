@@ -504,6 +504,21 @@ async fn main() -> std::io::Result<()> {
     build_app(AppState::default()).serve().await
 }
 
+/// Chapter 15, "In Lambda": OpenTelemetry in a Lambda function. `lesto::lambda::serve` flushes
+/// the providers after every invocation; the guard only has to stay alive.
+pub async fn lambda_main(app: App<()>) -> Result<(), lesto::lambda::Error> {
+    let _telemetry = lesto::otel::init_named("notes");
+    lesto::lambda::serve(app).await
+}
+
+/// The same, for a collector that buffers across freezes by itself.
+pub async fn lambda_main_without_flush(app: App<()>) -> Result<(), lesto::lambda::Error> {
+    use lesto::lambda::Options;
+
+    let _telemetry = lesto::otel::init_named("notes");
+    lesto::lambda::serve_with(app, Options::default().flush_telemetry(false)).await
+}
+
 /// The built-in layers, all of them, as the chapter lists them.
 pub fn production_app() -> Result<App<()>, Box<dyn std::error::Error>> {
     use std::time::Duration;

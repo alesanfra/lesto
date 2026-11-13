@@ -16,32 +16,62 @@
 //! With a REST API the stage name is part of the path (`/prod/notes`); by default it is
 //! removed so routes stay `/notes`. See [`Options::keep_stage`].
 //!
+//! With the `otel` feature, the telemetry buffered during an invocation is exported before the
+//! response goes back to the runtime: Lambda freezes the environment as soon as it has the
+//! response, and the batch exporters' timers do not run while it is frozen. See
+//! [`Options::flush_telemetry`].
+//!
 //! [`test::invoke`] feeds an event fixture to a router without Lambda, for tests.
 
 use crate::App;
 use axum::Router;
-use http::Request;
+use axum::body::Body;
+use http::{Request, Response};
+use http_body_util::BodyExt;
 use lambda_http::RequestExt;
 use lambda_http::request::RequestContext;
-use tower::ServiceExt;
-use tower::util::MapRequest;
+use tower::{Service, ServiceExt};
 
 /// The error type of the Lambda runtime: any `Box<dyn std::error::Error + Send + Sync>`.
 pub use lambda_http::Error;
 
 /// How [`serve_with`] behaves inside Lambda.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Options {
     /// Keep the API Gateway stage in the request path (`/prod/notes`). Off by default: the
     /// stage is stripped and routes match as they do locally.
     pub keep_stage: bool,
+    /// Flush the OpenTelemetry providers after every invocation, before the response is
+    /// returned (feature `otel`; without it there is nothing to flush). On by default.
+    pub flush_telemetry: bool,
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Options {
+            keep_stage: false,
+            flush_telemetry: true,
+        }
+    }
 }
 
 impl Options {
     /// Keep (`true`) or strip (`false`, the default) the API Gateway stage.
     pub fn keep_stage(mut self, keep: bool) -> Self {
         self.keep_stage = keep;
+        self
+    }
+
+    /// Flush (`true`, the default) or not the OpenTelemetry providers after each invocation.
+    ///
+    /// The flush exports what the providers of the live `lesto::otel::Telemetry` buffered
+    /// (`lesto::otel::init`, or `Telemetry::from_providers` for providers of your own) and
+    /// waits for the export, so the invocation lasts that much longer: keep the collector
+    /// close, such as a collector extension on `localhost`. Turn it off when the export goes
+    /// through something that buffers across freezes by itself.
+    pub fn flush_telemetry(mut self, flush: bool) -> Self {
+        self.flush_telemetry = flush;
         self
     }
 }
@@ -87,25 +117,49 @@ pub async fn run_with(router: Router, options: Options) -> Result<(), Error> {
     lambda_http::run(with_options(router, options)).await
 }
 
-/// The router as Lambda sees it: behind a request mapper that strips the stage unless
-/// `keep_stage`.
-///
-/// The path is rewritten *before* the router sees it (a `Router::layer` would run after
-/// routing), and by a mapper rather than through the runtime's
-/// `AWS_LAMBDA_HTTP_IGNORE_STAGE_IN_PATH` variable: the option stays local to this router (two
-/// routers, two settings, one process) and nothing mutates the environment of a running
-/// multi-threaded program.
+/// The router as Lambda sees it: one invocation is the request mapped by [`invoke_once`].
 fn with_options(
     router: Router,
     options: Options,
-) -> MapRequest<Router, impl FnMut(lambda_http::Request) -> lambda_http::Request + Clone> {
-    router.map_request(move |req: lambda_http::Request| {
-        if options.keep_stage {
-            req
-        } else {
-            strip_stage(req)
-        }
-    })
+) -> impl Service<
+    lambda_http::Request,
+    Response = Response<Body>,
+    Error = Error,
+    Future = impl Future<Output = Result<Response<Body>, Error>> + Send,
+> + Clone {
+    tower::service_fn(move |req: lambda_http::Request| invoke_once(router.clone(), req, options))
+}
+
+/// One invocation: strip the stage, run the router, collect the body, flush the telemetry.
+///
+/// The path is rewritten *before* the router sees it (a `Router::layer` would run after
+/// routing), and here rather than through the runtime's `AWS_LAMBDA_HTTP_IGNORE_STAGE_IN_PATH`
+/// variable: the option stays local to this router (two routers, two settings, one process)
+/// and nothing mutates the environment of a running multi-threaded program.
+///
+/// The body is collected here (`lambda_http` buffers it anyway) so the flush comes after
+/// everything the handler logs while producing it, and the request span is closed by then.
+async fn invoke_once(
+    router: Router,
+    req: lambda_http::Request,
+    options: Options,
+) -> Result<Response<Body>, Error> {
+    let req = if options.keep_stage {
+        req
+    } else {
+        strip_stage(req)
+    };
+    let response = match router.oneshot(req).await {
+        Ok(response) => response,
+        Err(infallible) => match infallible {},
+    };
+    let (parts, body) = response.into_parts();
+    let bytes = body.collect().await?.to_bytes();
+    #[cfg(feature = "otel")]
+    if options.flush_telemetry {
+        crate::otel::flush_async().await;
+    }
+    Ok(Response::from_parts(parts, Body::from(bytes)))
 }
 
 /// Remove the API Gateway stage prefix that `lambda_http` puts in the path.
@@ -161,7 +215,8 @@ pub mod test {
     /// Convert an API Gateway (v1 or v2), Function URL or ALB event to an HTTP request, run
     /// it through `router`, and return the response with its body collected.
     ///
-    /// Applies [`Options::default`] (stage stripped); [`invoke_with`] takes explicit options.
+    /// Applies [`Options::default`] (stage stripped, telemetry flushed as in Lambda);
+    /// [`invoke_with`] takes explicit options.
     pub async fn invoke(router: &Router, event_json: &str) -> Result<Response<Bytes>, Error> {
         invoke_with(router, event_json, Options::default()).await
     }

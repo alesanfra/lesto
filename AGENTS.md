@@ -54,7 +54,7 @@ crates/lesto/             library
     error.rs              lesto::db::Error → 403/404/409/500 problems, ResultExt::internal
     trace.rs              the transaction's client span (database semconv)
   src/lambda.rs           feature `lambda`: AWS Lambda adapter over lambda_http: serve (Lambda or
-                          local), Options (keep_stage, a per-router request mapper), test::invoke
+                          local), Options (keep_stage, flush_telemetry), test::invoke
   src/oidc/               feature `oidc`: bearer JWTs verified against an OpenID Connect provider
     mod.rs                Oidc (discover → Discover builder, IntoFuture), from_env, verify
     keys.rs               discovery document, URL/issuer checks, JWKS parsing, KeyCache (refresh)
@@ -86,6 +86,8 @@ crates/lesto/             library
   tests/log.rs            what Console prints, both formats, into a buffer (thread-local default)
   tests/metrics.rs        the duration histogram through the SDK's in-memory exporter
   tests/lambda.rs         API Gateway v1/v2, Function URL and ALB event fixtures
+  tests/lambda_otel.rs    the per-invocation telemetry flush, against an in-memory span exporter
+                          (own binary: the flushed providers are global)
   tests/oidc.rs           a provider on 127.0.0.1:0, tokens signed with tests/fixtures/oidc/*.pem
                           (test-only keys): every check, key rotation, protect, lesto::db
   tests/oidc_provider.rs  the same against a real provider (mock-oauth2-server); skipped unless
@@ -456,7 +458,7 @@ Recorded here because they are not derivable from the code. Do not undo them cas
   turns API Gateway v1/v2, Function URL and ALB events into `http::Request`s and accepts any
   tower service, so the crate adds only what lesto users need: the Lambda-or-local switch on
   `AWS_LAMBDA_RUNTIME_API`, stage stripping by default, and an in-process test helper. The
-  stage is stripped by a `tower::ServiceExt::map_request` around the router (it must run
+  stage is stripped in the `service_fn` around the router (`invoke_once`; it must run
   *before* routing; a `Router::layer` runs after) rather than through the runtime's
   `AWS_LAMBDA_HTTP_IGNORE_STAGE_IN_PATH` variable, which is process-wide. Docs pages link
   `openapi.json` relatively for the same reason (a stage or proxy prefix the app does not know).
@@ -588,9 +590,17 @@ Recorded here because they are not derivable from the code. Do not undo them cas
   a *query* between methods, which is the `Connection<DB>` alias plus the convention of writing
   `..._in(conn, ..)` helpers. Two public store methods sharing one transaction stays impossible
   on purpose — that is the boundary the design is built on.
-- **`lesto::lambda`**: `Options::keep_stage` selects whether the request mapper strips
+- **`lesto::lambda` flushes telemetry per invocation** (decided 2026-11-13, issue #4). Lambda
+  freezes the instance once it has the response, and the batch processors' timers do not run
+  while frozen. The handler collects the body, then `otel::flush` runs on the blocking pool
+  (`force_flush` blocks on the processor threads) before the response is returned. `flush`
+  reaches the providers through a registry of clones that `Telemetry` fills on creation and
+  clears on drop, so it works with `init` called by hand (the documented path) without a
+  `Telemetry` argument on `lambda::run`; `Telemetry::from_providers` registers an application's
+  own providers. `Options::flush_telemetry(false)` opts out.
+- **`lesto::lambda`**: `Options::keep_stage` selects whether `invoke_once` strips
   `/{stage}` (read from the event's `RequestContext`, v1 and v2; `$default` has no prefix).
-  `lambda_http` still *adds* the stage when the event path lacks it, so the mapper always sees
+  `lambda_http` still *adds* the stage when the event path lacks it, so `invoke_once` always sees
   it. `lambda_http` is built with only `apigw_rest`, `apigw_http`, `alb` (no websockets) to
   keep the binary small.
 - **lesto-cli**: builds with `--message-format=json-render-diagnostics` (diagnostics to the

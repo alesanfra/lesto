@@ -49,7 +49,8 @@
 //!
 //! Call [`init`] by hand where `App::serve` is not the entry point (`lesto::lambda::serve`, a
 //! test, a worker), and keep the returned [`Telemetry`] alive: dropping it flushes what is
-//! still buffered.
+//! still buffered. On AWS Lambda the process is frozen between invocations and never dropped,
+//! so `lesto::lambda` calls [`flush`] after each one instead.
 
 use opentelemetry::trace::TracerProvider as _;
 use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
@@ -146,19 +147,93 @@ impl Config {
 #[derive(Debug)]
 #[must_use = "dropping the guard flushes and stops the export; bind it for the lifetime of the application"]
 pub struct Telemetry {
+    /// Identifies this guard in [`INSTALLED`], so dropping an older guard does not unregister
+    /// a newer one. `0` for a guard that owns nothing (never registered).
+    id: u64,
     traces: Option<SdkTracerProvider>,
     logs: Option<SdkLoggerProvider>,
     metrics: Option<SdkMeterProvider>,
+}
+
+/// Clones of the providers of the live [`Telemetry`] (the SDK providers are reference counted),
+/// so [`flush`] can reach them from code that does not hold the guard: the Lambda adapter.
+#[derive(Clone)]
+struct Providers {
+    id: u64,
+    traces: Option<SdkTracerProvider>,
+    logs: Option<SdkLoggerProvider>,
+    metrics: Option<SdkMeterProvider>,
+}
+
+static INSTALLED: std::sync::Mutex<Option<Providers>> = std::sync::Mutex::new(None);
+
+fn installed() -> std::sync::MutexGuard<'static, Option<Providers>> {
+    // A panic while holding the lock leaves an `Option` of clones: still consistent.
+    INSTALLED
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 impl Telemetry {
     /// A guard that owns nothing: the console subscriber, or nothing at all.
     fn none() -> Self {
         Telemetry {
+            id: 0,
             traces: None,
             logs: None,
             metrics: None,
         }
+    }
+
+    /// A guard over providers the application built itself (the escape hatch: its own
+    /// exporters, sampler or subscriber).
+    ///
+    /// Like the guard [`init`] returns, it flushes and shuts the providers down when dropped,
+    /// and it makes them the ones [`flush`] flushes, which is what `lesto::lambda` calls after
+    /// every invocation. Installing the subscriber, the propagator and the global meter
+    /// provider stays the application's job ([`enable_propagation`], [`enable_metrics`]).
+    pub fn from_providers(
+        traces: Option<SdkTracerProvider>,
+        logs: Option<SdkLoggerProvider>,
+        metrics: Option<SdkMeterProvider>,
+    ) -> Self {
+        Self::register(traces, logs, metrics)
+    }
+
+    fn register(
+        traces: Option<SdkTracerProvider>,
+        logs: Option<SdkLoggerProvider>,
+        metrics: Option<SdkMeterProvider>,
+    ) -> Self {
+        static NEXT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        if traces.is_none() && logs.is_none() && metrics.is_none() {
+            return Self::none();
+        }
+        let id = NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        *installed() = Some(Providers {
+            id,
+            traces: traces.clone(),
+            logs: logs.clone(),
+            metrics: metrics.clone(),
+        });
+        Telemetry {
+            id,
+            traces,
+            logs,
+            metrics,
+        }
+    }
+
+    /// Export what is buffered now, and wait for it: spans, metrics, then logs.
+    ///
+    /// Blocking: the batch processors export on threads of their own and this waits for them.
+    /// From async code, call it through `tokio::task::spawn_blocking`.
+    pub fn flush(&self) {
+        flush_providers(
+            self.traces.as_ref(),
+            self.logs.as_ref(),
+            self.metrics.as_ref(),
+        );
     }
 
     /// Are spans being exported over OTLP?
@@ -183,6 +258,12 @@ impl Telemetry {
     }
 
     fn stop(&mut self) {
+        if self.id != 0 {
+            let mut installed = installed();
+            if installed.as_ref().is_some_and(|p| p.id == self.id) {
+                *installed = None;
+            }
+        }
         if let Some(provider) = self.traces.take()
             && let Err(error) = provider.shutdown()
         {
@@ -205,6 +286,59 @@ impl Telemetry {
 impl Drop for Telemetry {
     fn drop(&mut self) {
         self.stop();
+    }
+}
+
+/// Export what the providers of the live [`Telemetry`] (from [`init`], [`init_named`],
+/// [`Telemetry::from_providers`] or `App::serve`) have buffered, and wait for it. Nothing
+/// happens when there is none.
+///
+/// For environments that stop the process between requests without a shutdown: the Lambda
+/// adapter calls it after every invocation (see `lesto::lambda::Options::flush_telemetry`),
+/// because Lambda freezes the environment as soon as the response is returned and the batch
+/// processors' timers do not run while it is frozen. Blocking, like [`Telemetry::flush`].
+pub fn flush() {
+    let Some(providers) = installed().clone() else {
+        return;
+    };
+    flush_providers(
+        providers.traces.as_ref(),
+        providers.logs.as_ref(),
+        providers.metrics.as_ref(),
+    );
+}
+
+/// [`flush`] on the blocking pool, skipped without a live [`Telemetry`] (no thread hop then).
+#[cfg(feature = "lambda")]
+pub(crate) async fn flush_async() {
+    if installed().is_none() {
+        return;
+    }
+    // A panic in an exporter is the exporter's; the response is already built.
+    let _ = tokio::task::spawn_blocking(flush).await;
+}
+
+fn flush_providers(
+    traces: Option<&SdkTracerProvider>,
+    logs: Option<&SdkLoggerProvider>,
+    metrics: Option<&SdkMeterProvider>,
+) {
+    // Spans and metrics first: a failure there is logged, and the log flush below takes it.
+    if let Some(provider) = traces
+        && let Err(error) = provider.force_flush()
+    {
+        tracing::warn!(%error, "the span exporter could not flush");
+    }
+    if let Some(provider) = metrics
+        && let Err(error) = provider.force_flush()
+    {
+        tracing::warn!(%error, "the metric exporter could not flush");
+    }
+    if let Some(provider) = logs
+        && let Err(error) = provider.force_flush()
+    {
+        // Printed, not logged: the log pipeline is the thing that failed.
+        eprintln!("lesto: the log exporter could not flush: {error}");
     }
 }
 
@@ -332,11 +466,7 @@ fn install(config: Config) -> Telemetry {
         metrics = metrics.is_some(),
         "OTLP export configured"
     );
-    Telemetry {
-        traces,
-        logs,
-        metrics,
-    }
+    Telemetry::register(traces, logs, metrics)
 }
 
 /// Keep the telemetry stack out of the log pipeline it feeds.

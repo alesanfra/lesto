@@ -6,6 +6,18 @@ All notable changes to lesto are listed here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `lesto::otel::flush`, `Telemetry::flush` and `Telemetry::from_providers`: export what the
+  providers buffered on demand, including providers an application built itself.
+- `lambda::Options::flush_telemetry` (on by default).
+
+### Fixed
+
+- On AWS Lambda, spans, logs and metrics are flushed after every invocation, before the response
+  is returned to the runtime (#4). Lambda freezes the instance between invocations, so the batch
+  exporters exported an invocation's telemetry late, at the next invocation, or never.
+
 ## [0.3.1] - 2026-11-01
 
 ### Fixed

@@ -103,6 +103,7 @@ yourself and keep the guard alive:
 ```rust
 let telemetry = lesto::otel::init_named("notes");
 // ... run ...
+telemetry.flush();             // export what is buffered now, and wait
 telemetry.shutdown();          // or let it drop
 ```
 
@@ -236,10 +237,31 @@ OpenTelemetry API in your code. To time a helper, put `#[tracing::instrument]` o
 ## In Lambda
 
 The spans are the same, and `traceparent` from API Gateway is picked up as usual, but
-`lesto::lambda::serve` sets up only the console of chapter 11 (stdout goes to CloudWatch Logs): a
-Lambda instance is frozen between invocations, so a batching exporter loses spans. Call
-`lesto::otel::init()` in `main` and flush before returning, or send to the OpenTelemetry Lambda
-layer, which does that for you.
+`lesto::lambda::serve` sets up only the console of chapter 11 (stdout goes to CloudWatch Logs).
+Install the export yourself, and keep the guard alive for the life of the process:
+
+```rust
+#[lesto::main]
+async fn main() -> Result<(), lesto::lambda::Error> {
+    let _telemetry = lesto::otel::init_named("notes");
+    lesto::lambda::serve(build_app()).await
+}
+```
+
+Lambda freezes the instance as soon as it has the response, and a batching exporter's timer does
+not run while it is frozen: spans would leave at the next invocation, or never. So
+`lesto::lambda` flushes the providers after every invocation, before the response goes back to
+the runtime. The invocation waits for the export, so keep the collector close: the OpenTelemetry
+Lambda layer, or another collector extension, listens on `localhost`. If what you export to
+buffers across freezes by itself, turn the flush off:
+
+```rust
+lesto::lambda::serve_with(app, Options::default().flush_telemetry(false)).await
+```
+
+Providers you build yourself (the escape hatch above) are flushed too once you hand them to
+`lesto::otel::Telemetry::from_providers` and keep the guard it returns; `lesto::otel::flush()`
+does the same flush anywhere else.
 
 ## Recap
 
@@ -250,6 +272,7 @@ layer, which does that for you.
   the console of chapter 11 and the OTLP export of spans and logs, and flushes on shutdown.
 - Log records carry their `trace_id` and `span_id`, so logs and traces line up in the backend.
 - An incoming `traceparent` continues the trace here.
+- In Lambda, `lesto::otel::init` by hand; `lesto::lambda` flushes after every invocation.
 - `App::trace(Trace::new()...)` opts `url.query` in, trusts forwarding headers, or turns the
   span off.
 - `examples/04-opentelemetry` runs the whole thing against a local Jaeger or OpenObserve.
