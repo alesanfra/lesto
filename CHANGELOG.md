@@ -8,6 +8,12 @@ All notable changes to lesto are listed here. The format follows
 
 ## [0.4.1] - 2026-11-13
 
+### Fixed
+
+- The release workflow updates a GitHub release that already exists for the tag instead of
+  failing on it (v0.4.0 was published to crates.io, then failed creating its release).
+- The 0.4.0 section of this changelog: a stray blank line and an unwrapped entry.
+
 ## [0.4.0] - 2026-11-13
 
 ### Added
