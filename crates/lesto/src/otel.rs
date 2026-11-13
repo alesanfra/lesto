@@ -31,6 +31,7 @@
 //! | `OTEL_LOGS_EXPORTER=none` | keep the spans, stop exporting logs |
 //! | `OTEL_METRICS_EXPORTER=none` | stop exporting metrics (`http.server.request.duration`) |
 //! | `OTEL_SDK_DISABLED` | `true` turns every signal off and leaves the console |
+//! | `LESTO_OTEL_SIGV4` | `on` signs every export with AWS SigV4 (region from the host, or `AWS_REGION`), `off` never; unset, an AWS endpoint is signed |
 //! | `RUST_LOG` | the console and export filter, `info` by default |
 //! | `LESTO_LOG` | the console's format, `text`, `json` or `off` ([`crate::log`]); not the export |
 //!
@@ -43,6 +44,13 @@
 //! an OTLP log record carrying the id of the span it happened in, so a backend shows the logs
 //! of a request next to its trace. The console keeps printing them as usual.
 //!
+//! **AWS, with no collector.** An endpoint on AWS (`https://xray.<region>.amazonaws.com/v1/traces`,
+//! `https://logs.<region>.amazonaws.com/v1/logs`, `https://monitoring.<region>.amazonaws.com/v1/metrics`)
+//! is signed with SigV4, using the credentials in `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`
+//! and `AWS_SESSION_TOKEN` — where Lambda puts those of the function's role. An `Authorization`
+//! header of your own (an X-Ray API key in `OTEL_EXPORTER_OTLP_HEADERS`) is sent instead.
+//! Without credentials that signal is not exported, and the reason is logged.
+//!
 //! The export is OTLP over **HTTP/protobuf**. `OTEL_EXPORTER_OTLP_PROTOCOL=grpc` is not
 //! honored: build your own exporters and subscriber then (chapter 15 of the tutorial) — lesto
 //! stands aside as soon as a subscriber is installed.
@@ -54,6 +62,7 @@
 
 use opentelemetry::trace::TracerProvider as _;
 use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
+use opentelemetry_otlp::{ExporterBuildError, WithHttpConfig};
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::logs::SdkLoggerProvider;
 use opentelemetry_sdk::metrics::{PeriodicReader, SdkMeterProvider};
@@ -62,6 +71,8 @@ use opentelemetry_sdk::trace::SdkTracerProvider;
 use tracing_subscriber::filter::FilterFn;
 use tracing_subscriber::layer::{Layer, SubscriberExt};
 use tracing_subscriber::util::SubscriberInitExt;
+
+use crate::sigv4::{Credentials, Scope, Signer, SigningClient};
 
 /// The `OTEL_*` settings lesto itself looks at.
 ///
@@ -397,6 +408,10 @@ pub(crate) fn auto_init(default_service_name: &str) -> Option<Telemetry> {
 }
 
 fn install(config: Config) -> Telemetry {
+    install_with(config, |name| std::env::var(name).ok())
+}
+
+fn install_with(config: Config, env: impl Fn(&str) -> Option<String>) -> Telemetry {
     // Both providers are built before the subscriber, so a failure can be reported through it
     // afterwards rather than printed to a console nobody configured yet.
     let mut problems = Vec::new();
@@ -405,15 +420,15 @@ fn install(config: Config) -> Telemetry {
         .build();
     let traces = config
         .exports_traces()
-        .then(|| tracer_provider(&resource))
+        .then(|| signing_client(Signal::Traces, &env).and_then(|c| tracer_provider(&resource, c)))
         .and_then(|built| unwrap_provider(built, "spans", &mut problems));
     let logs = config
         .exports_logs()
-        .then(|| logger_provider(&resource))
+        .then(|| signing_client(Signal::Logs, &env).and_then(|c| logger_provider(&resource, c)))
         .and_then(|built| unwrap_provider(built, "logs", &mut problems));
     let metrics = config
         .exports_metrics()
-        .then(|| meter_provider(&resource))
+        .then(|| signing_client(Signal::Metrics, &env).and_then(|c| meter_provider(&resource, c)))
         .and_then(|built| unwrap_provider(built, "metrics", &mut problems));
 
     // The console of `lesto::log`, in the format `LESTO_LOG` asks for (none for `off`).
@@ -502,7 +517,7 @@ fn is_telemetry_target(target: &str) -> bool {
 }
 
 fn unwrap_provider<P>(
-    built: Result<P, opentelemetry_otlp::ExporterBuildError>,
+    built: Result<P, ExporterBuildError>,
     signal: &str,
     problems: &mut Vec<String>,
 ) -> Option<P> {
@@ -515,6 +530,123 @@ fn unwrap_provider<P>(
     }
 }
 
+/// What differs between the three signals on the way out.
+#[derive(Clone, Copy, Debug)]
+enum Signal {
+    Traces,
+    Logs,
+    Metrics,
+}
+
+impl Signal {
+    /// The infix of the per-signal variables (`OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`).
+    fn var(self) -> &'static str {
+        match self {
+            Signal::Traces => "TRACES",
+            Signal::Logs => "LOGS",
+            Signal::Metrics => "METRICS",
+        }
+    }
+
+    /// The AWS service of the signal's CloudWatch OTLP endpoint.
+    fn aws_service(self) -> &'static str {
+        match self {
+            Signal::Traces => "xray",
+            Signal::Logs => "logs",
+            Signal::Metrics => "monitoring",
+        }
+    }
+}
+
+/// Whether the export of `signal` is signed with SigV4, and as what.
+///
+/// `Ok(None)`: sent as the exporter would on its own. `Err`: the signal should be signed and
+/// cannot be, so it is not exported (an unsigned request to AWS is a 403 on every batch).
+fn signing_plan(
+    signal: Signal,
+    get: &impl Fn(&str) -> Option<String>,
+) -> Result<Option<Signer>, String> {
+    let value = |name: &str| get(name).filter(|v| !v.trim().is_empty());
+    let forced = match value("LESTO_OTEL_SIGV4").map(|v| v.trim().to_ascii_lowercase()) {
+        None => false,
+        Some(v) if v == "on" || v == "true" => true,
+        Some(v) if v == "off" || v == "false" => return Ok(None),
+        Some(other) => {
+            return Err(format!(
+                "LESTO_OTEL_SIGV4 is `{other}`; it takes `on` or `off`"
+            ));
+        }
+    };
+    let endpoint = value(&format!("OTEL_EXPORTER_OTLP_{}_ENDPOINT", signal.var()))
+        .or_else(|| value("OTEL_EXPORTER_OTLP_ENDPOINT"));
+    let detected = endpoint
+        .as_deref()
+        .and_then(|endpoint| endpoint.trim().parse::<http::Uri>().ok())
+        .and_then(|uri| uri.host().and_then(Scope::of_host));
+    let scope = match detected {
+        Some(scope) => scope,
+        None if forced => Scope {
+            service: signal.aws_service().to_string(),
+            region: value("AWS_REGION")
+                .or_else(|| value("AWS_DEFAULT_REGION"))
+                .ok_or("LESTO_OTEL_SIGV4=on needs AWS_REGION when the endpoint is not an AWS host")?
+                .trim()
+                .to_string(),
+        },
+        None => return Ok(None),
+    };
+    // An API key of the application's (X-Ray's bearer tokens) is the authentication it chose.
+    let headers = value(&format!("OTEL_EXPORTER_OTLP_{}_HEADERS", signal.var()))
+        .or_else(|| value("OTEL_EXPORTER_OTLP_HEADERS"));
+    let has_authorization = headers.is_some_and(|headers| {
+        headers.split(',').any(|pair| {
+            pair.split_once('=')
+                .is_some_and(|(key, _)| key.trim().eq_ignore_ascii_case("authorization"))
+        })
+    });
+    if has_authorization && !forced {
+        return Ok(None);
+    }
+    let credentials = Credentials::read(get).ok_or_else(|| {
+        format!(
+            "{} on AWS needs SigV4, and AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY are not set \
+             (an API key in OTEL_EXPORTER_OTLP_HEADERS is the other way in)",
+            scope.service
+        )
+    })?;
+    Ok(Some(Signer { credentials, scope }))
+}
+
+/// The HTTP client of `signal`'s exporter when it signs, built as the exporter builds its own:
+/// a blocking reqwest client with the `OTEL_EXPORTER_OTLP_*_TIMEOUT`, on a thread of its own
+/// (a blocking client cannot be created inside an async runtime).
+fn signing_client(
+    signal: Signal,
+    get: &impl Fn(&str) -> Option<String>,
+) -> Result<Option<SigningClient>, ExporterBuildError> {
+    let Some(signer) =
+        signing_plan(signal, get).map_err(ExporterBuildError::InvalidConfiguration)?
+    else {
+        return Ok(None);
+    };
+    let millis = |name: &str| get(name).and_then(|v| v.trim().parse::<u64>().ok());
+    let timeout = millis(&format!("OTEL_EXPORTER_OTLP_{}_TIMEOUT", signal.var()))
+        .or_else(|| millis("OTEL_EXPORTER_OTLP_TIMEOUT"))
+        .map_or(
+            opentelemetry_otlp::OTEL_EXPORTER_OTLP_TIMEOUT_DEFAULT,
+            std::time::Duration::from_millis,
+        );
+    let inner = std::thread::spawn(move || {
+        reqwest::blocking::Client::builder()
+            .timeout(timeout)
+            .build()
+    })
+    .join()
+    .map_err(|_| ExporterBuildError::InternalFailure("building the HTTP client panicked".into()))?
+    .map_err(|error| ExporterBuildError::InternalFailure(error.to_string()))?;
+    Ok(Some(SigningClient { inner, signer }))
+}
+
 /// The batching span provider, with the resource the collector groups telemetry by.
 ///
 /// The endpoint, the headers and the timeout come from the environment, which the exporter
@@ -522,10 +654,13 @@ fn unwrap_provider<P>(
 /// `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` (as given), `OTEL_EXPORTER_OTLP_HEADERS`.
 fn tracer_provider(
     resource: &Resource,
-) -> Result<SdkTracerProvider, opentelemetry_otlp::ExporterBuildError> {
-    let exporter = opentelemetry_otlp::SpanExporter::builder()
-        .with_http()
-        .build()?;
+    client: Option<SigningClient>,
+) -> Result<SdkTracerProvider, ExporterBuildError> {
+    let mut builder = opentelemetry_otlp::SpanExporter::builder().with_http();
+    if let Some(client) = client {
+        builder = builder.with_http_client(client);
+    }
+    let exporter = builder.build()?;
     Ok(SdkTracerProvider::builder()
         .with_batch_exporter(exporter)
         .with_resource(resource.clone())
@@ -536,10 +671,13 @@ fn tracer_provider(
 /// endpoint plus `/v1/logs`) the same way.
 fn logger_provider(
     resource: &Resource,
-) -> Result<SdkLoggerProvider, opentelemetry_otlp::ExporterBuildError> {
-    let exporter = opentelemetry_otlp::LogExporter::builder()
-        .with_http()
-        .build()?;
+    client: Option<SigningClient>,
+) -> Result<SdkLoggerProvider, ExporterBuildError> {
+    let mut builder = opentelemetry_otlp::LogExporter::builder().with_http();
+    if let Some(client) = client {
+        builder = builder.with_http_client(client);
+    }
+    let exporter = builder.build()?;
     Ok(SdkLoggerProvider::builder()
         .with_batch_exporter(exporter)
         .with_resource(resource.clone())
@@ -550,10 +688,13 @@ fn logger_provider(
 /// reading `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` or the generic endpoint plus `/v1/metrics`.
 fn meter_provider(
     resource: &Resource,
-) -> Result<SdkMeterProvider, opentelemetry_otlp::ExporterBuildError> {
-    let exporter = opentelemetry_otlp::MetricExporter::builder()
-        .with_http()
-        .build()?;
+    client: Option<SigningClient>,
+) -> Result<SdkMeterProvider, ExporterBuildError> {
+    let mut builder = opentelemetry_otlp::MetricExporter::builder().with_http();
+    if let Some(client) = client {
+        builder = builder.with_http_client(client);
+    }
+    let exporter = builder.build()?;
     Ok(SdkMeterProvider::builder()
         .with_reader(PeriodicReader::builder(exporter).build())
         .with_resource(resource.clone())
@@ -685,6 +826,274 @@ mod tests {
         ]);
         assert!(!config.logs);
         assert!(config.disabled);
+    }
+
+    fn env(vars: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> + use<> {
+        let vars: Vec<(String, String)> = vars
+            .iter()
+            .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
+            .collect();
+        move |name| vars.iter().find(|(k, _)| k == name).map(|(_, v)| v.clone())
+    }
+
+    const CREDENTIALS: [(&str, &str); 3] = [
+        ("AWS_ACCESS_KEY_ID", "AKIDEXAMPLE"),
+        (
+            "AWS_SECRET_ACCESS_KEY",
+            "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY",
+        ),
+        ("AWS_SESSION_TOKEN", "token"),
+    ];
+
+    fn plan(signal: Signal, vars: &[(&str, &str)]) -> Result<Option<Scope>, String> {
+        let mut all = CREDENTIALS.to_vec();
+        all.extend_from_slice(vars);
+        signing_plan(signal, &env(&all)).map(|signer| signer.map(|s| s.scope))
+    }
+
+    fn scope(service: &str, region: &str) -> Option<Scope> {
+        Some(Scope {
+            service: service.into(),
+            region: region.into(),
+        })
+    }
+
+    #[test]
+    fn aws_endpoints_are_signed_others_are_not() {
+        let xray = (
+            "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
+            "https://xray.eu-west-1.amazonaws.com/v1/traces",
+        );
+        assert_eq!(
+            plan(Signal::Traces, &[xray]),
+            Ok(scope("xray", "eu-west-1"))
+        );
+        // The per-signal endpoint is the traces' own: logs fall back to the generic one.
+        assert_eq!(plan(Signal::Logs, &[xray]), Ok(None));
+        assert_eq!(
+            plan(
+                Signal::Metrics,
+                &[(
+                    "OTEL_EXPORTER_OTLP_ENDPOINT",
+                    "https://monitoring.us-east-1.amazonaws.com"
+                )]
+            ),
+            Ok(scope("monitoring", "us-east-1"))
+        );
+        assert_eq!(
+            plan(
+                Signal::Traces,
+                &[("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4318")]
+            ),
+            Ok(None)
+        );
+        assert_eq!(plan(Signal::Traces, &[]), Ok(None));
+    }
+
+    #[test]
+    fn sigv4_can_be_forced_or_turned_off() {
+        let local = ("OTEL_EXPORTER_OTLP_ENDPOINT", "http://127.0.0.1:4318");
+        assert_eq!(
+            plan(
+                Signal::Logs,
+                &[
+                    local,
+                    ("LESTO_OTEL_SIGV4", "on"),
+                    ("AWS_REGION", "eu-south-1")
+                ]
+            ),
+            Ok(scope("logs", "eu-south-1")),
+            "a proxy or a test double, signed as the signal's service"
+        );
+        assert_eq!(
+            plan(
+                Signal::Traces,
+                &[
+                    local,
+                    ("LESTO_OTEL_SIGV4", "ON"),
+                    ("AWS_DEFAULT_REGION", "us-west-2")
+                ]
+            ),
+            Ok(scope("xray", "us-west-2"))
+        );
+        assert!(
+            plan(Signal::Traces, &[local, ("LESTO_OTEL_SIGV4", "on")]).is_err(),
+            "no region"
+        );
+        assert_eq!(
+            plan(
+                Signal::Traces,
+                &[
+                    (
+                        "OTEL_EXPORTER_OTLP_ENDPOINT",
+                        "https://xray.eu-west-1.amazonaws.com"
+                    ),
+                    ("LESTO_OTEL_SIGV4", "off")
+                ]
+            ),
+            Ok(None)
+        );
+        assert!(plan(Signal::Traces, &[("LESTO_OTEL_SIGV4", "maybe")]).is_err());
+    }
+
+    #[test]
+    fn an_api_key_wins_over_sigv4() {
+        let xray = (
+            "OTEL_EXPORTER_OTLP_ENDPOINT",
+            "https://xray.eu-west-1.amazonaws.com",
+        );
+        assert_eq!(
+            plan(
+                Signal::Traces,
+                &[
+                    xray,
+                    (
+                        "OTEL_EXPORTER_OTLP_HEADERS",
+                        "x-a=1, Authorization=Bearer%20key"
+                    )
+                ]
+            ),
+            Ok(None)
+        );
+        assert_eq!(
+            plan(
+                Signal::Traces,
+                &[
+                    xray,
+                    (
+                        "OTEL_EXPORTER_OTLP_LOGS_HEADERS",
+                        "authorization=Bearer%20key"
+                    )
+                ]
+            ),
+            Ok(scope("xray", "eu-west-1")),
+            "the logs' key is not the traces'"
+        );
+    }
+
+    #[test]
+    fn an_aws_endpoint_without_credentials_is_not_exported() {
+        let get = env(&[(
+            "OTEL_EXPORTER_OTLP_ENDPOINT",
+            "https://xray.eu-west-1.amazonaws.com",
+        )]);
+        let error = signing_plan(Signal::Traces, &get).unwrap_err();
+        assert!(error.contains("AWS_ACCESS_KEY_ID"), "{error}");
+    }
+
+    /// The request line, headers and body one request carried.
+    type Captured = (String, Vec<(String, String)>, Vec<u8>);
+
+    /// A one-request HTTP server on loopback: returns what it received.
+    fn capture_one() -> (String, std::thread::JoinHandle<Captured>) {
+        use std::io::{BufRead, BufReader, Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = format!("http://{}/v1/traces", listener.local_addr().unwrap());
+        let handle = std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            let mut line = String::new();
+            reader.read_line(&mut line).unwrap();
+            let mut headers = Vec::new();
+            loop {
+                let mut header = String::new();
+                reader.read_line(&mut header).unwrap();
+                let header = header.trim_end();
+                if header.is_empty() {
+                    break;
+                }
+                let (name, value) = header.split_once(':').unwrap();
+                headers.push((name.to_ascii_lowercase(), value.trim().to_string()));
+            }
+            let length: usize = headers
+                .iter()
+                .find(|(n, _)| n == "content-length")
+                .map_or(0, |(_, v)| v.parse().unwrap());
+            let mut body = vec![0; length];
+            reader.read_exact(&mut body).unwrap();
+            let mut stream = stream;
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 0\r\n\r\n")
+                .unwrap();
+            (line, headers, body)
+        });
+        (address, handle)
+    }
+
+    #[test]
+    fn the_signature_holds_for_what_goes_on_the_wire() {
+        use opentelemetry::trace::{Tracer as _, TracerProvider as _};
+        use opentelemetry_otlp::WithExportConfig;
+
+        let (endpoint, server) = capture_one();
+        let get = env(&[
+            ("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", &endpoint),
+            ("LESTO_OTEL_SIGV4", "on"),
+            ("AWS_REGION", "eu-west-1"),
+            CREDENTIALS[0],
+            CREDENTIALS[1],
+            CREDENTIALS[2],
+        ]);
+        let client = signing_client(Signal::Traces, &get).unwrap().unwrap();
+        let signer = client.signer.clone();
+        let exporter = opentelemetry_otlp::SpanExporter::builder()
+            .with_http()
+            .with_endpoint(endpoint)
+            .with_http_client(client)
+            .build()
+            .unwrap();
+        let provider = SdkTracerProvider::builder()
+            .with_simple_exporter(exporter)
+            .build();
+        provider.tracer("test").in_span("signed", |_| {});
+        let (line, headers, body) = server.join().unwrap();
+        let _ = provider.shutdown();
+
+        let header = |name: &str| {
+            headers
+                .iter()
+                .find(|(n, _)| n == name)
+                .map(|(_, v)| v.clone())
+                .unwrap_or_else(|| panic!("no {name} in {headers:?}"))
+        };
+        let authorization = header("authorization");
+        let signed_names: Vec<String> = authorization
+            .split("SignedHeaders=")
+            .nth(1)
+            .unwrap()
+            .split(',')
+            .next()
+            .unwrap()
+            .split(';')
+            .map(str::to_string)
+            .collect();
+        assert!(signed_names.contains(&"host".to_string()));
+        assert!(signed_names.contains(&"x-amz-security-token".to_string()));
+        // Recompute from the bytes the server received: a header the client changed after
+        // signing (or a `host` spelled differently) breaks this, as it would at AWS.
+        let received: Vec<(String, String)> = signed_names
+            .iter()
+            .map(|name| (name.clone(), header(name)))
+            .collect();
+        let path = line.split(' ').nth(1).unwrap();
+        let payload_hash = {
+            let digest = aws_lc_rs::digest::digest(&aws_lc_rs::digest::SHA256, &body);
+            digest
+                .as_ref()
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect::<String>()
+        };
+        let expected = signer.signature(
+            "POST",
+            path,
+            "",
+            &received,
+            &payload_hash,
+            &header("x-amz-date"),
+        );
+        assert_eq!(authorization, expected.authorization);
+        assert!(authorization.contains("/eu-west-1/xray/aws4_request"));
     }
 
     #[test]

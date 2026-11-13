@@ -81,6 +81,8 @@ pub mod otel;
 pub mod response;
 pub mod route;
 pub mod security;
+#[cfg(feature = "otel")]
+mod sigv4;
 pub mod trace;
 
 pub use app::{App, DEFAULT_SHUTDOWN_TIMEOUT};

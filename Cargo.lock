@@ -1476,6 +1476,8 @@ name = "lesto"
 version = "0.3.1"
 dependencies = [
  "anyhow",
+ "async-trait",
+ "aws-lc-rs",
  "axum",
  "base64 0.23.1",
  "form_urlencoded",
@@ -1491,6 +1493,7 @@ dependencies = [
  "mime",
  "opentelemetry",
  "opentelemetry-appender-tracing",
+ "opentelemetry-http",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
  "pin-project-lite",

@@ -50,8 +50,9 @@ Logs Insights can query `http.route` or `http.response.status_code` directly.
 
 **Traces.** With the `otel` feature, call `lesto::otel::init()` before `serve`: the spans and log
 records of an invocation are flushed before its response is returned, because a frozen instance
-exports nothing. Chapter 15 has the details, `Options::flush_telemetry` to turn it off, and
-`Options::xray` to join the X-Ray trace of the invocation.
+exports nothing. Chapter 15 has the details, `Options::flush_telemetry` to turn it off,
+`Options::xray` to join the X-Ray trace of the invocation, and how to send the spans straight to
+X-Ray (lesto signs the request with the function's role) without a layer.
 
 **State.** A Lambda instance handles one request at a time and may be frozen or discarded at
 any moment. Keep in-memory state (like the `Mutex<Vec<Note>>` of the example) for caches only;

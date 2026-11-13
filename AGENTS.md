@@ -39,6 +39,10 @@ crates/lesto/             library
                           (`lesto::access`), feature `otel`: propagation
   src/log.rs              feature `log` (default): Console, the tracing Layer printing text or
                           JSON on stdout (LESTO_LOG), init called by App::serve and lambda::serve
+  src/sigv4.rs            feature `otel`: AWS SigV4 for the CloudWatch OTLP endpoints (Signer,
+                          Scope from the host, env credentials, SigningClient wrapping the
+                          exporters' blocking reqwest client); checked against tests/fixtures/sigv4
+                          (AWS's own test suite, Apache-2.0)
   src/otel.rs             feature `otel`: Config from the OTEL_* variables, init/init_named,
                           Telemetry guard (tracer + logger + meter providers), auto_init called by
                           App::serve_until, the tracing→OTLP logs bridge and its feedback filter
@@ -607,6 +611,21 @@ Recorded here because they are not derivable from the code. Do not undo them cas
   global propagator would replace the W3C one for the whole app. Opt-in, because the parent
   brings X-Ray's sampling decision: `Sampled=0` (active tracing off) makes the default
   parent-based sampler drop every lesto span.
+- **SigV4 is hand-written, credentials come from the environment only** (decided 2026-11-13).
+  CloudWatch's OTLP endpoints (`xray`, `logs`, `monitoring`) take SigV4, and Lambda already
+  puts the role's credentials in `AWS_*`: signing there removes the collector layer (cold start,
+  memory, a config file). ~250 lines on aws-lc-rs (SHA-256, HMAC), already in the graph through
+  rustls; `aws-sigv4` would bring `aws-smithy-*` and the SDK's release churn, `aws-config` the
+  whole provider chain. No IMDS, container credentials or profiles: those need refreshes, and
+  ECS/EC2 can run a collector. The `SigningClient` wraps the exporters' blocking reqwest client
+  (`with_http_client`), built the way the exporter builds its own (timeout from the `OTEL_*`
+  variables, on a thread). Signed when the endpoint host is an AWS OTLP endpoint (scope read
+  from it), or always with `LESTO_OTEL_SIGV4=on` (region from `AWS_REGION`); an `Authorization`
+  in the headers wins (X-Ray API keys). `user-agent`, `expect` and `x-amzn-trace-id` are left
+  unsigned like botocore does: a proxy may rewrite them, and botocore-based verifiers expect it.
+  Without credentials an AWS signal is not exported at all (a 403 per batch otherwise) and the
+  reason is logged. The vectors in `tests/fixtures/sigv4` are AWS's own suite (30 cases run);
+  `the_signature_holds_for_what_goes_on_the_wire` re-signs what a loopback server received.
 - **`lesto::lambda`**: `Options::keep_stage` selects whether `invoke_once` strips
   `/{stage}` (read from the event's `RequestContext`, v1 and v2; `$default` has no prefix).
   `lambda_http` still *adds* the stage when the event path lacks it, so `invoke_once` always sees

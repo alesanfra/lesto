@@ -49,6 +49,9 @@ opentelemetry_sdk = { workspace = true, optional = true }
 opentelemetry-otlp = { workspace = true, optional = true }
 opentelemetry-appender-tracing = { workspace = true, optional = true }
 tracing-opentelemetry = { workspace = true, optional = true }
+opentelemetry-http = { workspace = true, optional = true, features = ["reqwest-blocking"] }
+async-trait = { workspace = true, optional = true }
+aws-lc-rs = { workspace = true, optional = true }
 # features `oidc` and `otel`: rustls on aws-lc-rs, so `https` endpoints work (`otel`'s exporter
 # uses this same reqwest)
 reqwest = { workspace = true, optional = true, features = ["rustls"] }
@@ -105,6 +108,9 @@ otel = [
     "dep:opentelemetry-otlp",
     "dep:opentelemetry-appender-tracing",
     "dep:tracing-opentelemetry",
+    "dep:opentelemetry-http",
+    "dep:async-trait",
+    "dep:aws-lc-rs",
     "dep:reqwest",
     "log",
 ]
