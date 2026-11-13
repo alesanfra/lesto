@@ -519,7 +519,8 @@ pub async fn lambda_main_without_flush(app: App<()>) -> Result<(), lesto::lambda
     lesto::lambda::serve_with(app, Options::default().flush_telemetry(false)).await
 }
 
-/// The same, continuing the X-Ray trace of the invocation.
+/// The same, continuing the X-Ray trace of the invocation (chapter 14, "Tracing with X-Ray, step
+/// by step", and chapter 15).
 pub async fn lambda_main_with_xray(app: App<()>) -> Result<(), lesto::lambda::Error> {
     use lesto::lambda::Options;
 
