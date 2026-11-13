@@ -83,7 +83,8 @@ lesto dev                  # rebuild and restart on save, the port stays open
   the query, Postgres row level security.
 - **MCP** with `mcp`: routes served to AI agents as tools, resources and prompts.
 - **Logs** on stdout out of the box, one line per request, text or JSON (`LESTO_LOG=json`).
-- **OpenTelemetry** with `otel`: traces, logs and metrics, configured by the `OTEL_*` variables.
+- **OpenTelemetry** with `otel`: traces, logs and metrics, configured by the `OTEL_*` variables;
+  CloudWatch's OTLP endpoints are signed with SigV4, so a Lambda exports to X-Ray with no layer.
 - **AWS Lambda** with `lambda`: the same app behind API Gateway, Function URLs or ALB.
 - **Production defaults**: graceful shutdown, timeouts, body limits, CORS, compression, request
   ids, security headers, panics answered as `500` problems.

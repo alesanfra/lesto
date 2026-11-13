@@ -7,7 +7,7 @@ publish = false
 description = "Compiles the code shown in docs/tutorial so the tutorial cannot drift from the API"
 
 [dependencies]
-lesto = { path = "../../crates/lesto", features = ["otel", "oidc", "mcp"] }
+lesto = { path = "../../crates/lesto", features = ["otel", "oidc", "mcp", "lambda"] }
 
 [dev-dependencies]
 tower.workspace = true

@@ -48,6 +48,14 @@ line per request and every `tracing` event. Set the function's log format to JSO
 sets `AWS_LAMBDA_LOG_FORMAT=JSON`, which makes lesto write JSON too (`LESTO_LOG` still wins), so
 Logs Insights can query `http.route` or `http.response.status_code` directly.
 
+**Traces.** With the `otel` feature, call `lesto::otel::init()` before `serve`: the spans and log
+records of an invocation are exported right after its response, before Lambda freezes the
+instance (a frozen instance exports nothing). Chapter 15 has the details,
+`Options::flush_telemetry` to turn it off, `Options::xray` to join the X-Ray trace of the
+invocation, and how to send the spans straight to X-Ray (lesto signs the request with the
+function's role) without a layer; [Tracing with X-Ray, step by step](#tracing-with-x-ray-step-by-step)
+below is the recipe.
+
 **State.** A Lambda instance handles one request at a time and may be frozen or discarded at
 any moment. Keep in-memory state (like the `Mutex<Vec<Note>>` of the example) for caches only;
 real data goes to a database or another service. With `lesto::db`, build the pool once in
@@ -88,6 +96,89 @@ strip = true
 The `lambda` feature enables only the API Gateway and ALB event formats of the runtime; websockets are
 not included.
 
+## Tracing with X-Ray, step by step
+
+The whole recipe for an API on Lambda whose traces show up in X-Ray as one trace per request
+(API Gateway, the Lambda segment and lesto's spans), with no collector layer. Chapter 15 explains
+each piece.
+
+**1. Features.** `lambda` and `otel`:
+
+```toml
+lesto = { version = "0.3", features = ["lambda", "otel"] }
+```
+
+**2. `main`.** Install the telemetry *before* `serve`, keep the guard, and ask for the X-Ray
+parent:
+
+```rust
+#[lesto::main]
+async fn main() -> Result<(), lesto::lambda::Error> {
+    let _telemetry = lesto::otel::init_named("notes-api");
+    lesto::lambda::serve_with(build_app(), Options::default().xray(true)).await
+}
+```
+
+The order matters: `serve_with` registers the internal extension that exports after each response
+only when there is telemetry to flush. Nothing else turns it on.
+
+**3. Environment of the function.** Spans go straight to the X-Ray OTLP endpoint; lesto signs the
+requests with SigV4, using the credentials of the function's role that Lambda already puts in the
+environment:
+
+```sh
+OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=https://xray.eu-west-1.amazonaws.com/v1/traces
+OTEL_LOGS_EXPORTER=none        # stdout already goes to CloudWatch Logs
+OTEL_METRICS_EXPORTER=none     # or OTEL_EXPORTER_OTLP_METRICS_ENDPOINT=https://monitoring.eu-west-1.amazonaws.com/v1/metrics
+```
+
+Turn logs and metrics off (or give them an endpoint): with only the traces endpoint set, their
+exporters would fall back to `localhost`. `OTEL_SERVICE_NAME` overrides the name given to
+`init_named`.
+
+**4. AWS, once.**
+
+- Turn on **Transaction Search** in the CloudWatch settings of the account: the X-Ray OTLP
+  endpoint requires it. Spans are stored in the `aws/spans` log group and billed as CloudWatch
+  Logs ingestion.
+- Give the function's role **`AWSXrayWriteOnlyPolicy`**.
+- Turn on **active tracing** on the function (and on API Gateway, for its segment), so that
+  `xray(true)` has a segment to attach to.
+
+With SAM, steps 3 and 4 (except Transaction Search) are:
+
+```yaml
+NotesApi:
+  Type: AWS::Serverless::Function
+  Properties:
+    CodeUri: target/lambda/notes-api/
+    Runtime: provided.al2023
+    Architectures: [arm64]
+    Handler: bootstrap
+    Tracing: Active
+    Policies: [AWSXrayWriteOnlyPolicy]
+    Environment:
+      Variables:
+        OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: !Sub https://xray.${AWS::Region}.amazonaws.com/v1/traces
+        OTEL_LOGS_EXPORTER: none
+        OTEL_METRICS_EXPORTER: none
+    Events:
+      Api:
+        Type: HttpApi
+```
+
+**5. Check it.**
+
+- The init logs of the function list the extension, `lesto-telemetry-flush`, registered for
+  `INVOKE`. A warning `the Lambda Extensions API is not available` means lesto fell back to
+  flushing before each response.
+- The `REPORT` line of each invocation carries `PostRuntimeExtensionsDuration`: the export, done
+  after the response.
+- CloudWatch → X-Ray traces shows one trace per request: API Gateway, the Lambda segment, and
+  lesto's `GET /notes/{id}` span under it.
+- A `403` from the endpoint, logged by the exporter, means the policy or Transaction Search is
+  missing.
+
 ## Testing with event fixtures
 
 `lesto::lambda::test::invoke` feeds a raw event (the JSON API Gateway sends, which you can copy
@@ -112,6 +203,11 @@ option belongs to the router you pass, so both settings can share a test file.
 - REST API stages are stripped from the path by default (`Options::keep_stage` to keep them).
 - Documentation pages work behind the stage because they link `openapi.json` relatively.
 - Logs go to CloudWatch through stdout, as JSON when the function's log format is JSON.
+- With `otel`, telemetry is flushed after every invocation (`Options::flush_telemetry`), by an
+  internal extension once the response is posted.
+- X-Ray with no layer: `otel` + `init_named` before `serve_with(.., Options::default().xray(true))`,
+  the traces endpoint in the environment, Transaction Search, `AWSXrayWriteOnlyPolicy`, active
+  tracing.
 - Build with `cargo lambda build --release --arm64`, deploy with `cargo lambda deploy` or your
   infrastructure tool.
 - Test the Lambda path in-process with `lesto::lambda::test::invoke` and event fixtures.

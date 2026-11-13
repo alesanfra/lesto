@@ -64,6 +64,11 @@ opentelemetry_sdk = { version = "0.33", default-features = false, features = ["t
 opentelemetry-otlp = { version = "0.33", default-features = false, features = ["trace", "logs", "metrics", "http-proto", "reqwest-blocking-client"] }
 opentelemetry-appender-tracing = { version = "0.33", default-features = false }
 tracing-opentelemetry = { version = "0.34", default-features = false }
+# feature `otel`: SigV4 for the AWS OTLP endpoints. All three are already in the graph through
+# opentelemetry-otlp (the HTTP client trait) and rustls (aws-lc-rs: SHA-256 and HMAC).
+opentelemetry-http = { version = "0.33", default-features = false }
+async-trait = "0.1.80"
+aws-lc-rs = { version = "1.18", default-features = false, features = ["aws-lc-sys"] }
 tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
 # features `oidc` and `otel` of `lesto`: the async client that fetches the discovery document and
 # the JWKS, and the TLS stack of the OTLP exporter's blocking client (the same reqwest major
@@ -74,7 +79,7 @@ jsonwebtoken = { version = "11", default-features = false }
 anyhow = "1.0.5"
 uuid = { version = "1.12.1", default-features = false }
 # Dev-only: the MCP client of `crates/lesto/tests/mcp_rmcp.rs`. Plain HTTP on loopback, no TLS.
-rmcp = { version = "3.4", default-features = false, features = ["client", "transport-streamable-http-client-reqwest"] }
+rmcp = { version = "3.9", default-features = false, features = ["client", "transport-streamable-http-client-reqwest"] }
 
 # Intra-workspace dependency: `version` is required to publish, `path` to build from a checkout.
 lesto-macros = { path = "crates/lesto-macros", version = "0.3.1" }

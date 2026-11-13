@@ -39,6 +39,10 @@ crates/lesto/             library
                           (`lesto::access`), feature `otel`: propagation
   src/log.rs              feature `log` (default): Console, the tracing Layer printing text or
                           JSON on stdout (LESTO_LOG), init called by App::serve and lambda::serve
+  src/sigv4.rs            feature `otel`: AWS SigV4 for the CloudWatch OTLP endpoints (Signer,
+                          Scope from the host, env credentials, SigningClient wrapping the
+                          exporters' blocking reqwest client); checked against tests/fixtures/sigv4
+                          (AWS's own test suite, Apache-2.0)
   src/otel.rs             feature `otel`: Config from the OTEL_* variables, init/init_named,
                           Telemetry guard (tracer + logger + meter providers), auto_init called by
                           App::serve_until, the tracing→OTLP logs bridge and its feedback filter
@@ -54,7 +58,7 @@ crates/lesto/             library
     error.rs              lesto::db::Error → 403/404/409/500 problems, ResultExt::internal
     trace.rs              the transaction's client span (database semconv)
   src/lambda.rs           feature `lambda`: AWS Lambda adapter over lambda_http: serve (Lambda or
-                          local), Options (keep_stage, a per-router request mapper), test::invoke
+                          local), Options (keep_stage, flush_telemetry, xray), test::invoke
   src/oidc/               feature `oidc`: bearer JWTs verified against an OpenID Connect provider
     mod.rs                Oidc (discover → Discover builder, IntoFuture), from_env, verify
     keys.rs               discovery document, URL/issuer checks, JWKS parsing, KeyCache (refresh)
@@ -86,6 +90,8 @@ crates/lesto/             library
   tests/log.rs            what Console prints, both formats, into a buffer (thread-local default)
   tests/metrics.rs        the duration histogram through the SDK's in-memory exporter
   tests/lambda.rs         API Gateway v1/v2, Function URL and ALB event fixtures
+  tests/lambda_otel.rs    the per-invocation telemetry flush, against an in-memory span exporter
+                          (own binary: the flushed providers are global)
   tests/oidc.rs           a provider on 127.0.0.1:0, tokens signed with tests/fixtures/oidc/*.pem
                           (test-only keys): every check, key rotation, protect, lesto::db
   tests/oidc_provider.rs  the same against a real provider (mock-oauth2-server); skipped unless
@@ -456,7 +462,7 @@ Recorded here because they are not derivable from the code. Do not undo them cas
   turns API Gateway v1/v2, Function URL and ALB events into `http::Request`s and accepts any
   tower service, so the crate adds only what lesto users need: the Lambda-or-local switch on
   `AWS_LAMBDA_RUNTIME_API`, stage stripping by default, and an in-process test helper. The
-  stage is stripped by a `tower::ServiceExt::map_request` around the router (it must run
+  stage is stripped in the `service_fn` around the router (`invoke_once`; it must run
   *before* routing; a `Router::layer` runs after) rather than through the runtime's
   `AWS_LAMBDA_HTTP_IGNORE_STAGE_IN_PATH` variable, which is process-wide. Docs pages link
   `openapi.json` relatively for the same reason (a stage or proxy prefix the app does not know).
@@ -588,9 +594,54 @@ Recorded here because they are not derivable from the code. Do not undo them cas
   a *query* between methods, which is the `Connection<DB>` alias plus the convention of writing
   `..._in(conn, ..)` helpers. Two public store methods sharing one transaction stays impossible
   on purpose — that is the boundary the design is built on.
-- **`lesto::lambda`**: `Options::keep_stage` selects whether the request mapper strips
+- **`lesto::lambda` flushes telemetry per invocation** (decided 2026-11-13, issue #4). Lambda
+  freezes the instance once it has the response, and the batch processors' timers do not run
+  while frozen. The handler collects the body; `otel::flush` then runs on the blocking pool
+  (`force_flush` blocks on the processor threads) in an *internal extension*: `run_with`
+  registers one for `INVOKE` events (Extensions API, two calls written on `otel`'s reqwest; the
+  `lambda-extension` crate would add `chrono`, `async-stream`, `tokio-stream`), each invocation
+  signals "done" through a channel when its future ends (`DoneOnDrop`, so an error still
+  signals), and the extension flushes and only then asks for its next event, which is what
+  Lambda waits for before freezing. The caller gets the response before the export. An
+  extension that stops asking holds every invocation until its timeout, so `event/next` is
+  retried, never abandoned. After a flush it drains the dones that arrived meanwhile and flushes
+  again before asking: Lambda never runs an invocation while an extension is busy, but floci
+  does and drops the `INVOKE` events the extension missed, which left the last invocation's
+  telemetry for the next one. Checked on floci with a verifier delaying each export by 1 s:
+  0.28 s responses with the extension, 3.3 s with the flush before the response. Fallback to flushing before the response without the Extensions API
+  (warned) or with `AWS_LAMBDA_MAX_CONCURRENCY` > 1 (no freeze, no pairing), and in
+  `test::invoke`. `flush`
+  reaches the providers through a registry of clones that `Telemetry` fills on creation and
+  clears on drop, so it works with `init` called by hand (the documented path) without a
+  `Telemetry` argument on `lambda::run`; `Telemetry::from_providers` registers an application's
+  own providers. `Options::flush_telemetry(false)` opts out.
+- **X-Ray is a parent, not a propagator** (decided 2026-11-13). `Options::xray` reads the
+  invocation's trace id from the Lambda context (`Lambda-Runtime-Trace-Id`; `X-Amzn-Trace-Id`
+  of API Gateway/ALB as fallback), parses it by hand (`lambda::xray`, no `opentelemetry-aws`)
+  and puts the parent in the request extensions (`trace::propagation::RemoteParent`), which the
+  request span prefers over the headers. Not a global `XrayPropagator`: the context is per
+  invocation (`_X_AMZN_TRACE_ID` is process-wide and wrong under managed concurrency), and a
+  global propagator would replace the W3C one for the whole app. Opt-in, because the parent
+  brings X-Ray's sampling decision: `Sampled=0` (active tracing off) makes the default
+  parent-based sampler drop every lesto span.
+- **SigV4 is hand-written, credentials come from the environment only** (decided 2026-11-13).
+  CloudWatch's OTLP endpoints (`xray`, `logs`, `monitoring`) take SigV4, and Lambda already
+  puts the role's credentials in `AWS_*`: signing there removes the collector layer (cold start,
+  memory, a config file). ~250 lines on aws-lc-rs (SHA-256, HMAC), already in the graph through
+  rustls; `aws-sigv4` would bring `aws-smithy-*` and the SDK's release churn, `aws-config` the
+  whole provider chain. No IMDS, container credentials or profiles: those need refreshes, and
+  ECS/EC2 can run a collector. The `SigningClient` wraps the exporters' blocking reqwest client
+  (`with_http_client`), built the way the exporter builds its own (timeout from the `OTEL_*`
+  variables, on a thread). Signed when the endpoint host is an AWS OTLP endpoint (scope read
+  from it), or always with `LESTO_OTEL_SIGV4=on` (region from `AWS_REGION`); an `Authorization`
+  in the headers wins (X-Ray API keys). `user-agent`, `expect` and `x-amzn-trace-id` are left
+  unsigned like botocore does: a proxy may rewrite them, and botocore-based verifiers expect it.
+  Without credentials an AWS signal is not exported at all (a 403 per batch otherwise) and the
+  reason is logged. The vectors in `tests/fixtures/sigv4` are AWS's own suite (30 cases run);
+  `the_signature_holds_for_what_goes_on_the_wire` re-signs what a loopback server received.
+- **`lesto::lambda`**: `Options::keep_stage` selects whether `invoke_once` strips
   `/{stage}` (read from the event's `RequestContext`, v1 and v2; `$default` has no prefix).
-  `lambda_http` still *adds* the stage when the event path lacks it, so the mapper always sees
+  `lambda_http` still *adds* the stage when the event path lacks it, so `invoke_once` always sees
   it. `lambda_http` is built with only `apigw_rest`, `apigw_http`, `alb` (no websockets) to
   keep the binary small.
 - **lesto-cli**: builds with `--message-format=json-render-diagnostics` (diagnostics to the

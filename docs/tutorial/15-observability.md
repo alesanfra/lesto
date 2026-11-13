@@ -103,6 +103,7 @@ yourself and keep the guard alive:
 ```rust
 let telemetry = lesto::otel::init_named("notes");
 // ... run ...
+telemetry.flush();             // export what is buffered now, and wait
 telemetry.shutdown();          // or let it drop
 ```
 
@@ -236,10 +237,79 @@ OpenTelemetry API in your code. To time a helper, put `#[tracing::instrument]` o
 ## In Lambda
 
 The spans are the same, and `traceparent` from API Gateway is picked up as usual, but
-`lesto::lambda::serve` sets up only the console of chapter 11 (stdout goes to CloudWatch Logs): a
-Lambda instance is frozen between invocations, so a batching exporter loses spans. Call
-`lesto::otel::init()` in `main` and flush before returning, or send to the OpenTelemetry Lambda
-layer, which does that for you.
+`lesto::lambda::serve` sets up only the console of chapter 11 (stdout goes to CloudWatch Logs).
+Install the export yourself, and keep the guard alive for the life of the process:
+
+```rust
+#[lesto::main]
+async fn main() -> Result<(), lesto::lambda::Error> {
+    let _telemetry = lesto::otel::init_named("notes");
+    lesto::lambda::serve(build_app()).await
+}
+```
+
+Lambda freezes the instance as soon as the invocation is over, and a batching exporter's timer
+does not run while it is frozen: spans would leave at the next invocation, or never. So
+`lesto::lambda` flushes the providers after every invocation. It does it from an *internal
+extension*, a task in your function's process that Lambda waits for: the runtime posts the
+response, the caller has it, and the extension exports before the instance freezes. The export
+is billed as part of the invocation (`PostRuntimeExtensionsDuration` in the `REPORT` line), and
+that instance takes its next invocation once it is done, but no caller waits for it. Where there
+is no Extensions API (an emulator without it), or several invocations share the process
+(`AWS_LAMBDA_MAX_CONCURRENCY`), the flush happens before the response instead. If what you
+export to buffers across freezes by itself, turn the flush off:
+
+```rust
+lesto::lambda::serve_with(app, Options::default().flush_telemetry(false)).await
+```
+
+With active tracing on, Lambda also opens an X-Ray segment for every invocation, and API Gateway
+one in front of it. Their ids are not a `traceparent`, so by default lesto's spans form a trace of
+their own next to them. `xray(true)` makes the request span a child of the invocation's segment,
+and the backend shows API Gateway, Lambda and your handler as one trace:
+
+```rust
+lesto::lambda::serve_with(app, Options::default().xray(true)).await
+```
+
+The id comes from the invocation (`Lambda-Runtime-Trace-Id`), or from the `X-Amzn-Trace-Id`
+header API Gateway and ALB add, and wins over a `traceparent`. X-Ray's sampling decision comes
+with it: a request X-Ray does not sample (`Sampled=0`, which is every request while active tracing
+is off) records no lesto span either.
+
+### Straight to X-Ray, no layer
+
+CloudWatch takes OTLP itself: `https://xray.<region>.amazonaws.com/v1/traces` for spans,
+`https://logs.<region>.amazonaws.com/v1/logs` and `https://monitoring.<region>.amazonaws.com/v1/metrics`
+for the rest. Those endpoints want each request signed with AWS Signature Version 4, and lesto
+signs when the endpoint is one of them, with the credentials Lambda already puts in the
+environment of the function (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`,
+those of its role). No collector, no layer, no extra cold start:
+
+```sh
+OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=https://xray.eu-west-1.amazonaws.com/v1/traces
+OTEL_LOGS_EXPORTER=none        # stdout already goes to CloudWatch Logs
+OTEL_METRICS_EXPORTER=none     # or https://monitoring.eu-west-1.amazonaws.com/v1/metrics
+```
+
+On the AWS side: turn on Transaction Search once per account (the traces endpoint requires it;
+spans are stored in the `aws/spans` log group and billed as CloudWatch Logs ingestion), and give
+the function's role `AWSXrayWriteOnlyPolicy`. With `Options::xray(true)` the trace is the one
+API Gateway and Lambda started.
+
+The price is time, though not the caller's: the flush is an HTTPS call to the regional endpoint
+after the response, a few milliseconds when the connection is still open, tens when the freeze
+dropped it and TLS starts over, billed as part of the invocation.
+
+The credentials are read from those three variables only, which covers Lambda and any process
+you hand them to; on ECS or EC2 (container or instance credentials, refreshed by the SDKs) run a
+collector instead. An `Authorization` header you set yourself, such as an X-Ray API key in
+`OTEL_EXPORTER_OTLP_HEADERS`, is sent instead of a signature. `LESTO_OTEL_SIGV4=on` signs for any
+endpoint (a proxy; the region comes from `AWS_REGION`), `off` never signs.
+
+Providers you build yourself (the escape hatch above) are flushed too once you hand them to
+`lesto::otel::Telemetry::from_providers` and keep the guard it returns; `lesto::otel::flush()`
+does the same flush anywhere else.
 
 ## Recap
 
@@ -250,6 +320,10 @@ layer, which does that for you.
   the console of chapter 11 and the OTLP export of spans and logs, and flushes on shutdown.
 - Log records carry their `trace_id` and `span_id`, so logs and traces line up in the backend.
 - An incoming `traceparent` continues the trace here.
+- In Lambda, `lesto::otel::init` by hand; `lesto::lambda` flushes after every invocation, and
+  `Options::xray` joins lesto's spans to the X-Ray trace of the invocation.
+- An endpoint on AWS (`xray`, `logs`, `monitoring`) is signed with SigV4 from the environment's
+  credentials: a Lambda function exports to X-Ray with no layer.
 - `App::trace(Trace::new()...)` opts `url.query` in, trusts forwarding headers, or turns the
   span off.
 - `examples/04-opentelemetry` runs the whole thing against a local Jaeger or OpenObserve.

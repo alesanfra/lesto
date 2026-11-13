@@ -202,7 +202,12 @@ pub(crate) fn request_span<B>(req: &http::Request<B>, config: Trace) -> Span {
     }
 
     #[cfg(feature = "otel")]
-    propagation::set_parent(&span, req.headers());
+    match req.extensions().get::<propagation::RemoteParent>() {
+        // Set by an adapter that knows the parent better than the headers do (`lesto::lambda`
+        // with `Options::xray`).
+        Some(parent) => propagation::attach(&span, parent.0.clone()),
+        None => propagation::set_parent(&span, req.headers()),
+    }
 
     span
 }
@@ -481,6 +486,16 @@ pub mod propagation {
         }
         let context =
             opentelemetry::global::get_text_map_propagator(|p| p.extract(&Headers(headers)));
+        attach(span, context);
+    }
+
+    /// A parent found outside the headers, in the request extensions: it replaces what the
+    /// propagator would find. Independent of [`otel::enable_propagation`](crate::otel::enable_propagation),
+    /// since whoever inserts it was asked to.
+    #[derive(Clone, Debug)]
+    pub(crate) struct RemoteParent(pub(crate) opentelemetry::Context);
+
+    pub(crate) fn attach(span: &Span, context: opentelemetry::Context) {
         // `Err` means the subscriber has no `tracing_opentelemetry::layer()`, so there is no
         // OpenTelemetry span to reparent: the request is still traced, as a root.
         let _ = span.set_parent(context);
