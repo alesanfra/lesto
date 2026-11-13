@@ -15,7 +15,6 @@ All notable changes to lesto are listed here. The format follows
 - `lambda::Options::flush_telemetry` (on by default).
 - `lambda::Options::xray` (feature `otel`): the X-Ray trace of the invocation becomes the parent
   of the request span, so API Gateway, the Lambda segment and lesto's spans form one trace.
-
 - OTLP export straight to CloudWatch (feature `otel`): an endpoint on AWS (`xray`, `logs`,
   `monitoring`) is signed with SigV4, using `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` and
   `AWS_SESSION_TOKEN`. A Lambda function exports to X-Ray with no collector or layer.
@@ -24,8 +23,9 @@ All notable changes to lesto are listed here. The format follows
 ### Fixed
 
 - On AWS Lambda, spans, logs and metrics are flushed after every invocation, by an internal
-  extension once the response is posted, so callers do not wait for the export (#4). Lambda freezes the instance between invocations, so the batch
-  exporters exported an invocation's telemetry late, at the next invocation, or never.
+  extension once the response is posted, so callers do not wait for the export (#4). Lambda
+  freezes the instance between invocations, so the batch exporters exported an invocation's
+  telemetry late, at the next invocation, or never.
 
 ## [0.3.1] - 2026-11-01
 
