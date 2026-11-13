@@ -54,7 +54,7 @@ crates/lesto/             library
     error.rs              lesto::db::Error → 403/404/409/500 problems, ResultExt::internal
     trace.rs              the transaction's client span (database semconv)
   src/lambda.rs           feature `lambda`: AWS Lambda adapter over lambda_http: serve (Lambda or
-                          local), Options (keep_stage, flush_telemetry), test::invoke
+                          local), Options (keep_stage, flush_telemetry, xray), test::invoke
   src/oidc/               feature `oidc`: bearer JWTs verified against an OpenID Connect provider
     mod.rs                Oidc (discover → Discover builder, IntoFuture), from_env, verify
     keys.rs               discovery document, URL/issuer checks, JWKS parsing, KeyCache (refresh)
@@ -598,6 +598,15 @@ Recorded here because they are not derivable from the code. Do not undo them cas
   clears on drop, so it works with `init` called by hand (the documented path) without a
   `Telemetry` argument on `lambda::run`; `Telemetry::from_providers` registers an application's
   own providers. `Options::flush_telemetry(false)` opts out.
+- **X-Ray is a parent, not a propagator** (decided 2026-11-13). `Options::xray` reads the
+  invocation's trace id from the Lambda context (`Lambda-Runtime-Trace-Id`; `X-Amzn-Trace-Id`
+  of API Gateway/ALB as fallback), parses it by hand (`lambda::xray`, no `opentelemetry-aws`)
+  and puts the parent in the request extensions (`trace::propagation::RemoteParent`), which the
+  request span prefers over the headers. Not a global `XrayPropagator`: the context is per
+  invocation (`_X_AMZN_TRACE_ID` is process-wide and wrong under managed concurrency), and a
+  global propagator would replace the W3C one for the whole app. Opt-in, because the parent
+  brings X-Ray's sampling decision: `Sampled=0` (active tracing off) makes the default
+  parent-based sampler drop every lesto span.
 - **`lesto::lambda`**: `Options::keep_stage` selects whether `invoke_once` strips
   `/{stage}` (read from the event's `RequestContext`, v1 and v2; `$default` has no prefix).
   `lambda_http` still *adds* the stage when the event path lacks it, so `invoke_once` always sees

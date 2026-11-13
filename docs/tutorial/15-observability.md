@@ -259,6 +259,21 @@ buffers across freezes by itself, turn the flush off:
 lesto::lambda::serve_with(app, Options::default().flush_telemetry(false)).await
 ```
 
+With active tracing on, Lambda also opens an X-Ray segment for every invocation, and API Gateway
+one in front of it. Their ids are not a `traceparent`, so by default lesto's spans form a trace of
+their own next to them. `xray(true)` makes the request span a child of the invocation's segment,
+and the backend shows API Gateway, Lambda and your handler as one trace:
+
+```rust
+lesto::lambda::serve_with(app, Options::default().xray(true)).await
+```
+
+The id comes from the invocation (`Lambda-Runtime-Trace-Id`), or from the `X-Amzn-Trace-Id`
+header API Gateway and ALB add, and wins over a `traceparent`. X-Ray's sampling decision comes
+with it: a request X-Ray does not sample (`Sampled=0`, which is every request while active tracing
+is off) records no lesto span either. The spans still leave over OTLP; to see them in X-Ray, send
+them to a collector that forwards there, such as the AWS Distro for OpenTelemetry Lambda layer.
+
 Providers you build yourself (the escape hatch above) are flushed too once you hand them to
 `lesto::otel::Telemetry::from_providers` and keep the guard it returns; `lesto::otel::flush()`
 does the same flush anywhere else.
@@ -272,7 +287,8 @@ does the same flush anywhere else.
   the console of chapter 11 and the OTLP export of spans and logs, and flushes on shutdown.
 - Log records carry their `trace_id` and `span_id`, so logs and traces line up in the backend.
 - An incoming `traceparent` continues the trace here.
-- In Lambda, `lesto::otel::init` by hand; `lesto::lambda` flushes after every invocation.
+- In Lambda, `lesto::otel::init` by hand; `lesto::lambda` flushes after every invocation, and
+  `Options::xray` joins lesto's spans to the X-Ray trace of the invocation.
 - `App::trace(Trace::new()...)` opts `url.query` in, trusts forwarding headers, or turns the
   span off.
 - `examples/04-opentelemetry` runs the whole thing against a local Jaeger or OpenObserve.

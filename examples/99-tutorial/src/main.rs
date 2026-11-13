@@ -519,6 +519,14 @@ pub async fn lambda_main_without_flush(app: App<()>) -> Result<(), lesto::lambda
     lesto::lambda::serve_with(app, Options::default().flush_telemetry(false)).await
 }
 
+/// The same, continuing the X-Ray trace of the invocation.
+pub async fn lambda_main_with_xray(app: App<()>) -> Result<(), lesto::lambda::Error> {
+    use lesto::lambda::Options;
+
+    let _telemetry = lesto::otel::init_named("notes");
+    lesto::lambda::serve_with(app, Options::default().xray(true)).await
+}
+
 /// The built-in layers, all of them, as the chapter lists them.
 pub fn production_app() -> Result<App<()>, Box<dyn std::error::Error>> {
     use std::time::Duration;

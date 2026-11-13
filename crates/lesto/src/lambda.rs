@@ -45,6 +45,9 @@ pub struct Options {
     /// Flush the OpenTelemetry providers after every invocation, before the response is
     /// returned (feature `otel`; without it there is nothing to flush). On by default.
     pub flush_telemetry: bool,
+    /// Make the X-Ray trace of the invocation the parent of the request span (feature `otel`).
+    /// Off by default.
+    pub xray: bool,
 }
 
 impl Default for Options {
@@ -52,6 +55,7 @@ impl Default for Options {
         Options {
             keep_stage: false,
             flush_telemetry: true,
+            xray: false,
         }
     }
 }
@@ -72,6 +76,23 @@ impl Options {
     /// through something that buffers across freezes by itself.
     pub fn flush_telemetry(mut self, flush: bool) -> Self {
         self.flush_telemetry = flush;
+        self
+    }
+
+    /// Continue the X-Ray trace of the invocation (`true`) or not (`false`, the default).
+    ///
+    /// With active tracing on, Lambda opens a segment for every invocation and hands its id to
+    /// the function. With this option the request span becomes a child of that segment, so the
+    /// backend shows API Gateway, the Lambda segment and lesto's spans as one trace instead of
+    /// two. The id is read from the invocation context (`Lambda-Runtime-Trace-Id`), or else from
+    /// the `X-Amzn-Trace-Id` header that API Gateway and ALB add; it replaces a `traceparent`.
+    ///
+    /// X-Ray's sampling decision is the parent's: with `Sampled=0` (active tracing off, or a
+    /// request X-Ray chose not to trace) the default parent-based sampler records nothing. Only
+    /// the trace and parent ids are taken; the spans are still exported over OTLP, to a collector
+    /// that forwards them to X-Ray (the ADOT Lambda layer), and need the `otel` feature.
+    pub fn xray(mut self, xray: bool) -> Self {
+        self.xray = xray;
         self
     }
 }
@@ -144,11 +165,19 @@ async fn invoke_once(
     req: lambda_http::Request,
     options: Options,
 ) -> Result<Response<Body>, Error> {
-    let req = if options.keep_stage {
+    #[cfg_attr(not(feature = "otel"), expect(unused_mut))]
+    let mut req = if options.keep_stage {
         req
     } else {
         strip_stage(req)
     };
+    #[cfg(feature = "otel")]
+    if options.xray
+        && let Some(parent) = xray::parent_of(&req)
+    {
+        req.extensions_mut()
+            .insert(crate::trace::propagation::RemoteParent(parent));
+    }
     let response = match router.oneshot(req).await {
         Ok(response) => response,
         Err(infallible) => match infallible {},
@@ -200,6 +229,138 @@ fn stage_of<B>(req: &Request<B>) -> Option<String> {
     }?;
     // The `$default` stage of an HTTP API has no path prefix.
     (!stage.is_empty() && stage != "$default").then_some(stage)
+}
+
+/// The X-Ray trace header, as an OpenTelemetry parent (feature `otel`).
+#[cfg(feature = "otel")]
+mod xray {
+    use lambda_http::RequestExt;
+    use opentelemetry::trace::{
+        SpanContext, SpanId, TraceContextExt, TraceFlags, TraceId, TraceState,
+    };
+
+    /// The X-Ray trace of the invocation: the Lambda context first (the segment of this
+    /// invocation), the `X-Amzn-Trace-Id` header of API Gateway or ALB otherwise.
+    pub(super) fn parent_of(req: &lambda_http::Request) -> Option<opentelemetry::Context> {
+        let from_context = req
+            .lambda_context_ref()
+            .and_then(|context| context.xray_trace_id.as_deref());
+        let from_header = || {
+            req.headers()
+                .get("x-amzn-trace-id")
+                .and_then(|value| value.to_str().ok())
+        };
+        let span_context = from_context
+            .and_then(parse)
+            .or_else(|| from_header().and_then(parse))?;
+        Some(opentelemetry::Context::new().with_remote_span_context(span_context))
+    }
+
+    /// `Root=1-{8 hex epoch}-{24 hex};Parent={16 hex};Sampled=1`, in any order, other keys
+    /// (`Lineage`, `Self`) ignored. `None` without a valid root and parent: a root alone names
+    /// a trace but no span to hang from.
+    pub(super) fn parse(header: &str) -> Option<SpanContext> {
+        let mut trace_id = None;
+        let mut span_id = None;
+        let mut flags = TraceFlags::default();
+        for field in header.split(';') {
+            let Some((key, value)) = field.split_once('=') else {
+                continue;
+            };
+            match key.trim() {
+                "Root" => trace_id = root(value.trim()),
+                "Parent" => {
+                    span_id = hex::<16>(value.trim()).and_then(|id| {
+                        SpanId::from_hex(id)
+                            .ok()
+                            .filter(|id| *id != SpanId::INVALID)
+                    })
+                }
+                "Sampled" if value.trim() == "1" => flags = TraceFlags::SAMPLED,
+                _ => {}
+            }
+        }
+        Some(SpanContext::new(
+            trace_id?,
+            span_id?,
+            flags,
+            true,
+            TraceState::default(),
+        ))
+    }
+
+    /// `1-5759e988-bd862e3fe1be46a994272793` is the W3C trace id
+    /// `5759e988bd862e3fe1be46a994272793`.
+    fn root(value: &str) -> Option<TraceId> {
+        let mut parts = value.split('-');
+        let (Some("1"), Some(epoch), Some(random), None) =
+            (parts.next(), parts.next(), parts.next(), parts.next())
+        else {
+            return None;
+        };
+        let id = format!("{}{}", hex::<8>(epoch)?, hex::<24>(random)?);
+        TraceId::from_hex(&id)
+            .ok()
+            .filter(|id| *id != TraceId::INVALID)
+    }
+
+    /// `value` if it is exactly `N` hexadecimal digits.
+    fn hex<const N: usize>(value: &str) -> Option<&str> {
+        (value.len() == N && value.bytes().all(|b| b.is_ascii_hexdigit())).then_some(value)
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn the_lambda_header_becomes_a_remote_parent() {
+            let context = parse(
+                "Root=1-5759e988-bd862e3fe1be46a994272793;Parent=53995c3f42cd8ad8;Sampled=1;Lineage=a87bd80c:0",
+            )
+            .unwrap();
+            assert_eq!(
+                context.trace_id().to_string(),
+                "5759e988bd862e3fe1be46a994272793"
+            );
+            assert_eq!(context.span_id().to_string(), "53995c3f42cd8ad8");
+            assert!(context.is_sampled());
+            assert!(context.is_remote());
+        }
+
+        #[test]
+        fn order_and_spaces_do_not_matter_and_unsampled_stays_unsampled() {
+            let context = parse(
+                "Sampled=0; Parent=53995c3f42cd8ad8; Root=1-5759e988-bd862e3fe1be46a994272793",
+            )
+            .unwrap();
+            assert!(!context.is_sampled());
+            assert!(
+                parse("Root=1-5759e988-bd862e3fe1be46a994272793;Sampled=?;Parent=53995c3f42cd8ad8")
+                    .is_some_and(|c| !c.is_sampled()),
+                "a deferred decision is not a yes"
+            );
+        }
+
+        #[test]
+        fn malformed_headers_give_no_parent() {
+            for header in [
+                "",
+                "Root=1-5759e988-bd862e3fe1be46a994272793",
+                "Parent=53995c3f42cd8ad8;Sampled=1",
+                "Root=2-5759e988-bd862e3fe1be46a994272793;Parent=53995c3f42cd8ad8",
+                "Root=1-5759e98-bd862e3fe1be46a994272793;Parent=53995c3f42cd8ad8",
+                "Root=1-5759e988-bd862e3fe1be46a99427279z;Parent=53995c3f42cd8ad8",
+                "Root=1-5759e988-bd862e3fe1be46a994272793-00;Parent=53995c3f42cd8ad8",
+                "Root=1-5759e988-bd862e3fe1be46a994272793;Parent=53995c3f",
+                "Root=1-00000000-000000000000000000000000;Parent=53995c3f42cd8ad8",
+                "Root=1-5759e988-bd862e3fe1be46a994272793;Parent=0000000000000000",
+                "Root=1-5759e988-bd862e3fe1be46a99427279é;Parent=53995c3f42cd8ad8",
+            ] {
+                assert!(parse(header).is_none(), "{header}");
+            }
+        }
+    }
 }
 
 /// Test helpers: drive a router with Lambda event fixtures, no Lambda needed.

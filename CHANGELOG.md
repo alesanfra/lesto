@@ -11,6 +11,8 @@ All notable changes to lesto are listed here. The format follows
 - `lesto::otel::flush`, `Telemetry::flush` and `Telemetry::from_providers`: export what the
   providers buffered on demand, including providers an application built itself.
 - `lambda::Options::flush_telemetry` (on by default).
+- `lambda::Options::xray` (feature `otel`): the X-Ray trace of the invocation becomes the parent
+  of the request span, so API Gateway, the Lambda segment and lesto's spans form one trace.
 
 ### Fixed
 

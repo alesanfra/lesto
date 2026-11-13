@@ -21,12 +21,21 @@ async fn ping() -> &'static str {
 }
 
 fn event() -> String {
+    event_with_trace(None)
+}
+
+/// The event with the `X-Amzn-Trace-Id` header API Gateway adds when tracing is on.
+fn event_with_trace(xray: Option<&str>) -> String {
+    let mut headers = json!({ "host": "abc.lambda-url.eu-west-1.on.aws" });
+    if let Some(xray) = xray {
+        headers["x-amzn-trace-id"] = json!(xray);
+    }
     json!({
         "version": "2.0",
         "routeKey": "$default",
         "rawPath": "/ping",
         "rawQueryString": "",
-        "headers": { "host": "abc.lambda-url.eu-west-1.on.aws" },
+        "headers": headers,
         "requestContext": {
             "accountId": "123456789012",
             "apiId": "abc",
@@ -109,4 +118,50 @@ async fn spans_of_an_invocation_are_exported_before_the_next_one() {
     telemetry.shutdown();
     invoke(&router, &event()).await.unwrap();
     lesto::otel::flush();
+}
+
+const XRAY: &str =
+    "Root=1-5759e988-bd862e3fe1be46a994272793;Parent=53995c3f42cd8ad8;Sampled=1;Lineage=a87bd80c:0";
+
+#[tokio::test]
+async fn the_xray_trace_becomes_the_parent_when_asked() {
+    let exporter = InMemorySpanExporter::default();
+    let (provider, subscriber) = tracing_to(&exporter);
+    let _subscriber = tracing::subscriber::set_default(subscriber);
+    let router = App::<()>::new().routes(routes![ping]).into_router();
+
+    // No flush per invocation: it would reach the providers the other test registered.
+    let plain = Options::default().flush_telemetry(false);
+    let xray = plain.xray(true);
+    invoke_with(&router, &event_with_trace(Some(XRAY)), xray)
+        .await
+        .unwrap();
+    // Off by default: the header is ignored and the span is a root of its own.
+    invoke_with(&router, &event_with_trace(Some(XRAY)), plain)
+        .await
+        .unwrap();
+    // X-Ray chose not to sample: the parent-based sampler records nothing.
+    let unsampled = XRAY.replace("Sampled=1", "Sampled=0");
+    invoke_with(&router, &event_with_trace(Some(&unsampled)), xray)
+        .await
+        .unwrap();
+    // No header: a root, as without the option.
+    invoke_with(&router, &event(), xray).await.unwrap();
+
+    provider.force_flush().unwrap();
+    let spans = exporter.get_finished_spans().unwrap();
+    assert_eq!(spans.len(), 3, "the unsampled invocation is not recorded");
+    assert_eq!(
+        spans[0].span_context.trace_id().to_string(),
+        "5759e988bd862e3fe1be46a994272793"
+    );
+    assert_eq!(spans[0].parent_span_id.to_string(), "53995c3f42cd8ad8");
+    assert!(spans[0].parent_span_is_remote);
+    for root in &spans[1..] {
+        assert_ne!(
+            root.span_context.trace_id().to_string(),
+            "5759e988bd862e3fe1be46a994272793"
+        );
+        assert_eq!(root.parent_span_id, opentelemetry::trace::SpanId::INVALID);
+    }
 }
