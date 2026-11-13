@@ -6,7 +6,8 @@ All notable changes to lesto are listed here. The format follows
 
 ## [Unreleased]
 
-## [0.4.1] - 2026-11-13
+The tag `v0.4.1` was pushed with an empty changelog section, so the release workflow refused to
+publish it; its changes ship here.
 
 ### Fixed
 
