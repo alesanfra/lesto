@@ -6,6 +6,8 @@ All notable changes to lesto are listed here. The format follows
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-13
+
 ### Added
 
 - `lesto::otel::flush`, `Telemetry::flush` and `Telemetry::from_providers`: export what the
