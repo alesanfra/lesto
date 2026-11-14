@@ -1494,6 +1494,7 @@ dependencies = [
  "indexmap",
  "jsonwebtoken",
  "lambda_http",
+ "lambda_runtime_api_client",
  "lesto",
  "lesto-macros",
  "libc",

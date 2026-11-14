@@ -37,6 +37,18 @@ fn skipped(name: &HeaderName) -> bool {
 /// It belongs to this call, so it wins on the inner request.
 const META_TRACE_KEYS: [&str; 3] = ["traceparent", "tracestate", "baggage"];
 
+/// Carries what the app's own layers put in the outer request's extensions over to the inner
+/// request: the background-task scope, so a tool's tasks land where the caller's do (one
+/// tracker per Lambda invocation) and not on the process-wide one.
+pub(crate) fn inherit(request: &mut Request, outer: &http::Extensions) {
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(scope) = outer.get::<crate::background::BackgroundScope>() {
+        request.extensions_mut().insert(scope.clone());
+    }
+    #[cfg(target_arch = "wasm32")]
+    let _ = (request, outer);
+}
+
 /// The inner request for `target` called with `arguments`. `Err` is the message of an
 /// invalid-params error.
 pub(crate) fn request(
@@ -410,6 +422,22 @@ mod tests {
         );
         assert_eq!(request.headers()[header::CONTENT_TYPE], "application/json");
         assert_eq!(request.extensions().get::<McpCall>().unwrap().name(), "t");
+    }
+
+    #[test]
+    fn the_background_scope_is_copied_to_the_inner_request() {
+        use crate::background::{BackgroundScope, Tracker};
+        let tool = tool("/x", &[], &[], BodyArgs::None);
+        let mut inner = request(&tool, &Map::new(), &HeaderMap::new(), None).unwrap();
+        let mut outer = http::Extensions::new();
+        inherit(&mut inner, &outer);
+        assert!(inner.extensions().get::<BackgroundScope>().is_none());
+        let tracker = Tracker::new();
+        outer.insert(BackgroundScope(tracker.clone()));
+        inherit(&mut inner, &outer);
+        let scope = inner.extensions().get::<BackgroundScope>().unwrap();
+        let _guard = scope.0.start();
+        assert_eq!(tracker.live(), 1, "the same tracker, not a copy");
     }
 
     #[test]

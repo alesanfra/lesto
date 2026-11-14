@@ -58,6 +58,8 @@
 #![warn(missing_docs)]
 
 pub mod app;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod background;
 #[cfg(feature = "db")]
 pub mod db;
 pub mod docs;
@@ -88,6 +90,8 @@ pub mod trace;
 pub use app::{App, DEFAULT_SHUTDOWN_TIMEOUT};
 #[cfg(not(target_arch = "wasm32"))]
 pub use app::{bind_address, listener, shutdown_signal};
+#[cfg(not(target_arch = "wasm32"))]
+pub use background::{BackgroundTasks, TaskOutput};
 pub use docs::DocsAssets;
 pub use error::{
     HttpError, IntoStatus, Problem, ProblemError, ProblemRendered, Rejection, ValidationError,
@@ -132,6 +136,8 @@ pub use tracing;
 
 /// Everything a typical handler module needs.
 pub mod prelude {
+    #[cfg(not(target_arch = "wasm32"))]
+    pub use crate::BackgroundTasks;
     pub use crate::openapi::{ApiKeyIn, OAuthFlows, SecurityScheme};
     pub use crate::security::{ApiKey, ApiKeyScheme, AuthScheme, Basic, Bearer, Security};
     pub use crate::{

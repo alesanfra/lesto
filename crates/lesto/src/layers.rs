@@ -257,12 +257,17 @@ where
     }
 }
 
-fn panic_response(payload: Box<dyn Any + Send>) -> Response {
-    let message = payload
+/// A panic payload as text: the message of `panic!` when it is a string.
+pub(crate) fn panic_message(payload: &(dyn Any + Send)) -> String {
+    payload
         .downcast_ref::<&str>()
         .map(|s| s.to_string())
         .or_else(|| payload.downcast_ref::<String>().cloned())
-        .unwrap_or_else(|| "non-string panic payload".to_string());
+        .unwrap_or_else(|| "non-string panic payload".to_string())
+}
+
+fn panic_response(payload: Box<dyn Any + Send>) -> Response {
+    let message = panic_message(payload.as_ref());
     tracing::error!(panic = %message, "handler panicked");
     HttpError::internal("Internal Server Error").into_response()
 }

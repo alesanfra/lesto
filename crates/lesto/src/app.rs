@@ -805,8 +805,15 @@ impl App<()> {
         let server = axum::serve(listener, self.into_router())
             .with_graceful_shutdown(shutdown)
             .into_future();
+        // The deadline covers the server *and* the background tasks started by requests: an
+        // orchestrator's grace period does not grow because tasks exist.
+        let finish = async move {
+            let result = server.await;
+            crate::background::global().wait().await;
+            result
+        };
         let Some(timeout) = timeout else {
-            return server.await;
+            return finish.await;
         };
         let deadline = async move {
             match shutdown_started.await {
@@ -816,12 +823,21 @@ impl App<()> {
             }
         };
         tokio::select! {
-            result = server => result,
+            result = finish => result,
             () = deadline => {
-                tracing::warn!(
-                    timeout_ms = timeout.as_millis() as u64,
-                    "shutdown deadline reached, abandoning requests still in flight"
-                );
+                let tasks = crate::background::global().live();
+                if tasks > 0 {
+                    tracing::warn!(
+                        timeout_ms = timeout.as_millis() as u64,
+                        tasks,
+                        "shutdown deadline reached, abandoning requests and background tasks still running"
+                    );
+                } else {
+                    tracing::warn!(
+                        timeout_ms = timeout.as_millis() as u64,
+                        "shutdown deadline reached, abandoning requests still in flight"
+                    );
+                }
                 Ok(())
             }
         }

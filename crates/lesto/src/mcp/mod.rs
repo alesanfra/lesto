@@ -245,9 +245,13 @@ where
     pub(crate) fn method_router(&self) -> MethodRouter<S> {
         let shared = self.shared.clone();
         axum::routing::post(
-            move |State(state): State<S>, uri: Uri, headers: HeaderMap, body: Bytes| {
+            move |State(state): State<S>,
+                  uri: Uri,
+                  headers: HeaderMap,
+                  extensions: http::Extensions,
+                  body: Bytes| {
                 let shared = shared.clone();
-                async move { shared.handle(state, uri, headers, body).await }
+                async move { shared.handle(state, uri, headers, extensions, body).await }
             },
         )
         .fallback(|| async {
@@ -307,7 +311,14 @@ impl<S> Shared<S>
 where
     S: Clone + Send + Sync + 'static,
 {
-    async fn handle(&self, state: S, uri: Uri, headers: HeaderMap, body: Bytes) -> Response {
+    async fn handle(
+        &self,
+        state: S,
+        uri: Uri,
+        headers: HeaderMap,
+        outer: http::Extensions,
+        body: Bytes,
+    ) -> Response {
         if !self.origin_allowed(&uri, &headers) {
             return RpcError::new(
                 StatusCode::FORBIDDEN,
@@ -353,14 +364,17 @@ where
             }
             (_, "prompts/list") => Ok(self.list(era, "prompts", self.prompts())),
             (_, "tools/call") => {
-                self.call_tool(era, params, &headers, self.router(state))
+                self.call_tool(era, params, &headers, &outer, self.router(state))
                     .await
             }
             (_, "resources/read") => {
-                self.read_resource(era, params, &headers, self.router(state))
+                self.read_resource(era, params, &headers, &outer, self.router(state))
                     .await
             }
-            (_, "prompts/get") => self.get_prompt(params, &headers, self.router(state)).await,
+            (_, "prompts/get") => {
+                self.get_prompt(params, &headers, &outer, self.router(state))
+                    .await
+            }
             (_, method) => Err(RpcError::method_not_found(era, method).into()),
         };
         match result {
@@ -504,6 +518,7 @@ where
         era: Era,
         params: &Map<String, Value>,
         headers: &HeaderMap,
+        outer: &http::Extensions,
         router: &Router,
     ) -> Result<Map<String, Value>, Outcome> {
         let name = params
@@ -517,8 +532,9 @@ where
             .ok_or_else(|| RpcError::invalid_params(format!("unknown tool: {name}")))?;
         let arguments = arguments(params)?;
         let meta = params.get("_meta").and_then(Value::as_object);
-        let request = dispatch::request(&tool.target, arguments, headers, meta)
+        let mut request = dispatch::request(&tool.target, arguments, headers, meta)
             .map_err(RpcError::invalid_params)?;
+        dispatch::inherit(&mut request, outer);
         let uri = format!("{}{}", self.server.resource_base, request.uri());
         let response = send(router, request, name).await?;
         Ok(dispatch::tool_result(
@@ -534,6 +550,7 @@ where
         era: Era,
         params: &Map<String, Value>,
         headers: &HeaderMap,
+        outer: &http::Extensions,
         router: &Router,
     ) -> Result<Map<String, Value>, Outcome> {
         let uri = params
@@ -550,8 +567,9 @@ where
         let path = target.split_once('?').map_or(target, |(path, _)| path);
         let resource = self.server.catalog.resource(path).ok_or_else(not_found)?;
         let meta = params.get("_meta").and_then(Value::as_object);
-        let request = dispatch::build(&resource.target, target, None, headers, meta)
+        let mut request = dispatch::build(&resource.target, target, None, headers, meta)
             .map_err(RpcError::invalid_params)?;
+        dispatch::inherit(&mut request, outer);
         let response = send(router, request, &resource.target.name).await?;
         if response.status == StatusCode::NOT_FOUND {
             return Err(not_found());
@@ -572,6 +590,7 @@ where
         &self,
         params: &Map<String, Value>,
         headers: &HeaderMap,
+        outer: &http::Extensions,
         router: &Router,
     ) -> Result<Map<String, Value>, Outcome> {
         let name = params
@@ -585,8 +604,9 @@ where
             .ok_or_else(|| RpcError::invalid_params(format!("unknown prompt: {name}")))?;
         let arguments = arguments(params)?;
         let meta = params.get("_meta").and_then(Value::as_object);
-        let request = dispatch::request(&prompt.target, arguments, headers, meta)
+        let mut request = dispatch::request(&prompt.target, arguments, headers, meta)
             .map_err(RpcError::invalid_params)?;
+        dispatch::inherit(&mut request, outer);
         let response = send(router, request, name).await?;
         // A 4xx is the arguments' fault (a missing or invalid one): the client can fix them.
         if response.status.is_client_error() {

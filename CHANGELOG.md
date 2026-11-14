@@ -6,6 +6,22 @@ All notable changes to lesto are listed here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `BackgroundTasks` (and `TaskOutput`): an extractor whose `spawn` runs a future after the
+  response. Tasks return `()` or `Result<(), E: Display>`, errors and panics are logged at
+  `ERROR` (target `lesto::background`), each task runs in a span `background {name}`, and
+  `App::serve` waits for them inside `shutdown_timeout`. Best effort, not durable. In Lambda
+  they run in the invocation, bound by its deadline, and `lambda::test::invoke` waits for them.
+  Chapter 17 of the tutorial.
+
+### Changed
+
+- Lambda: the internal extension is registered whenever the function handles one invocation at
+  a time, no longer only with telemetry to flush, and needs the `lambda` feature alone, not
+  `otel`. It is named `lesto` (was `lesto-telemetry-flush`) and holds the freeze until the
+  invocation's background tasks are done, then flushes telemetry.
+
 ## [0.4.2] - 2026-11-13
 
 The tag `v0.4.1` was pushed with an empty changelog section, so the release workflow refused to
