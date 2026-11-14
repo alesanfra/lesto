@@ -89,8 +89,12 @@ fn tracing_to(
     (provider, subscriber)
 }
 
+/// The providers `flush` reaches are global: the tests that register some take turns.
+static TELEMETRY: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 #[tokio::test]
 async fn spans_of_an_invocation_are_exported_before_the_next_one() {
+    let _turn = TELEMETRY.lock().await;
     let exporter = InMemorySpanExporter::default();
     let (provider, subscriber) = tracing_to(&exporter);
     let _subscriber = tracing::subscriber::set_default(subscriber);
@@ -164,4 +168,34 @@ async fn the_xray_trace_becomes_the_parent_when_asked() {
         );
         assert_eq!(root.parent_span_id, opentelemetry::trace::SpanId::INVALID);
     }
+}
+
+#[lesto::get("/work")]
+async fn work(tasks: BackgroundTasks) -> &'static str {
+    tasks.spawn(async {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    });
+    "queued"
+}
+
+#[tokio::test]
+async fn a_tasks_span_is_exported_with_its_invocation() {
+    let _turn = TELEMETRY.lock().await;
+    let exporter = InMemorySpanExporter::default();
+    let (provider, subscriber) = tracing_to(&exporter);
+    let _subscriber = tracing::subscriber::set_default(subscriber);
+    let telemetry = Telemetry::from_providers(Some(provider), None, None);
+    let router = App::<()>::new().routes(routes![work]).into_router();
+
+    let event = event().replace("/ping", "/work");
+    invoke(&router, &event).await.unwrap();
+    let names = exported(&exporter);
+    assert_eq!(names.len(), 2, "{names:?}");
+    assert!(names.iter().any(|n| n == "GET /work"), "{names:?}");
+    assert!(
+        names.iter().any(|n| n.starts_with("background")),
+        "{names:?}"
+    );
+
+    telemetry.shutdown();
 }

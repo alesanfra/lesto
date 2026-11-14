@@ -16,14 +16,26 @@
 //! With a REST API the stage name is part of the path (`/prod/notes`); by default it is
 //! removed so routes stay `/notes`. See [`Options::keep_stage`].
 //!
-//! With the `otel` feature, the telemetry buffered during an invocation is exported before Lambda
-//! freezes the environment, by an internal extension once the response is posted: the batch
-//! exporters' timers do not run while the environment is frozen. See
-//! [`Options::flush_telemetry`].
+//! Lambda freezes the environment once the response is posted, which would freeze the
+//! [`BackgroundTasks`](crate::BackgroundTasks) a handler started. So lesto registers an internal
+//! extension (named `lesto`) at init, whenever the function runs one invocation at a time: the
+//! response goes back at once, and the extension holds Lambda's freeze back until the
+//! invocation's tasks have finished, at most until half a second before the invocation's
+//! deadline (the tasks still running then are frozen with the environment and logged with a
+//! warning). Each invocation has a scope of its own, so only its tasks are waited for. With the
+//! `otel` feature the same extension then exports the telemetry the invocation and its tasks
+//! buffered, since the batch exporters' timers do not run while the environment is frozen; see
+//! [`Options::flush_telemetry`]. Without the Extensions API (an emulator), or in
+//! [`test::invoke`], the tasks (and the flush) are awaited before the response instead; with
+//! managed concurrency (`AWS_LAMBDA_MAX_CONCURRENCY` above 1) nothing is waited for and tasks
+//! run as they do on a server. The time after the response is billed.
 //!
 //! [`test::invoke`] feeds an event fixture to a router without Lambda, for tests.
 
+use std::time::{Duration, SystemTime};
+
 use crate::App;
+use crate::background::Tracker;
 use axum::Router;
 use axum::body::Body;
 use http::{Request, Response};
@@ -70,13 +82,15 @@ impl Options {
     /// Flush (`true`, the default) or not the OpenTelemetry providers after each invocation.
     ///
     /// The flush exports what the providers of the live `lesto::otel::Telemetry` buffered
-    /// (`lesto::otel::init`, or `Telemetry::from_providers` for providers of your own). It runs
-    /// in an internal Lambda extension registered by [`run_with`], after the runtime has posted
-    /// the response: the caller does not wait for it, the invocation's billed duration does.
-    /// Without the Extensions API, or with several invocations per process
+    /// (`lesto::otel::init`, or `Telemetry::from_providers` for providers of your own), including
+    /// the spans and logs of the invocation's background tasks. It runs in the internal Lambda
+    /// extension registered by [`run_with`], after the runtime has posted the response and the
+    /// tasks have finished: the caller does not wait for it, the invocation's billed duration
+    /// does. Without the Extensions API, or with several invocations per process
     /// (`AWS_LAMBDA_MAX_CONCURRENCY`), it runs before the response instead, as it does in
     /// [`test::invoke`]. Turn it off when the export goes through something that buffers across
-    /// freezes by itself.
+    /// freezes by itself. This only concerns the telemetry: the extension is registered, and
+    /// the tasks are waited for, either way.
     pub fn flush_telemetry(mut self, flush: bool) -> Self {
         self.flush_telemetry = flush;
         self
@@ -143,53 +157,56 @@ pub async fn run_with(router: Router, options: Options) -> Result<(), Error> {
     lambda_http::run(with_options(router, options, flush)).await
 }
 
-/// When an invocation's telemetry is exported.
+/// When the work that follows an invocation's response happens: the background tasks it
+/// started ([`crate::BackgroundTasks`]) and, with feature `otel`, the telemetry flush.
 #[derive(Clone, Debug)]
 enum Flush {
-    /// Not at all: `flush_telemetry(false)`, or no `otel` feature.
-    Off,
-    /// Before the response is returned: tests, managed concurrency, or no Extensions API.
-    #[cfg(feature = "otel")]
+    /// Before the response is returned: tests, or no Extensions API. The invocation waits for
+    /// its tasks, then flushes the telemetry.
     BeforeResponse,
-    /// After it, by the internal extension, which the sender tells that an invocation is done.
-    #[cfg(feature = "otel")]
+    /// After it, by the internal extension, which the sender tells that an invocation's tasks
+    /// are over.
     AfterResponse(tokio::sync::mpsc::UnboundedSender<()>),
+    /// Managed concurrency: the instance is not frozen between invocations, so tasks run like
+    /// on a server (process-wide scope, not waited for); the telemetry is flushed before the
+    /// response.
+    Concurrent,
 }
 
 impl Flush {
     /// In Lambda: the internal extension when it can be registered.
     async fn start(options: Options) -> Flush {
-        if !options.flush_telemetry {
-            return Flush::Off;
+        if managed_concurrency() {
+            return Flush::Concurrent;
         }
-        #[cfg(feature = "otel")]
-        {
-            match extension::start_from_env().await {
-                Some(done) => Flush::AfterResponse(done),
-                None => Flush::BeforeResponse,
-            }
+        let Some(api) = std::env::var("AWS_LAMBDA_RUNTIME_API").ok() else {
+            return Flush::BeforeResponse;
+        };
+        match extension::start(&api, options.flush_telemetry).await {
+            Some(done) => Flush::AfterResponse(done),
+            None => Flush::BeforeResponse,
         }
-        #[cfg(not(feature = "otel"))]
-        Flush::Off
     }
 
     /// Outside Lambda ([`test::invoke`]): there is no extension, so before the response.
-    fn local(options: Options) -> Flush {
-        #[cfg(feature = "otel")]
-        if options.flush_telemetry {
-            return Flush::BeforeResponse;
-        }
-        let _ = options;
-        Flush::Off
+    fn local() -> Flush {
+        Flush::BeforeResponse
     }
+}
+
+/// More than one invocation per process (`AWS_LAMBDA_MAX_CONCURRENCY` above 1): the instance is
+/// not frozen between invocations and `INVOKE` events would not pair with responses.
+fn managed_concurrency() -> bool {
+    std::env::var("AWS_LAMBDA_MAX_CONCURRENCY")
+        .ok()
+        .and_then(|v| v.trim().parse::<u32>().ok())
+        .is_some_and(|n| n > 1)
 }
 
 /// Tells the extension the invocation is over when dropped, so an error or a panic on the way
 /// still lets it flush and lets Lambda freeze the environment.
-#[cfg(feature = "otel")]
 struct DoneOnDrop(Option<tokio::sync::mpsc::UnboundedSender<()>>);
 
-#[cfg(feature = "otel")]
 impl Drop for DoneOnDrop {
     fn drop(&mut self) {
         if let Some(done) = self.0.take() {
@@ -215,32 +232,71 @@ fn with_options(
     })
 }
 
-/// One invocation: strip the stage, run the router, collect the body, flush the telemetry.
+/// How long before the deadline the wait for tasks gives up, to leave the extension the time to
+/// flush the telemetry and to log what is still running.
+const DEADLINE_MARGIN: Duration = Duration::from_millis(500);
+
+/// The time left to wait for tasks: until `deadline_ms` (milliseconds since the epoch) minus
+/// [`DEADLINE_MARGIN`], zero when that has passed. `None` without a deadline.
+fn wait_budget(deadline_ms: Option<u64>) -> Option<Duration> {
+    let deadline = Duration::from_millis(deadline_ms.filter(|ms| *ms > 0)?);
+    let now = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default();
+    Some(deadline.saturating_sub(now).saturating_sub(DEADLINE_MARGIN))
+}
+
+/// Waits for the invocation's tasks, at most `budget`; logs how many are left when it runs out.
+async fn wait_for_tasks(tracker: &Tracker, budget: Option<Duration>) {
+    match budget {
+        None => tracker.wait().await,
+        Some(budget) => {
+            if tokio::time::timeout(budget, tracker.wait()).await.is_err() {
+                tracing::warn!(
+                    running = tracker.live(),
+                    "the invocation ends with background tasks still running; \
+                     Lambda freezes them with the environment"
+                );
+            }
+        }
+    }
+}
+
+/// One invocation: strip the stage, run the router, collect the body, then the work after the
+/// response (tasks, telemetry flush).
 ///
 /// The path is rewritten *before* the router sees it (a `Router::layer` would run after
 /// routing), and here rather than through the runtime's `AWS_LAMBDA_HTTP_IGNORE_STAGE_IN_PATH`
 /// variable: the option stays local to this router (two routers, two settings, one process)
 /// and nothing mutates the environment of a running multi-threaded program.
 ///
-/// The body is collected here (`lambda_http` buffers it anyway) so the flush comes after
-/// everything the handler logs while producing it, and the request span is closed by then.
+/// The body is collected here (`lambda_http` buffers it anyway) so the work after the response
+/// comes after everything the handler logs while producing it, and the request span is closed
+/// by then. Each invocation has a [`Tracker`] of its own (unless the instance runs several
+/// invocations at once): with the extension a spawned waiter holds the "done" signal until the
+/// tasks end, so the response goes back at once and Lambda freezes only afterwards; without it
+/// the tasks are awaited before the response.
 async fn invoke_once(
     router: Router,
     req: lambda_http::Request,
     options: Options,
     flush: Flush,
 ) -> Result<Response<Body>, Error> {
-    #[cfg(feature = "otel")]
-    let _done = DoneOnDrop(match &flush {
+    let done = DoneOnDrop(match &flush {
         Flush::AfterResponse(done) => Some(done.clone()),
         _ => None,
     });
-    #[cfg_attr(not(feature = "otel"), expect(unused_mut))]
+    let after_response = matches!(flush, Flush::AfterResponse(_));
+    let tracker = match flush {
+        Flush::Concurrent => None,
+        _ => Some(Tracker::new()),
+    };
     let mut req = if options.keep_stage {
         req
     } else {
         strip_stage(req)
     };
+    let budget = wait_budget(req.lambda_context_ref().map(|context| context.deadline));
     #[cfg(feature = "otel")]
     if options.xray
         && let Some(parent) = xray::parent_of(&req)
@@ -248,18 +304,32 @@ async fn invoke_once(
         req.extensions_mut()
             .insert(crate::trace::propagation::RemoteParent(parent));
     }
+    if let Some(tracker) = &tracker {
+        req.extensions_mut()
+            .insert(crate::background::BackgroundScope(tracker.clone()));
+    }
     let response = match router.oneshot(req).await {
         Ok(response) => response,
         Err(infallible) => match infallible {},
     };
     let (parts, body) = response.into_parts();
-    let bytes = body.collect().await?.to_bytes();
+    let collected = body.collect().await;
+    if let Some(tracker) = tracker {
+        if after_response {
+            // The runtime posts the response now; the extension is told when the tasks end.
+            tokio::spawn(async move {
+                wait_for_tasks(&tracker, budget).await;
+                drop(done);
+            });
+        } else {
+            wait_for_tasks(&tracker, budget).await;
+        }
+    }
+    let bytes = collected?.to_bytes();
     #[cfg(feature = "otel")]
-    if let Flush::BeforeResponse = flush {
+    if options.flush_telemetry && !after_response {
         crate::otel::flush_async().await;
     }
-    #[cfg(not(feature = "otel"))]
-    let _ = flush;
     Ok(Response::from_parts(parts, Body::from(bytes)))
 }
 
@@ -303,72 +373,69 @@ fn stage_of<B>(req: &Request<B>) -> Option<String> {
     (!stage.is_empty() && stage != "$default").then_some(stage)
 }
 
-/// An internal Lambda extension that flushes the telemetry after the response (feature `otel`).
+/// The internal Lambda extension: it holds Lambda's freeze back until an invocation's
+/// background tasks are over, and flushes the telemetry then (feature `otel`).
 ///
 /// Lambda freezes the environment once the runtime *and* every extension have asked for the next
 /// event. An extension registered for `INVOKE` events therefore gets time after the runtime has
-/// posted the response: the caller has its answer, and the export happens before the freeze.
-/// The protocol is two calls (`register`, then `event/next` in a loop), written here on the
-/// reqwest `otel` already brings rather than through `lambda-extension`, which would add
-/// `chrono`, `async-stream` and `tokio-stream` for them.
+/// posted the response: the caller has its answer, and the tasks and the export happen before
+/// the freeze. The protocol is two calls (`register`, then `event/next` in a loop), written here
+/// on `lambda_runtime_api_client`, the client the runtime itself uses, rather than through
+/// `lambda-extension`, which would add `chrono`, `async-stream` and `tokio-stream` for them.
 /// <https://docs.aws.amazon.com/lambda/latest/dg/runtimes-extensions-api.html>
-#[cfg(feature = "otel")]
 mod extension {
     use std::time::Duration;
 
+    use http_body_util::BodyExt;
+    use lambda_runtime_api_client::{Client, body::Body};
     use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
     /// Unique among the function's extensions.
-    pub(super) const NAME: &str = "lesto-telemetry-flush";
-
-    /// Register when there is something to flush and one invocation at a time. Under managed
-    /// concurrency (`AWS_LAMBDA_MAX_CONCURRENCY` above 1) the instance is not frozen between
-    /// invocations and `INVOKE` events would not pair with responses: flush before the
-    /// response there.
-    pub(super) async fn start_from_env() -> Option<UnboundedSender<()>> {
-        if !crate::otel::has_telemetry() {
-            return None;
-        }
-        let concurrent = std::env::var("AWS_LAMBDA_MAX_CONCURRENCY")
-            .ok()
-            .and_then(|v| v.trim().parse::<u32>().ok())
-            .is_some_and(|n| n > 1);
-        if concurrent {
-            return None;
-        }
-        let api = std::env::var("AWS_LAMBDA_RUNTIME_API").ok()?;
-        start(&api).await
-    }
+    pub(super) const NAME: &str = "lesto";
 
     /// Register with the Extensions API at `api` (`host:port`) and run the extension loop.
     /// `None`, and a warning, when the API is not there (an emulator without it).
-    pub(super) async fn start(api: &str) -> Option<UnboundedSender<()>> {
-        let client = reqwest::Client::new();
-        let base = format!("http://{api}/2020-01-01/extension");
-        let id = match register(&client, &base).await {
+    /// `flush_telemetry`: export the telemetry after each invocation (feature `otel`).
+    pub(super) async fn start(api: &str, flush_telemetry: bool) -> Option<UnboundedSender<()>> {
+        let client = match format!("http://{api}")
+            .parse()
+            .map_err(|e: http::uri::InvalidUri| e.to_string())
+            .and_then(|uri| {
+                Client::builder()
+                    .with_endpoint(uri)
+                    .build()
+                    .map_err(|e| e.to_string())
+            }) {
+            Ok(client) => client,
+            Err(error) => {
+                tracing::warn!(%error, "the Lambda runtime API address is not usable");
+                return None;
+            }
+        };
+        let id = match register(&client).await {
             Ok(id) => id,
             Err(error) => {
                 tracing::warn!(
                     %error,
-                    "the Lambda Extensions API is not available; telemetry is flushed before each response"
+                    "the Lambda Extensions API is not available; background tasks and telemetry are awaited before each response"
                 );
                 return None;
             }
         };
         let (done, invocations) = unbounded_channel();
-        tokio::spawn(run(client, base, id, invocations));
+        tokio::spawn(run(client, id, invocations, flush_telemetry));
         Some(done)
     }
 
-    async fn register(client: &reqwest::Client, base: &str) -> Result<String, String> {
-        let response = client
-            .post(format!("{base}/register"))
+    async fn register(client: &Client) -> Result<String, String> {
+        let request = lambda_runtime_api_client::build_request()
+            .method("POST")
+            .uri("/2020-01-01/extension/register")
             .header("Lambda-Extension-Name", NAME)
             .header("content-type", "application/json")
-            .body(r#"{"events":["INVOKE"]}"#)
-            .send()
-            .await
+            .body(Body::from(r#"{"events":["INVOKE"]}"#))
             .map_err(|e| e.to_string())?;
+        let response = client.call(request).await.map_err(|e| e.to_string())?;
         if !response.status().is_success() {
             return Err(format!("register answered {}", response.status()));
         }
@@ -381,43 +448,49 @@ mod extension {
     }
 
     /// Ask for the next event: this is also what tells Lambda the previous one is finished.
-    async fn next(client: &reqwest::Client, base: &str, id: &str) -> Result<(), String> {
-        let response = client
-            .get(format!("{base}/event/next"))
+    async fn next(client: &Client, id: &str) -> Result<(), String> {
+        let request = lambda_runtime_api_client::build_request()
+            .method("GET")
+            .uri("/2020-01-01/extension/event/next")
             .header("Lambda-Extension-Identifier", id)
-            .send()
-            .await
+            .body(Body::empty())
             .map_err(|e| e.to_string())?;
-        let status = response.status();
+        let response = client.call(request).await.map_err(|e| e.to_string())?;
+        let (parts, body) = response.into_parts();
         // The body says which invocation; the channel already pairs them one to one.
-        let _ = response.bytes().await;
-        if status.is_success() {
+        let _ = body.collect().await;
+        if parts.status.is_success() {
             Ok(())
         } else {
-            Err(format!("event/next answered {status}"))
+            Err(format!("event/next answered {}", parts.status))
         }
     }
 
     async fn run(
-        client: reqwest::Client,
-        base: String,
+        client: Client,
         id: String,
         mut invocations: UnboundedReceiver<()>,
+        flush_telemetry: bool,
     ) {
+        let _ = flush_telemetry;
         loop {
             // An extension that stops asking holds every invocation until its timeout, so a
             // failed call is retried, never given up on.
-            if let Err(error) = next(&client, &base, &id).await {
+            if let Err(error) = next(&client, &id).await {
                 tracing::warn!(%error, "the Lambda extension could not get its next event");
                 tokio::time::sleep(Duration::from_millis(100)).await;
                 continue;
             }
-            // An INVOKE: wait until the runtime has built the response, then export.
+            // An INVOKE: wait until the runtime has built the response and the invocation's
+            // tasks are over, then export.
             if invocations.recv().await.is_none() {
                 return;
             }
             loop {
-                crate::otel::flush_async().await;
+                #[cfg(feature = "otel")]
+                if flush_telemetry {
+                    crate::otel::flush_async().await;
+                }
                 // Invocations that ended during the export are exported too before asking for
                 // more. Lambda never starts one while an extension is busy, but an emulator
                 // that does (floci) would otherwise leave their telemetry for the next event.
@@ -433,7 +506,7 @@ mod extension {
     }
 }
 
-#[cfg(all(test, feature = "otel"))]
+#[cfg(test)]
 mod extension_tests {
     use std::sync::Arc;
     use std::time::Duration;
@@ -441,14 +514,11 @@ mod extension_tests {
     use axum::Router;
     use axum::http::{HeaderMap, StatusCode};
     use axum::routing::{get, post};
-    use opentelemetry::trace::{Tracer as _, TracerProvider as _};
-    use opentelemetry_sdk::trace::{
-        BatchConfigBuilder, BatchSpanProcessor, InMemorySpanExporter, SdkTracerProvider,
-    };
-    use tokio::sync::{Mutex, mpsc};
+    use lambda_http::RequestExt;
+    use tokio::sync::{Mutex, Notify, mpsc};
 
-    use super::extension;
-    use crate::otel::Telemetry;
+    use super::{Flush, Options, extension, invoke_once, wait_budget};
+    use crate::background::BackgroundTasks;
 
     /// A stand-in for the Extensions API: reports every `event/next` call and answers it with
     /// the next event the test pushes.
@@ -490,8 +560,161 @@ mod extension_tests {
             .expect("the extension asked for its next event");
     }
 
+    /// A route that starts one task, which ends when `release` is notified.
+    fn router(release: Arc<Notify>) -> Router {
+        Router::new().route(
+            "/",
+            get(move |tasks: BackgroundTasks| {
+                let release = release.clone();
+                async move {
+                    tasks.spawn(async move { release.notified().await });
+                    "ok"
+                }
+            }),
+        )
+    }
+
+    fn request(deadline_ms: Option<u64>) -> lambda_http::Request {
+        let request = lambda_http::http::Request::get("/")
+            .body(lambda_http::Body::Empty)
+            .unwrap();
+        match deadline_ms {
+            Some(deadline) => {
+                let mut context = lambda_http::Context::default();
+                context.deadline = deadline;
+                request.with_lambda_context(context)
+            }
+            None => request,
+        }
+    }
+
+    fn now_ms() -> u64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64
+    }
+
+    #[tokio::test]
+    async fn the_response_comes_first_and_done_only_after_the_task() {
+        let release = Arc::new(Notify::new());
+        let (api, mut asked, invoke) = extensions_api().await;
+        let done = extension::start(&api, true).await.expect("registered");
+        // The first `next` ends the init phase.
+        wait(&mut asked).await;
+        invoke.send(()).unwrap();
+
+        let response = invoke_once(
+            router(release.clone()),
+            request(None),
+            Options::default(),
+            Flush::AfterResponse(done),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            response.status(),
+            200,
+            "the response did not wait for the task"
+        );
+        assert!(
+            tokio::time::timeout(Duration::from_millis(200), asked.recv())
+                .await
+                .is_err(),
+            "no next event while the task runs: Lambda would freeze it"
+        );
+
+        release.notify_one();
+        wait(&mut asked).await;
+    }
+
+    #[tokio::test]
+    async fn the_wait_stops_half_a_second_before_the_deadline() {
+        let release = Arc::new(Notify::new());
+        let (api, mut asked, invoke) = extensions_api().await;
+        let done = extension::start(&api, true).await.expect("registered");
+        wait(&mut asked).await;
+        invoke.send(()).unwrap();
+
+        // 700 ms left: the waiter gives up after about 200 ms; the task never ends.
+        let started = std::time::Instant::now();
+        invoke_once(
+            router(release),
+            request(Some(now_ms() + 700)),
+            Options::default(),
+            Flush::AfterResponse(done),
+        )
+        .await
+        .unwrap();
+        wait(&mut asked).await;
+        let waited = started.elapsed();
+        assert!(waited >= Duration::from_millis(150), "{waited:?}");
+        assert!(waited < Duration::from_millis(700), "{waited:?}");
+    }
+
+    #[tokio::test]
+    async fn without_the_extension_the_tasks_end_before_the_response() {
+        let release = Arc::new(Notify::new());
+        let invocation = tokio::spawn(invoke_once(
+            router(release.clone()),
+            request(None),
+            Options::default(),
+            Flush::BeforeResponse,
+        ));
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(!invocation.is_finished(), "the response waits for the task");
+        release.notify_one();
+        let response = invocation.await.unwrap().unwrap();
+        assert_eq!(response.status(), 200);
+    }
+
+    #[tokio::test]
+    async fn managed_concurrency_does_not_wait() {
+        let release = Arc::new(Notify::new());
+        let response = invoke_once(
+            router(release.clone()),
+            request(None),
+            Options::default(),
+            Flush::Concurrent,
+        )
+        .await
+        .unwrap();
+        assert_eq!(response.status(), 200);
+        release.notify_one();
+    }
+
+    #[test]
+    fn the_budget_is_the_deadline_minus_the_margin() {
+        assert_eq!(wait_budget(None), None);
+        assert_eq!(wait_budget(Some(0)), None);
+        assert_eq!(wait_budget(Some(1)), Some(Duration::ZERO), "long past");
+        let budget = wait_budget(Some(now_ms() + 10_500)).unwrap();
+        assert!(
+            budget > Duration::from_secs(9) && budget <= Duration::from_secs(10),
+            "{budget:?}"
+        );
+        assert_eq!(wait_budget(Some(now_ms() + 100)), Some(Duration::ZERO));
+    }
+
+    #[tokio::test]
+    async fn no_extensions_api_means_no_extension() {
+        // A port nobody listens on.
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap().to_string();
+        drop(listener);
+        assert!(extension::start(&address, true).await.is_none());
+    }
+
+    #[cfg(feature = "otel")]
     #[tokio::test]
     async fn the_extension_flushes_after_the_invocation_and_before_the_next_event() {
+        use opentelemetry::trace::{Tracer as _, TracerProvider as _};
+        use opentelemetry_sdk::trace::{
+            BatchConfigBuilder, BatchSpanProcessor, InMemorySpanExporter, SdkTracerProvider,
+        };
+
+        use crate::otel::Telemetry;
+
         let exporter = InMemorySpanExporter::default();
         let processor = BatchSpanProcessor::builder(exporter.clone())
             .with_batch_config(
@@ -506,8 +729,7 @@ mod extension_tests {
         let tracer = provider.tracer("test");
         let telemetry = Telemetry::from_providers(Some(provider), None, None);
         let (api, mut asked, invoke) = extensions_api().await;
-        let done = extension::start(&api).await.expect("registered");
-        // The first `next` ends the init phase.
+        let done = extension::start(&api, true).await.expect("registered");
         wait(&mut asked).await;
 
         invoke.send(()).unwrap();
@@ -525,15 +747,6 @@ mod extension_tests {
         assert_eq!(exporter.get_finished_spans().unwrap().len(), 1);
 
         telemetry.shutdown();
-    }
-
-    #[tokio::test]
-    async fn no_extensions_api_means_no_extension() {
-        // A port nobody listens on.
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let address = listener.local_addr().unwrap().to_string();
-        drop(listener);
-        assert!(extension::start(&address).await.is_none());
     }
 }
 
@@ -680,7 +893,9 @@ pub mod test {
     use super::{Error, Options, with_options};
 
     /// Convert an API Gateway (v1 or v2), Function URL or ALB event to an HTTP request, run
-    /// it through `router`, and return the response with its body collected.
+    /// it through `router`, and return the response with its body collected, after the
+    /// invocation's [`BackgroundTasks`](crate::BackgroundTasks) have finished: a test can
+    /// assert their effects right after the call.
     ///
     /// Applies [`Options::default`] (stage stripped, telemetry flushed as in Lambda);
     /// [`invoke_with`] takes explicit options.
@@ -695,7 +910,7 @@ pub mod test {
         options: Options,
     ) -> Result<Response<Bytes>, Error> {
         let request = lambda_http::request::from_str(event_json)?;
-        let response = with_options(router.clone(), options, super::Flush::local(options))
+        let response = with_options(router.clone(), options, super::Flush::local())
             .oneshot(request)
             .await?;
         let (parts, body) = response.into_parts();
