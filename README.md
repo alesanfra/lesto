@@ -82,6 +82,8 @@ lesto dev                  # rebuild and restart on save, the port stays open
 - **Databases** with `db`: sqlx stores, one transaction per method, permissions checked before
   the query, Postgres row level security.
 - **MCP** with `mcp`: routes served to AI agents as tools, resources and prompts.
+- **Background tasks**: `BackgroundTasks` runs work after the response, on a server and in
+  Lambda (best effort, not durable).
 - **Logs** on stdout out of the box, one line per request, text or JSON (`LESTO_LOG=json`).
 - **OpenTelemetry** with `otel`: traces, logs and metrics, configured by the `OTEL_*` variables;
   CloudWatch's OTLP endpoints are signed with SigV4, so a Lambda exports to X-Ray with no layer.

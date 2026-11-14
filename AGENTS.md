@@ -57,6 +57,9 @@ crates/lesto/             library
     handle.rs             Db<DB>: primary pool + optional read replica, conflict retry budget
     error.rs              lesto::db::Error → 403/404/409/500 problems, ResultExt::internal
     trace.rs              the transaction's client span (database semconv)
+  src/background.rs       BackgroundTasks extractor, TaskOutput, the Tracker (live count + Notify),
+                          BackgroundScope (per-invocation tracker in the request extensions);
+                          design: docs/design/background-tasks.md
   src/lambda.rs           feature `lambda`: AWS Lambda adapter over lambda_http: serve (Lambda or
                           local), Options (keep_stage, flush_telemetry, xray), test::invoke
   src/oidc/               feature `oidc`: bearer JWTs verified against an OpenID Connect provider
@@ -96,6 +99,9 @@ crates/lesto/             library
                           (test-only keys): every check, key rotation, protect, lesto::db
   tests/oidc_provider.rs  the same against a real provider (mock-oauth2-server); skipped unless
                           LESTO_TEST_OIDC_URL is set. CI runs it with an `oauth2` service
+  tests/background.rs     tasks after the response: Err, panics, many tasks, the scope
+  tests/background_shutdown.rs  serve_until waits for tasks and gives up at the deadline
+                          (own binary: the process-wide tracker is global)
   tests/mcp.rs            the MCP endpoint through oneshot, both eras
   tests/mcp_rmcp.rs       the same driven by rmcp's client (dev-dependency only) on 127.0.0.1:0
   tests/listener.rs       LISTEN_FDS socket inheritance
@@ -137,7 +143,7 @@ examples/99-tutorial/     package `tutorial`: every tutorial snippet, compiled a
                           appendix D's plain axum router too)
 docs/tutorial/            the tutorial, mdBook (docs/book.toml, docs/build.sh → docs/book, gitignored)
                           published to GitHub Pages by .github/workflows/pages.yml on push to main
-docs/design/              written designs of bigger features (mcp.md), not part of the book
+docs/design/              written designs of bigger features (mcp.md, background-tasks.md), not part of the book
 ```
 
 ## Commands
@@ -598,8 +604,10 @@ Recorded here because they are not derivable from the code. Do not undo them cas
   freezes the instance once it has the response, and the batch processors' timers do not run
   while frozen. The handler collects the body; `otel::flush` then runs on the blocking pool
   (`force_flush` blocks on the processor threads) in an *internal extension*: `run_with`
-  registers one for `INVOKE` events (Extensions API, two calls written on `otel`'s reqwest; the
-  `lambda-extension` crate would add `chrono`, `async-stream`, `tokio-stream`), each invocation
+  registers one for `INVOKE` events, named `lesto` (it was `lesto-telemetry-flush` until background
+  tasks, below, generalized it; Extensions API, two calls written on `lambda_runtime_api_client`,
+  not reqwest; the `lambda-extension` crate would add `chrono`, `async-stream`,
+  `tokio-stream`), each invocation
   signals "done" through a channel when its future ends (`DoneOnDrop`, so an error still
   signals), and the extension flushes and only then asks for its next event, which is what
   Lambda waits for before freezing. The caller gets the response before the export. An
@@ -607,7 +615,8 @@ Recorded here because they are not derivable from the code. Do not undo them cas
   retried, never abandoned. After a flush it drains the dones that arrived meanwhile and flushes
   again before asking: Lambda never runs an invocation while an extension is busy, but floci
   does and drops the `INVOKE` events the extension missed, which left the last invocation's
-  telemetry for the next one. Checked on floci with a verifier delaying each export by 1 s:
+  telemetry for the next one. It is registered whenever one invocation runs at a time, with or
+  without telemetry (see background tasks). Checked on floci with a verifier delaying each export by 1 s:
   0.28 s responses with the extension, 3.3 s with the flush before the response. Fallback to flushing before the response without the Extensions API
   (warned) or with `AWS_LAMBDA_MAX_CONCURRENCY` > 1 (no freeze, no pairing), and in
   `test::invoke`. `flush`
@@ -615,6 +624,31 @@ Recorded here because they are not derivable from the code. Do not undo them cas
   clears on drop, so it works with `init` called by hand (the documented path) without a
   `Telemetry` argument on `lambda::run`; `Telemetry::from_providers` registers an application's
   own providers. `Options::flush_telemetry(false)` opts out.
+- **`BackgroundTasks`: an extractor over a hand-written tracker** (decided 2026-11-14, full
+  design in `docs/design/background-tasks.md`). FastAPI's and `waitUntil`'s idea as
+  `tasks.spawn(async move { .. })`: a future, not a function and arguments, returning `()` or
+  `Result<(), E: Display>` (`TaskOutput`; an `Err` is logged at `ERROR`, target
+  `lesto::background`; a panic is caught by a hand-rolled `catch_unwind` future and logged, never
+  propagated). It is **best effort, not durable**, and every document says so first: durable
+  work belongs in a queue. The tracker is an `Arc` of an `AtomicUsize` and a `Notify`
+  (`tokio-util`'s `TaskTracker` would be a dependency for forty lines), decremented by a guard
+  on drop so a panic still counts as finished. Scope: the extractor takes the request's
+  `BackgroundScope` extension, else the process-wide tracker, so a server inserts nothing per
+  request and an app that never names the extractor pays nothing; Lambda inserts one scope per
+  invocation. On a server `serve_until` waits for the tasks after the server stopped, inside the
+  same `shutdown_timeout` as the requests (the orchestrator's grace period does not grow),
+  abandoning the rest with a `WARN`. In Lambda the extension above became the general "after the
+  response" mechanism: `invoke_once` posts the response, a spawned waiter waits for the scope
+  (bounded by the deadline minus 500 ms, then a `WARN`; tasks are not aborted, they freeze
+  with the environment), then signals done, and the extension flushes and asks for its next
+  event. Because tasks are unknown at init and extensions register only then, the extension is
+  now registered whenever one invocation runs at a time, even without `otel`. Without an
+  Extensions API the tasks are awaited before the response, with `AWS_LAMBDA_MAX_CONCURRENCY` >
+  1 they use the process tracker like a server, and `test::invoke` waits for them. The cost is
+  documented, not solved: the time is billed (`PostRuntimeExtensionsDuration`) and a busy
+  extension takes no next invocation, so slow tasks mean more environments and cold starts. MCP
+  tool calls are inner requests, so `mcp::dispatch` copies `BackgroundScope` to them. Not on
+  `wasm32`.
 - **X-Ray is a parent, not a propagator** (decided 2026-11-13). `Options::xray` reads the
   invocation's trace id from the Lambda context (`Lambda-Runtime-Trace-Id`; `X-Amzn-Trace-Id`
   of API Gateway/ALB as fallback), parses it by hand (`lambda::xray`, no `opentelemetry-aws`)

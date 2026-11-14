@@ -294,5 +294,4 @@ authorization server on its own, is planned with `oidc`.
   or invalid-params errors (prompts) with the problem, a `401` reaches the client as a `401`.
 - MCP 2026-07-28 plus the two previous revisions, with no session.
 
-Appendices: [From FastAPI to lesto](A-from-fastapi-to-lesto.md), [Common problems](B-common-problems.md),
-[Why axum and not actix-web](C-why-axum.md).
+Next: [Background tasks: work after the response](17-background-tasks.md).

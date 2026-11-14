@@ -889,3 +889,75 @@ fn a_resource_cannot_require_a_query_parameter() {
         .mcp(Mcp::new())
         .into_router();
 }
+
+// ---- background tasks in Lambda ----------------------------------------------------------
+
+static NOTIFIED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Notify somebody, after the response.
+#[lesto::post("/notify", mcp = "tool")]
+async fn notify(tasks: BackgroundTasks) -> &'static str {
+    tasks.spawn(async {
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+        NOTIFIED.store(true, std::sync::atomic::Ordering::SeqCst);
+    });
+    "queued"
+}
+
+#[tokio::test]
+async fn a_tools_background_tasks_belong_to_the_lambda_invocation() {
+    let router = App::<()>::new()
+        .routes(routes![notify])
+        .mcp(Mcp::new())
+        .into_router();
+    let body = json!({
+        "jsonrpc": "2.0", "id": 7, "method": "tools/call",
+        "params": {
+            "name": "notify", "arguments": {},
+            "_meta": {
+                "io.modelcontextprotocol/protocolVersion": MODERN,
+                "io.modelcontextprotocol/clientInfo": {"name": "test", "version": "0"},
+                "io.modelcontextprotocol/clientCapabilities": {},
+            },
+        },
+    });
+    let event = json!({
+        "version": "2.0",
+        "routeKey": "$default",
+        "rawPath": "/mcp",
+        "rawQueryString": "",
+        "headers": {
+            "host": "abc.lambda-url.eu-west-1.on.aws",
+            "content-type": "application/json",
+            "mcp-protocol-version": MODERN,
+            "mcp-method": "tools/call",
+            "mcp-name": "notify",
+        },
+        "requestContext": {
+            "accountId": "123456789012",
+            "apiId": "abc",
+            "domainName": "abc.lambda-url.eu-west-1.on.aws",
+            "domainPrefix": "abc",
+            "http": {
+                "method": "POST", "path": "/mcp", "protocol": "HTTP/1.1",
+                "sourceIp": "203.0.113.1", "userAgent": "test"
+            },
+            "requestId": "id",
+            "routeKey": "$default",
+            "stage": "$default",
+            "time": "13/Nov/2026:10:00:00 +0000",
+            "timeEpoch": 1_794_564_000_000_u64
+        },
+        "body": body.to_string(),
+        "isBase64Encoded": false
+    });
+    let response = lesto::lambda::test::invoke(&router, &event.to_string())
+        .await
+        .unwrap();
+    let reply: Value = serde_json::from_slice(response.body()).unwrap();
+    assert_eq!(reply["result"]["content"][0]["text"], "queued", "{reply}");
+    assert!(
+        NOTIFIED.load(std::sync::atomic::Ordering::SeqCst),
+        "the invocation waited for the tool's task"
+    );
+}

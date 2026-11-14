@@ -2,6 +2,8 @@
 //! Run with `LESTO_PORT=8000 cargo run -p tutorial`.
 
 mod auth;
+#[allow(dead_code)] // exercised by its tests only
+mod background;
 mod errors;
 mod mcp;
 mod oidc;

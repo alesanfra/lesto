@@ -236,3 +236,27 @@ fn v2_event_with_stage(stage: &str, method: &str, path: &str) -> String {
     event["requestContext"]["http"]["path"] = json!(format!("/{stage}{path}"));
     event.to_string()
 }
+
+static TASK_DONE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+#[lesto::get("/after")]
+async fn after(tasks: BackgroundTasks) -> &'static str {
+    tasks.spawn(async {
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+        TASK_DONE.store(true, std::sync::atomic::Ordering::SeqCst);
+    });
+    "sent"
+}
+
+#[tokio::test]
+async fn invoke_waits_for_the_background_tasks() {
+    let router = App::<()>::new().routes(routes![after]).into_router();
+    let res = invoke(&router, &v2_event("GET", "/after", None))
+        .await
+        .unwrap();
+    assert_eq!(&res.body()[..], b"sent");
+    assert!(
+        TASK_DONE.load(std::sync::atomic::Ordering::SeqCst),
+        "the task ended before the invocation returned"
+    );
+}

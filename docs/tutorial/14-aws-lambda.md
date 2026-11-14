@@ -61,6 +61,48 @@ any moment. Keep in-memory state (like the `Mutex<Vec<Note>>` of the example) fo
 real data goes to a database or another service. With `lesto::db`, build the pool once in
 `main` and reuse it across invocations, as the example does with its state.
 
+## Tasks after the response
+
+Chapter 17's `BackgroundTasks` works in Lambda, with one guarantee the platform can keep: the
+task runs to completion unless the invocation's deadline or a crash ends it first. It is still
+best effort, not durable (a timeout loses the task and nothing retries it): work that must happen
+goes to a queue.
+
+**How it works.** Lambda freezes the environment when the runtime *and* every extension have
+asked for their next event. lesto registers an internal extension, named `lesto`, for `INVOKE`
+events. It needs the `lambda` feature only (not `otel`) and is registered whenever the function
+handles one invocation at a time, because whether the application spawns tasks is not known at
+init, and extensions can only register then. Per invocation, lesto keeps the tasks of that
+request in a scope of their own, runs the router, and posts the response *first*. Then the
+extension waits for the tasks, exports the telemetry (with `otel`: the tasks' spans and logs
+belong to the same trace) and only then asks for its next event, which is what lets Lambda
+freeze. Without tasks and without telemetry it answers at once, and the cost is one local call
+per invocation.
+
+**The deadline.** The wait for the tasks ends 500 ms before the invocation's deadline, so the
+extension still has time to flush and to log a warning that the invocation ended with tasks still
+running. Tasks past that point are not cancelled: they are frozen with the environment and
+resume if it is thawed for another invocation, or die with it. Set the function's timeout for
+the slowest request plus its slowest task.
+
+**Billing.** The time after the response is billed and counts against the function timeout. It
+shows in the `REPORT` line as `PostRuntimeExtensionsDuration`.
+
+**Capacity.** Lambda does not send the next invocation to an environment whose extension is
+busy. Slow tasks lower the number of invocations each environment serves, so Lambda scales out:
+more environments, more cold starts. The telemetry flush does this too, on a small scale; tasks
+can make it large.
+
+**Fallbacks.**
+
+- *No Extensions API* (some emulators): lesto waits for the tasks *before* returning the
+  response, as it does for the telemetry flush. Correct, but the caller waits. A warning at init
+  says so.
+- *Managed concurrency* (`AWS_LAMBDA_MAX_CONCURRENCY` above 1): invocations are not frozen between
+  one another and cannot be paired with their responses, so there is no extension and no
+  per-invocation scope. Tasks behave as on a server: they run on the process, best effort.
+- *Tests*: `lambda::test::invoke` waits for the tasks before returning.
+
 ## Building and deploying
 
 Lambda wants a Linux executable named `bootstrap`. The easiest way is
@@ -119,8 +161,8 @@ async fn main() -> Result<(), lesto::lambda::Error> {
 }
 ```
 
-The order matters: `serve_with` registers the internal extension that exports after each response
-only when there is telemetry to flush. Nothing else turns it on.
+The order matters: install the telemetry before `serve_with`, so that what the extension
+flushes after each response exists when the first invocation arrives.
 
 **3. Environment of the function.** Spans go straight to the X-Ray OTLP endpoint; lesto signs the
 requests with SigV4, using the credentials of the function's role that Lambda already puts in the
@@ -169,9 +211,9 @@ NotesApi:
 
 **5. Check it.**
 
-- The init logs of the function list the extension, `lesto-telemetry-flush`, registered for
-  `INVOKE`. A warning `the Lambda Extensions API is not available` means lesto fell back to
-  flushing before each response.
+- The init logs of the function list the extension, `lesto`, registered for `INVOKE`. A warning
+  `the Lambda Extensions API is not available` means lesto fell back to flushing before each
+  response.
 - The `REPORT` line of each invocation carries `PostRuntimeExtensionsDuration`: the export, done
   after the response.
 - CloudWatch → X-Ray traces shows one trace per request: API Gateway, the Lambda segment, and
@@ -203,8 +245,11 @@ option belongs to the router you pass, so both settings can share a test file.
 - REST API stages are stripped from the path by default (`Options::keep_stage` to keep them).
 - Documentation pages work behind the stage because they link `openapi.json` relatively.
 - Logs go to CloudWatch through stdout, as JSON when the function's log format is JSON.
-- With `otel`, telemetry is flushed after every invocation (`Options::flush_telemetry`), by an
-  internal extension once the response is posted.
+- An internal extension, `lesto`, holds the freeze until the invocation's background tasks are
+  done and, with `otel`, its telemetry is flushed (`Options::flush_telemetry`): both after the
+  response is posted.
+- `BackgroundTasks` (chapter 17) works in Lambda, bound by the invocation's deadline, billed as
+  `PostRuntimeExtensionsDuration`; `lambda::test::invoke` waits for the tasks.
 - X-Ray with no layer: `otel` + `init_named` before `serve_with(.., Options::default().xray(true))`,
   the traces endpoint in the environment, Transaction Search, `AWSXrayWriteOnlyPolicy`, active
   tracing.
