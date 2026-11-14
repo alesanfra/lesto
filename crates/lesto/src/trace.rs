@@ -502,6 +502,51 @@ pub mod propagation {
     }
 }
 
+/// The store method a closure of type `F` was written in, as `NoteStore::list`.
+///
+/// `type_name` is documented as diagnostics-only output, which is exactly what a span name is:
+/// the compiler spells a closure `crate::module::NoteStore<ReadOnly, Public>::list::{{closure}}`,
+/// and the two path segments in front of the closure marker are the type and the method.
+/// Anything unexpected falls back to `fallback` rather than putting `{{closure}}` in a trace.
+pub(crate) fn operation_of<F>(fallback: &'static str) -> Cow<'static, str> {
+    match method_path(std::any::type_name::<F>()) {
+        Some(name) => Cow::Owned(name),
+        None => Cow::Borrowed(fallback),
+    }
+}
+
+fn method_path(type_name: &str) -> Option<String> {
+    // No closure marker: not a closure written in a function, so there is no method to name.
+    let (path, _) = type_name.split_once("::{{closure}}")?;
+    let path = without_generics(path);
+    let mut segments = path.rsplit("::").filter(|s| !s.is_empty());
+    let method = segments.next()?;
+    if method.starts_with('{') || method.starts_with('<') {
+        return None;
+    }
+    Some(match segments.next().filter(|s| !s.starts_with('{')) {
+        // `NoteStore::list`, dropping the crate and the modules in front of it.
+        Some(owner) => format!("{owner}::{method}"),
+        None => method.to_string(),
+    })
+}
+
+/// The path with every `<..>` group removed, so generic arguments (which contain `::` of their
+/// own) cannot be mistaken for path segments.
+fn without_generics(path: &str) -> String {
+    let mut out = String::with_capacity(path.len());
+    let mut depth = 0usize;
+    for c in path.chars() {
+        match c {
+            '<' => depth += 1,
+            '>' => depth = depth.saturating_sub(1),
+            _ if depth == 0 => out.push(c),
+            _ => {}
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -539,6 +584,54 @@ mod tests {
         assert_eq!(
             redact_query("q=OpenTelemetry&sig=abc&X-Amz-Signature=def"),
             "q=OpenTelemetry&sig=REDACTED&X-Amz-Signature=REDACTED"
+        );
+    }
+
+    struct NoteStore<M, P>(std::marker::PhantomData<(M, P)>);
+
+    fn name_of<F: Fn()>(_f: F) -> Cow<'static, str> {
+        operation_of::<F>("read")
+    }
+
+    impl<M, P> NoteStore<M, P> {
+        fn list(&self) -> Cow<'static, str> {
+            name_of(|| {})
+        }
+    }
+
+    fn in_a_free_function() -> Cow<'static, str> {
+        name_of(|| {})
+    }
+
+    #[test]
+    fn a_closure_is_named_after_the_method_it_was_written_in() {
+        let store = NoteStore::<(), ()>(std::marker::PhantomData);
+        assert_eq!(store.list(), "NoteStore::list");
+        assert_eq!(in_a_free_function(), "tests::in_a_free_function");
+    }
+
+    #[test]
+    fn generic_arguments_are_not_path_segments() {
+        assert_eq!(
+            method_path(
+                "notes::store::NoteStore<lesto::db::ReadOnly, app::User>::list::{{closure}}"
+            )
+            .as_deref(),
+            Some("NoteStore::list")
+        );
+        assert_eq!(
+            method_path("app::handlers::count::{{closure}}::{{closure}}").as_deref(),
+            Some("handlers::count")
+        );
+    }
+
+    #[test]
+    fn an_unreadable_name_falls_back() {
+        assert_eq!(method_path("{{closure}}"), None);
+        assert_eq!(
+            method_path("alloc::boxed::Box<dyn core::ops::Fn>"),
+            None,
+            "a closure that reached the store boxed says nothing about the method"
         );
     }
 }
