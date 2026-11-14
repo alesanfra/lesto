@@ -20,6 +20,7 @@
 - [Deploying to AWS Lambda](14-aws-lambda.md)
 - [Observability: tracing and OpenTelemetry](15-observability.md)
 - [MCP: tools, resources and prompts for agents](16-mcp.md)
+- [Background tasks: work after the response](17-background-tasks.md)
 
 # Appendices
 

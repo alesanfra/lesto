@@ -1,6 +1,6 @@
 # Background tasks
 
-Status: proposed on 2026-11-14, implementation in progress.
+Status: implemented on 2026-11-14.
 
 This document is the written design of work a handler starts and that runs after the response
 has been sent: FastAPI's `BackgroundTasks`, Vercel's and Cloudflare's `waitUntil`. It builds on

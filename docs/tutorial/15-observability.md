@@ -257,7 +257,8 @@ is billed as part of the invocation (`PostRuntimeExtensionsDuration` in the `REP
 that instance takes its next invocation once it is done, but no caller waits for it. Where there
 is no Extensions API (an emulator without it), or several invocations share the process
 (`AWS_LAMBDA_MAX_CONCURRENCY`), the flush happens before the response instead. If what you
-export to buffers across freezes by itself, turn the flush off:
+export to buffers across freezes by itself, turn the flush off (the same extension also waits for
+background tasks, chapter 17, which that option does not touch):
 
 ```rust
 lesto::lambda::serve_with(app, Options::default().flush_telemetry(false)).await

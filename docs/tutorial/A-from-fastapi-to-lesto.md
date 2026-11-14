@@ -20,6 +20,7 @@
 | `response_model=Out` | return type `Json<Out>` |
 | `class NoteCreate(NoteBase)`, `class Note(NoteBase)` | `#[lesto::views(Create(author, text), Update(text?))]` on the model |
 | `raise HTTPException(404, "...")` | `Err(HttpError::not_found("..."))` |
+| `background_tasks: BackgroundTasks` + `background_tasks.add_task(send, to)` | `tasks: BackgroundTasks` + `tasks.spawn(async move { send(&to).await })` (chapter 17: best effort, an `Err` is logged, `()` or `Result<(), E: Display>`) |
 | `Depends(get_db)` | `State<Db>`, or a `lesto::db` store: `NoteStore<ReadOnly, Public>` (chapter 13) |
 | `Depends(get_current_user)` | custom extractor (`FromRequestParts`), or `impl Authenticated for User` + `NoteStore<_, User>` (chapter 13) |
 | `Depends(require_scope("notes:write"))` | `self.write("notes:write", ..)` in the store method (chapter 13) |
@@ -68,6 +69,10 @@ Every option of the route attributes (`get`, `post`, `put`, `patch`, `delete`, `
 - **Types are checked at compile time.** A `State<Db>` without `with_state(Db)`, a body without
   `Validate`, a handler with the wrong signature: all of it fails at compile time, not on the
   first request.
+- **Background tasks take a future, not a function and arguments.** FastAPI's `add_task(f, *args)`
+  is `spawn(async move { f(args).await })`; the task starts at once, not after the response is
+  written. It is best effort as in FastAPI (a crash loses it), and in lesto an `Err` or a panic is
+  logged instead of lost silently. Chapter 17.
 - **The body goes last** among the handler's arguments (an axum constraint).
 - **Every validated field needs a garde attribute**, even just `skip`, or `allow_unvalidated` on
   the struct. Pydantic validates everything by default; garde is explicit.
